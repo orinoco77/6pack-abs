@@ -1,14 +1,7 @@
 """Series grid screen — browse all series in a library."""
 from __future__ import annotations
 
-<<<<<<< HEAD
-from PyQt6.QtCore import Qt, pyqtSignal, QThread, pyqtSlot
-from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
-from PyQt6.QtGui import QPixmap
-from PyQt6.QtCore import QPoint
-=======
-from PyQt6.QtCore import Qt, pyqtSignal
->>>>>>> 062e3d3 (feat: disk-backed cover art cache)
+from PyQt6.QtCore import Qt, pyqtSignal, QPoint
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -110,26 +103,6 @@ class SeriesScreen(QWidget):
 
         self._grid.set_focus_first()
 
-<<<<<<< HEAD
-    def _fetch_cover(self, card: MediaCard, url: str, token: str) -> None:
-        if self._nam is None:
-            return
-        request = QNetworkRequest()
-        from PyQt6.QtCore import QUrl
-        request.setUrl(QUrl(url))
-        request.setRawHeader(b"Authorization", f"Bearer {token}".encode())
-        reply = self._nam.get(request)
-        reply.finished.connect(lambda r=reply, c=card: self._on_cover_loaded(r, c))
-
-    def _on_cover_loaded(self, reply: QNetworkReply, card: MediaCard) -> None:
-        if reply.error() == QNetworkReply.NetworkError.NoError:
-            data = reply.readAll()
-            pix = QPixmap()
-            pix.loadFromData(data)
-            if not pix.isNull():
-                card.set_cover(pix)
-        reply.deleteLater()
-
     def _make_library_menu(self) -> QMenu:
         menu = QMenu(self)
         for lib in self._all_libraries:
@@ -150,8 +123,6 @@ class SeriesScreen(QWidget):
         if lib is not None and (self._library is None or lib.id != self._library.id):
             self.library_switch_requested.emit(lib)
 
-=======
->>>>>>> 062e3d3 (feat: disk-backed cover art cache)
     def _on_item_activated(self, index: int) -> None:
         if 0 <= index < len(self._series_list):
             self.series_selected.emit(self._series_list[index])
