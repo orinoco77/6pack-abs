@@ -14,6 +14,7 @@ from sixpack.api.models import (
 )
 from sixpack.ui.screens.login import LoginScreen
 from sixpack.ui.screens.library import LibraryScreen
+from sixpack.ui.screens.series import SeriesScreen
 from sixpack.ui.screens.series_detail import SeriesDetailScreen
 
 
@@ -326,3 +327,98 @@ def test_config_active_server_index_clamp():
     )
     assert cfg.active_server is not None
     assert cfg.active_server.url == "http://a"
+
+
+def test_config_last_library_id_persists(tmp_path, monkeypatch):
+    monkeypatch.setattr("sixpack.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("sixpack.config.CONFIG_FILE", tmp_path / "config.json")
+
+    from sixpack.config import AppConfig, ServerConfig
+    cfg = AppConfig()
+    cfg.add_or_update_server(
+        ServerConfig(name="Home", url="http://abs.local", token="tok", last_library_id="lib42")
+    )
+    cfg.save()
+
+    loaded = AppConfig.load()
+    assert loaded.servers[0].last_library_id == "lib42"
+
+
+def test_config_last_library_id_defaults_empty(tmp_path, monkeypatch):
+    """Old config files without last_library_id load without error."""
+    cfg_file = tmp_path / "config.json"
+    cfg_file.write_text('{"servers": [{"name": "H", "url": "http://x", "token": "t"}], "active_server_index": 0}')
+    monkeypatch.setattr("sixpack.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("sixpack.config.CONFIG_FILE", cfg_file)
+
+    from sixpack.config import AppConfig
+    cfg = AppConfig.load()
+    assert cfg.servers[0].last_library_id == ""
+
+
+# ---- SeriesScreen library combo ----
+
+def _make_three_libraries():
+    return [
+        Library(id="lib1", name="Audio Dramas", mediaType="book", icon="database"),
+        Library(id="lib2", name="Audiobooks", mediaType="book", icon="database"),
+        Library(id="lib3", name="Podcasts", mediaType="podcast", icon="microphone"),
+    ]
+
+
+def test_series_screen_combo_populates(qtbot):
+    screen = SeriesScreen()
+    qtbot.addWidget(screen)
+    libs = _make_three_libraries()
+    screen.load(libs[0], [], "http://localhost", "tok", all_libraries=libs)
+
+    assert screen._library_combo.count() == 3
+    assert screen._library_combo.itemText(0) == "Audio Dramas"
+    assert screen._library_combo.itemText(1) == "Audiobooks"
+    assert screen._library_combo.currentIndex() == 0
+
+
+def test_series_screen_combo_selects_current_library(qtbot):
+    screen = SeriesScreen()
+    qtbot.addWidget(screen)
+    libs = _make_three_libraries()
+    screen.load(libs[1], [], "http://localhost", "tok", all_libraries=libs)
+
+    assert screen._library_combo.currentIndex() == 1
+    assert screen._library_combo.currentText() == "Audiobooks"
+
+
+def test_series_screen_combo_switch_emits_signal(qtbot):
+    screen = SeriesScreen()
+    qtbot.addWidget(screen)
+    libs = _make_three_libraries()
+    screen.load(libs[0], [], "http://localhost", "tok", all_libraries=libs)
+
+    with qtbot.waitSignal(screen.library_switch_requested, timeout=1000) as blocker:
+        screen._library_combo.setCurrentIndex(2)
+
+    assert blocker.args[0].id == "lib3"
+
+
+def test_series_screen_combo_no_signal_same_library(qtbot):
+    screen = SeriesScreen()
+    qtbot.addWidget(screen)
+    libs = _make_three_libraries()
+    screen.load(libs[0], [], "http://localhost", "tok", all_libraries=libs)
+
+    signals = []
+    screen.library_switch_requested.connect(lambda lib: signals.append(lib))
+    # Reload same library — no switch signal
+    screen.load(libs[0], [], "http://localhost", "tok", all_libraries=libs)
+    assert signals == []
+
+
+def test_series_screen_load_without_all_libraries(qtbot):
+    """Calling load() without all_libraries keeps existing combo state."""
+    screen = SeriesScreen()
+    qtbot.addWidget(screen)
+    libs = _make_three_libraries()
+    screen.load(libs[0], [], "http://localhost", "tok", all_libraries=libs)
+    # Second load without passing all_libraries — combo count unchanged
+    screen.load(libs[1], [], "http://localhost", "tok")
+    assert screen._library_combo.count() == 3

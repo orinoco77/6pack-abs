@@ -378,8 +378,9 @@ def test_series_screen_title_shown(qtbot):
     screen = SeriesScreen()
     qtbot.addWidget(screen)
     library = Library(id="lib1", name="My Drama Library")
-    screen.load(library, _make_series_list(), "http://abs.test", "token")
-    assert screen._title_label.text() == "My Drama Library"
+    screen.load(library, _make_series_list(), "http://abs.test", "token",
+                all_libraries=[library])
+    assert screen._library_combo.currentText() == "My Drama Library"
 
 
 def test_series_screen_count_label(qtbot):

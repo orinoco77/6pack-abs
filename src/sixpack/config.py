@@ -15,6 +15,7 @@ class ServerConfig:
     url: str
     token: str = ""
     username: str = ""
+    last_library_id: str = ""
 
 
 @dataclass
