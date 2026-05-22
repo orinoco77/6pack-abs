@@ -6,6 +6,7 @@ import logging
 from typing import Any
 
 from PyQt6.QtCore import QObject, QThread, pyqtSignal, pyqtSlot, Qt
+from PyQt6.QtGui import QKeyEvent, QKeySequence, QShortcut
 from PyQt6.QtWidgets import QMainWindow, QStackedWidget, QApplication
 
 from sixpack.api.client import ABSClient, AuthenticationError, APIError
@@ -127,6 +128,7 @@ class MainWindow(QMainWindow):
         self._detail_screen.play_requested.connect(self._on_play_requested)
         self._detail_screen.back_requested.connect(self._show_series)
 
+        self._setup_quit_shortcut()
         self._show_login()
 
     def _try_autologin(self) -> None:
@@ -310,6 +312,24 @@ class MainWindow(QMainWindow):
             self._login_screen.show_error(f"Login failed: {message}")
         elif tag == "autologin":
             self._show_login()
+
+    # ------------------------------------------------------------------
+    # Quit
+    # ------------------------------------------------------------------
+
+    def _setup_quit_shortcut(self) -> None:
+        for seq in ("Ctrl+Q", "Q"):
+            sc = QShortcut(QKeySequence(seq), self)
+            sc.activated.connect(self.close)
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() == Qt.Key.Key_Q or (
+            event.key() == Qt.Key.Key_Q
+            and event.modifiers() & Qt.KeyboardModifier.ControlModifier
+        ):
+            self.close()
+        else:
+            super().keyPressEvent(event)
 
     # ------------------------------------------------------------------
     # Cleanup
