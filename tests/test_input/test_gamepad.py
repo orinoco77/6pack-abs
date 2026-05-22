@@ -1,0 +1,185 @@
+"""Tests for gamepad input handler."""
+from __future__ import annotations
+
+import sys
+from unittest.mock import MagicMock, patch
+import pytest
+
+
+def _make_ecodes():
+    ec = MagicMock()
+    ec.EV_KEY = 1
+    ec.EV_ABS = 3
+    ec.BTN_SOUTH = 304
+    ec.BTN_EAST = 305
+    ec.BTN_NORTH = 307
+    ec.BTN_WEST = 308
+    ec.BTN_TL = 310
+    ec.BTN_TR = 311
+    ec.BTN_SELECT = 314
+    ec.BTN_START = 315
+    ec.ABS_HAT0X = 16
+    ec.ABS_HAT0Y = 17
+    return ec
+
+
+def _make_event(type_, code, value):
+    ev = MagicMock()
+    ev.type = type_
+    ev.code = code
+    ev.value = value
+    return ev
+
+
+@pytest.fixture(autouse=True)
+def patch_evdev():
+    ec = _make_ecodes()
+    mock_evdev = MagicMock()
+    mock_evdev.ecodes = ec
+    with patch.dict("sys.modules", {"evdev": mock_evdev, "evdev.ecodes": ec}):
+        if "sixpack.input.gamepad" in sys.modules:
+            del sys.modules["sixpack.input.gamepad"]
+        yield mock_evdev
+    if "sixpack.input.gamepad" in sys.modules:
+        del sys.modules["sixpack.input.gamepad"]
+
+
+@pytest.fixture
+def listener(patch_evdev):
+    from sixpack.input.gamepad import GamepadListener
+    actions = []
+    gl = GamepadListener(callback=actions.append)
+    return gl, actions
+
+
+def test_button_south_maps_to_select(listener):
+    gl, actions = listener
+    ec = _make_ecodes()
+    event = _make_event(ec.EV_KEY, ec.BTN_SOUTH, 1)
+    action = gl._map_event(event)
+    from sixpack.input.actions import InputAction
+    assert action == InputAction.SELECT
+
+
+def test_button_east_maps_to_back(listener):
+    gl, actions = listener
+    ec = _make_ecodes()
+    event = _make_event(ec.EV_KEY, ec.BTN_EAST, 1)
+    action = gl._map_event(event)
+    from sixpack.input.actions import InputAction
+    assert action == InputAction.BACK
+
+
+def test_button_release_ignored(listener):
+    gl, actions = listener
+    ec = _make_ecodes()
+    event = _make_event(ec.EV_KEY, ec.BTN_SOUTH, 0)  # release
+    action = gl._map_event(event)
+    assert action is None
+
+
+def test_dpad_left(listener):
+    gl, actions = listener
+    ec = _make_ecodes()
+    event = _make_event(ec.EV_ABS, ec.ABS_HAT0X, -1)
+    action = gl._map_event(event)
+    from sixpack.input.actions import InputAction
+    assert action == InputAction.LEFT
+
+
+def test_dpad_right(listener):
+    gl, actions = listener
+    ec = _make_ecodes()
+    event = _make_event(ec.EV_ABS, ec.ABS_HAT0X, 1)
+    action = gl._map_event(event)
+    from sixpack.input.actions import InputAction
+    assert action == InputAction.RIGHT
+
+
+def test_dpad_up(listener):
+    gl, actions = listener
+    ec = _make_ecodes()
+    event = _make_event(ec.EV_ABS, ec.ABS_HAT0Y, -1)
+    action = gl._map_event(event)
+    from sixpack.input.actions import InputAction
+    assert action == InputAction.UP
+
+
+def test_dpad_down(listener):
+    gl, actions = listener
+    ec = _make_ecodes()
+    event = _make_event(ec.EV_ABS, ec.ABS_HAT0Y, 1)
+    action = gl._map_event(event)
+    from sixpack.input.actions import InputAction
+    assert action == InputAction.DOWN
+
+
+def test_dpad_center_ignored(listener):
+    gl, actions = listener
+    ec = _make_ecodes()
+    event = _make_event(ec.EV_ABS, ec.ABS_HAT0X, 0)
+    action = gl._map_event(event)
+    assert action is None
+
+
+def test_lb_maps_to_prev_chapter(listener):
+    gl, actions = listener
+    ec = _make_ecodes()
+    event = _make_event(ec.EV_KEY, ec.BTN_TL, 1)
+    action = gl._map_event(event)
+    from sixpack.input.actions import InputAction
+    assert action == InputAction.PREV_CHAPTER
+
+
+def test_rb_maps_to_next_chapter(listener):
+    gl, actions = listener
+    ec = _make_ecodes()
+    event = _make_event(ec.EV_KEY, ec.BTN_TR, 1)
+    action = gl._map_event(event)
+    from sixpack.input.actions import InputAction
+    assert action == InputAction.NEXT_CHAPTER
+
+
+def test_start_maps_to_menu(listener):
+    gl, actions = listener
+    ec = _make_ecodes()
+    event = _make_event(ec.EV_KEY, ec.BTN_START, 1)
+    action = gl._map_event(event)
+    from sixpack.input.actions import InputAction
+    assert action == InputAction.MENU
+
+
+def test_unmapped_button_returns_none(listener):
+    gl, actions = listener
+    ec = _make_ecodes()
+    event = _make_event(ec.EV_KEY, 999, 1)
+    action = gl._map_event(event)
+    assert action is None
+
+
+def test_start_with_no_gamepads_does_not_raise(patch_evdev):
+    patch_evdev.list_devices.return_value = []
+    from sixpack.input.gamepad import GamepadListener
+    gl = GamepadListener(callback=lambda a: None)
+    gl.start()  # should not raise
+
+
+def test_stop_sets_event(patch_evdev):
+    from sixpack.input.gamepad import GamepadListener
+    gl = GamepadListener(callback=lambda a: None)
+    gl.stop()
+    assert gl._stop_event.is_set()
+
+
+def test_no_evdev_start_logs_warning(patch_evdev):
+    """When evdev is unavailable, start() should warn and not crash."""
+    with patch.dict("sys.modules", {"evdev": None}):
+        if "sixpack.input.gamepad" in sys.modules:
+            del sys.modules["sixpack.input.gamepad"]
+        import importlib
+        mod = importlib.import_module("sixpack.input.gamepad")
+        assert mod._EVDEV_AVAILABLE is False
+        gl = mod.GamepadListener(callback=lambda a: None)
+        gl.start()  # should not raise
+    if "sixpack.input.gamepad" in sys.modules:
+        del sys.modules["sixpack.input.gamepad"]

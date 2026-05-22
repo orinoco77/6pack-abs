@@ -1,0 +1,57 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sixpack-abs"
+version = "0.1.0"
+description = "A 10-foot Linux client for audiobookshelf"
+requires-python = ">=3.10"
+dependencies = [
+    "PyQt6>=6.6.0",
+    "python-mpv>=1.0.6",
+    "httpx>=0.27.0",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+gamepad = [
+    "evdev>=1.7.0",
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=5.0.0",
+    "pytest-qt>=4.4.0",
+    "ruff>=0.4.0",
+    "respx>=0.21.0",
+]
+
+[project.scripts]
+sixpack = "sixpack.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sixpack"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+addopts = "--cov=sixpack --cov-report=term-missing --cov-fail-under=80"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["src/sixpack"]
+omit = ["*/tests/*", "*/__main__.py", "*/main.py", "*/ui/app.py"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]

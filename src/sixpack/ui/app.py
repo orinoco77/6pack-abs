@@ -1,0 +1,324 @@
+"""Main application window with screen navigation stack."""
+from __future__ import annotations
+
+import asyncio
+import logging
+from typing import Any
+
+from PyQt6.QtCore import QObject, QThread, pyqtSignal, pyqtSlot, Qt
+from PyQt6.QtWidgets import QMainWindow, QStackedWidget, QApplication
+
+from sixpack.api.client import ABSClient, AuthenticationError, APIError
+from sixpack.api.models import Library, Series, SeriesBook, MediaProgress
+from sixpack.config import AppConfig, ServerConfig
+from sixpack.player.player import AudioPlayer, PlayerError
+from sixpack.ui import theme
+from sixpack.ui.screens.login import LoginScreen
+from sixpack.ui.screens.library import LibraryScreen
+from sixpack.ui.screens.series import SeriesScreen
+from sixpack.ui.screens.series_detail import SeriesDetailScreen
+from sixpack.ui.screens.player import PlayerScreen
+
+logger = logging.getLogger(__name__)
+
+
+class AsyncWorker(QObject):
+    """
+    Runs coroutines on a dedicated asyncio event loop in a QThread.
+    Results are delivered back via Qt signals so callers don't block the GUI.
+    """
+
+    result = pyqtSignal(str, object)   # tag, result
+    error = pyqtSignal(str, str)       # tag, error message
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    def start_loop(self) -> None:
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
+        self._loop.run_forever()
+
+    def stop_loop(self) -> None:
+        if self._loop:
+            self._loop.call_soon_threadsafe(self._loop.stop)
+
+    def run(self, tag: str, coro) -> None:
+        if self._loop is None:
+            return
+        asyncio.run_coroutine_threadsafe(self._run_coro(tag, coro), self._loop)
+
+    async def _run_coro(self, tag: str, coro) -> None:
+        try:
+            result = await coro
+            self.result.emit(tag, result)
+        except Exception as exc:
+            self.error.emit(tag, str(exc))
+
+
+class MainWindow(QMainWindow):
+    def __init__(self, config: AppConfig) -> None:
+        super().__init__()
+        self._config = config
+        self._client: ABSClient | None = None
+        self._server_url = ""
+        self._token = ""
+        self._current_series: Series | None = None
+
+        self._init_player()
+        self._init_worker()
+        self._build_ui()
+        self._try_autologin()
+
+    # ------------------------------------------------------------------
+    # Setup
+    # ------------------------------------------------------------------
+
+    def _init_player(self) -> None:
+        try:
+            self._player = AudioPlayer()
+        except PlayerError as exc:
+            logger.warning("Audio player unavailable: %s", exc)
+            self._player = None  # type: ignore[assignment]
+
+    def _init_worker(self) -> None:
+        self._worker = AsyncWorker()
+        self._thread = QThread()
+        self._worker.moveToThread(self._thread)
+        self._thread.started.connect(self._worker.start_loop)
+        self._worker.result.connect(self._on_result)
+        self._worker.error.connect(self._on_error)
+        self._thread.start()
+
+    def _build_ui(self) -> None:
+        self.setWindowTitle("SixPack — Audiobookshelf")
+        self.showFullScreen()
+
+        self._stack = QStackedWidget()
+        self.setCentralWidget(self._stack)
+
+        self._login_screen = LoginScreen()
+        self._library_screen = LibraryScreen()
+        self._series_screen = SeriesScreen()
+        self._detail_screen = SeriesDetailScreen()
+
+        if self._player:
+            self._player_screen = PlayerScreen(self._player)
+        else:
+            self._player_screen = None  # type: ignore[assignment]
+
+        self._stack.addWidget(self._login_screen)
+        self._stack.addWidget(self._library_screen)
+        self._stack.addWidget(self._series_screen)
+        self._stack.addWidget(self._detail_screen)
+
+        if self._player_screen:
+            self._stack.addWidget(self._player_screen)
+            self._player_screen.back_requested.connect(self._show_detail)
+            self._player_screen.next_item.connect(self._on_next_item)
+            self._player_screen.prev_item.connect(self._on_prev_item)
+            self._player_screen.progress_update.connect(self._on_progress_update)
+
+        self._login_screen.login_requested.connect(self._on_login_requested)
+        self._library_screen.library_selected.connect(self._on_library_selected)
+        self._series_screen.series_selected.connect(self._on_series_selected)
+        self._series_screen.back_requested.connect(self._show_libraries)
+        self._detail_screen.play_requested.connect(self._on_play_requested)
+        self._detail_screen.back_requested.connect(self._show_series)
+
+        self._show_login()
+
+    def _try_autologin(self) -> None:
+        server = self._config.active_server
+        if server and server.token:
+            self._login_screen.set_prefill(server.url, server.username)
+            self._do_connect_with_token(server.url, server.token)
+
+    # ------------------------------------------------------------------
+    # Screen navigation
+    # ------------------------------------------------------------------
+
+    def _show_login(self) -> None:
+        self._stack.setCurrentWidget(self._login_screen)
+
+    def _show_libraries(self) -> None:
+        self._stack.setCurrentWidget(self._library_screen)
+        self._library_screen.setFocus()
+
+    def _show_series(self) -> None:
+        self._stack.setCurrentWidget(self._series_screen)
+
+    def _show_detail(self) -> None:
+        self._stack.setCurrentWidget(self._detail_screen)
+
+    # ------------------------------------------------------------------
+    # Login / auth
+    # ------------------------------------------------------------------
+
+    def _on_login_requested(self, url: str, username: str, password: str) -> None:
+        self._server_url = url
+        self._client = ABSClient(url)
+        self._worker.run("login", self._async_login(username, password))
+
+    async def _async_login(self, username: str, password: str):
+        async with ABSClient(self._server_url) as client:
+            result = await client.login(username, password)
+            self._client = ABSClient(self._server_url, token=result.user.token)
+            return result
+
+    def _do_connect_with_token(self, url: str, token: str) -> None:
+        self._server_url = url
+        self._token = token
+        self._client = ABSClient(url, token=token)
+        self._worker.run("autologin", self._async_get_libraries())
+
+    async def _async_get_libraries(self):
+        async with ABSClient(self._server_url, token=self._token) as client:
+            return await client.get_libraries()
+
+    # ------------------------------------------------------------------
+    # Library / series / detail flow
+    # ------------------------------------------------------------------
+
+    def _on_library_selected(self, library: Library) -> None:
+        self._current_library = library
+        self._worker.run("series_list", self._async_get_series(library.id))
+
+    async def _async_get_series(self, library_id: str):
+        async with ABSClient(self._server_url, token=self._token) as client:
+            return await client.get_series(library_id)
+
+    def _on_series_selected(self, series: Series) -> None:
+        self._current_series = series
+        self._worker.run("series_detail", self._async_get_series_detail(series.id))
+
+    async def _async_get_series_detail(self, series_id: str):
+        async with ABSClient(self._server_url, token=self._token) as client:
+            detail = await client.get_series_detail(series_id)
+            # Fetch progress for all books in parallel
+            progress_map: dict[str, MediaProgress | None] = {}
+            for book in detail.sorted_books:
+                progress_map[book.id] = await client.get_progress(book.id)
+            return (detail, progress_map)
+
+    # ------------------------------------------------------------------
+    # Playback
+    # ------------------------------------------------------------------
+
+    def _on_play_requested(self, book: SeriesBook, start_time: float) -> None:
+        if not self._player or not self._player_screen:
+            return
+        self._current_book = book
+        self._current_start_time = start_time
+        series = self._current_series
+        if series is None:
+            return
+        self._player_screen.play_book(
+            book, start_time, series, series.sorted_books,
+            self._server_url, self._token,
+        )
+        self._worker.run("start_session", self._async_start_session(book.id, start_time))
+        self._stack.setCurrentWidget(self._player_screen)
+        self._player_screen.setFocus()
+
+    async def _async_start_session(self, item_id: str, start_time: float):
+        async with ABSClient(self._server_url, token=self._token) as client:
+            return await client.start_playback_session(item_id, start_time)
+
+    def _on_next_item(self) -> None:
+        if self._current_series is None:
+            return
+        books = self._current_series.sorted_books
+        idx = self._player_screen._current_index if self._player_screen else 0
+        next_idx = idx + 1
+        if next_idx < len(books):
+            self._on_play_requested(books[next_idx], 0.0)
+
+    def _on_prev_item(self) -> None:
+        if self._current_series is None:
+            return
+        books = self._current_series.sorted_books
+        idx = self._player_screen._current_index if self._player_screen else 0
+        prev_idx = idx - 1
+        if prev_idx >= 0:
+            self._on_play_requested(books[prev_idx], 0.0)
+
+    @pyqtSlot(str, float, float, bool)
+    def _on_progress_update(self, item_id: str, current_time: float, duration: float, is_finished: bool) -> None:
+        self._worker.run(
+            "progress",
+            self._async_update_progress(item_id, current_time, duration, is_finished),
+        )
+
+    async def _async_update_progress(self, item_id: str, current_time: float, duration: float, is_finished: bool):
+        async with ABSClient(self._server_url, token=self._token) as client:
+            await client.update_progress(item_id, current_time, duration, is_finished)
+
+    # ------------------------------------------------------------------
+    # Async result handling
+    # ------------------------------------------------------------------
+
+    @pyqtSlot(str, object)
+    def _on_result(self, tag: str, result: Any) -> None:
+        if tag == "login":
+            self._token = result.user.token
+            self._config.add_or_update_server(
+                ServerConfig(
+                    name=self._server_url,
+                    url=self._server_url,
+                    token=self._token,
+                    username=result.user.username,
+                )
+            )
+            self._config.save()
+            self._worker.run("libraries", self._async_get_libraries())
+
+        elif tag in ("libraries", "autologin"):
+            self._library_screen.set_libraries(result)
+            self._show_libraries()
+
+        elif tag == "series_list":
+            if hasattr(self, "_current_library"):
+                self._series_screen.load(
+                    self._current_library, result, self._server_url, self._token
+                )
+                self._show_series()
+
+        elif tag == "series_detail":
+            series, progress_map = result
+            self._current_series = series
+            clean_progress = {k: v for k, v in progress_map.items() if v is not None}
+            self._detail_screen.load(series, clean_progress)
+            self._show_detail()
+
+        elif tag == "start_session":
+            # result is a PlaybackSession — build URL and start playback
+            session = result
+            if session.audio_tracks and self._player_screen:
+                track = session.audio_tracks[0]
+                url = f"{self._server_url}{track.content_url}"
+                self._player_screen.set_audio_tracks(url, session.current_time, self._token)
+
+        elif tag == "progress":
+            pass  # fire-and-forget
+
+    @pyqtSlot(str, str)
+    def _on_error(self, tag: str, message: str) -> None:
+        logger.error("Async error [%s]: %s", tag, message)
+        if tag == "login":
+            self._login_screen.show_error(f"Login failed: {message}")
+        elif tag == "autologin":
+            self._show_login()
+
+    # ------------------------------------------------------------------
+    # Cleanup
+    # ------------------------------------------------------------------
+
+    def closeEvent(self, event) -> None:
+        if self._player:
+            self._player.shutdown()
+        self._worker.stop_loop()
+        self._thread.quit()
+        self._thread.wait(2000)
+        super().closeEvent(event)
