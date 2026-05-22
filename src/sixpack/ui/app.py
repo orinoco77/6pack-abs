@@ -66,6 +66,7 @@ class MainWindow(QMainWindow):
         self._server_url = ""
         self._token = ""
         self._current_series: Series | None = None
+        self._libraries: list[Library] = []
 
         self._init_player()
         self._init_worker()
@@ -125,6 +126,7 @@ class MainWindow(QMainWindow):
         self._library_screen.library_selected.connect(self._on_library_selected)
         self._series_screen.series_selected.connect(self._on_series_selected)
         self._series_screen.back_requested.connect(self._show_libraries)
+        self._series_screen.library_switch_requested.connect(self._on_library_selected)
         self._detail_screen.play_requested.connect(self._on_play_requested)
         self._detail_screen.back_requested.connect(self._show_series)
 
@@ -185,6 +187,10 @@ class MainWindow(QMainWindow):
 
     def _on_library_selected(self, library: Library) -> None:
         self._current_library = library
+        server = self._config.active_server
+        if server and server.last_library_id != library.id:
+            server.last_library_id = library.id
+            self._config.save()
         self._worker.run("series_list", self._async_get_series(library.id))
 
     async def _async_get_series(self, library_id: str):
@@ -277,13 +283,22 @@ class MainWindow(QMainWindow):
             self._worker.run("libraries", self._async_get_libraries())
 
         elif tag in ("libraries", "autologin"):
+            self._libraries = result
             self._library_screen.set_libraries(result)
+            server = self._config.active_server
+            last_id = server.last_library_id if server else ""
+            if last_id:
+                match = next((lib for lib in result if lib.id == last_id), None)
+                if match:
+                    self._on_library_selected(match)
+                    return
             self._show_libraries()
 
         elif tag == "series_list":
             if hasattr(self, "_current_library"):
                 self._series_screen.load(
-                    self._current_library, result, self._server_url, self._token
+                    self._current_library, result, self._server_url, self._token,
+                    all_libraries=self._libraries,
                 )
                 self._show_series()
 
