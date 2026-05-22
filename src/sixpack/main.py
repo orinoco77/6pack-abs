@@ -1,9 +1,13 @@
 """Entry point for SixPack."""
 from __future__ import annotations
 
+import locale
 import logging
 import os
 import sys
+
+# libmpv requires LC_NUMERIC=C (decimal point must be '.' not ',')
+locale.setlocale(locale.LC_NUMERIC, "C")
 
 from PyQt6.QtWidgets import QApplication
 
