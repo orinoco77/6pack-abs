@@ -145,6 +145,34 @@ QListWidget::item:focus {{
     border-color: {ACCENT};
     outline: none;
 }}
+
+QMenu {{
+    background-color: {SURFACE_HIGH};
+    color: {TEXT_PRIMARY};
+    border: 1px solid {TEXT_MUTED};
+    border-radius: 6px;
+    padding: 4px;
+}}
+
+QMenu::item {{
+    padding: 10px 24px;
+    border-radius: 4px;
+}}
+
+QMenu::item:selected {{
+    background-color: {ACCENT_DIM};
+    color: {TEXT_PRIMARY};
+}}
+
+QMenu::item:checked {{
+    color: {ACCENT};
+}}
+
+QMenu::separator {{
+    height: 1px;
+    background: {TEXT_MUTED};
+    margin: 4px 12px;
+}}
 """
 
 
