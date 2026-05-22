@@ -4,10 +4,11 @@ from __future__ import annotations
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, pyqtSlot
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 from PyQt6.QtGui import QPixmap
+from PyQt6.QtCore import QPoint
 from PyQt6.QtWidgets import (
-    QComboBox,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -54,15 +55,11 @@ class SeriesScreen(QWidget):
         self._back_btn.clicked.connect(self.back_requested)
         bar_layout.addWidget(self._back_btn)
 
-        self._library_combo = QComboBox()
-        self._library_combo.setMinimumWidth(220)
-        self._library_combo.setStyleSheet(
-            f"font-size: {theme.FONT_BODY}pt; font-weight: bold;"
-            f"color: {theme.TEXT_PRIMARY}; background-color: {theme.SURFACE_HIGH};"
-            f"border: 1px solid {theme.TEXT_MUTED}; border-radius: 6px; padding: 4px 10px;"
-        )
-        self._library_combo.currentIndexChanged.connect(self._on_combo_changed)
-        bar_layout.addWidget(self._library_combo)
+        self._library_btn = QPushButton()
+        self._library_btn.setMinimumWidth(180)
+        self._library_btn.setStyleSheet(f"font-size: {theme.FONT_BAR_BTN}pt; font-weight: bold; text-align: left;")
+        self._library_btn.clicked.connect(self._show_library_menu)
+        bar_layout.addWidget(self._library_btn)
         bar_layout.addStretch()
 
         self._count_label = QLabel()
@@ -91,17 +88,7 @@ class SeriesScreen(QWidget):
         if all_libraries is not None:
             self._all_libraries = all_libraries
 
-        # Populate combo without triggering _on_combo_changed
-        self._library_combo.blockSignals(True)
-        self._library_combo.clear()
-        current_index = 0
-        for i, lib in enumerate(self._all_libraries):
-            self._library_combo.addItem(lib.name, userData=lib)
-            if lib.id == library.id:
-                current_index = i
-        self._library_combo.setCurrentIndex(current_index)
-        self._library_combo.blockSignals(False)
-
+        self._library_btn.setText(f"{library.name}  ▾")
         self._count_label.setText(f"{len(series_list)} series")
 
         self._grid.clear()
@@ -139,8 +126,23 @@ class SeriesScreen(QWidget):
                 card.set_cover(pix)
         reply.deleteLater()
 
-    def _on_combo_changed(self, index: int) -> None:
-        lib: Library | None = self._library_combo.itemData(index)
+    def _make_library_menu(self) -> QMenu:
+        menu = QMenu(self)
+        for lib in self._all_libraries:
+            action = menu.addAction(lib.name)
+            action.setCheckable(True)
+            action.setChecked(self._library is not None and lib.id == self._library.id)
+            action.setData(lib)
+        menu.triggered.connect(self._on_menu_action)
+        return menu
+
+    def _show_library_menu(self) -> None:
+        menu = self._make_library_menu()
+        pos = self._library_btn.mapToGlobal(QPoint(0, self._library_btn.height()))
+        menu.exec(pos)
+
+    def _on_menu_action(self, action) -> None:
+        lib: Library | None = action.data()
         if lib is not None and (self._library is None or lib.id != self._library.id):
             self.library_switch_requested.emit(lib)
 

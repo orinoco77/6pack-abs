@@ -372,10 +372,10 @@ def test_series_screen_combo_populates(qtbot):
     libs = _make_three_libraries()
     screen.load(libs[0], [], "http://localhost", "tok", all_libraries=libs)
 
-    assert screen._library_combo.count() == 3
-    assert screen._library_combo.itemText(0) == "Audio Dramas"
-    assert screen._library_combo.itemText(1) == "Audiobooks"
-    assert screen._library_combo.currentIndex() == 0
+    menu = screen._make_library_menu()
+    assert menu.actions()[0].text() == "Audio Dramas"
+    assert menu.actions()[1].text() == "Audiobooks"
+    assert len(menu.actions()) == 3
 
 
 def test_series_screen_combo_selects_current_library(qtbot):
@@ -384,8 +384,9 @@ def test_series_screen_combo_selects_current_library(qtbot):
     libs = _make_three_libraries()
     screen.load(libs[1], [], "http://localhost", "tok", all_libraries=libs)
 
-    assert screen._library_combo.currentIndex() == 1
-    assert screen._library_combo.currentText() == "Audiobooks"
+    menu = screen._make_library_menu()
+    assert menu.actions()[1].isChecked()
+    assert not menu.actions()[0].isChecked()
 
 
 def test_series_screen_combo_switch_emits_signal(qtbot):
@@ -395,7 +396,8 @@ def test_series_screen_combo_switch_emits_signal(qtbot):
     screen.load(libs[0], [], "http://localhost", "tok", all_libraries=libs)
 
     with qtbot.waitSignal(screen.library_switch_requested, timeout=1000) as blocker:
-        screen._library_combo.setCurrentIndex(2)
+        menu = screen._make_library_menu()
+        menu.actions()[2].trigger()
 
     assert blocker.args[0].id == "lib3"
 
@@ -414,11 +416,11 @@ def test_series_screen_combo_no_signal_same_library(qtbot):
 
 
 def test_series_screen_load_without_all_libraries(qtbot):
-    """Calling load() without all_libraries keeps existing combo state."""
+    """Calling load() without all_libraries keeps existing menu state."""
     screen = SeriesScreen()
     qtbot.addWidget(screen)
     libs = _make_three_libraries()
     screen.load(libs[0], [], "http://localhost", "tok", all_libraries=libs)
-    # Second load without passing all_libraries — combo count unchanged
+    # Second load without passing all_libraries — menu count unchanged
     screen.load(libs[1], [], "http://localhost", "tok")
-    assert screen._library_combo.count() == 3
+    assert len(screen._make_library_menu().actions()) == 3
