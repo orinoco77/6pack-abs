@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
 from sixpack.api.models import MediaProgress, Series, SeriesBook
 from sixpack.player.player import AudioPlayer
 from sixpack.ui import theme
+from sixpack.ui.cover_cache import CoverCache
 
 
 def _fmt_time(seconds: float) -> str:
@@ -46,9 +47,10 @@ class PlayerScreen(QWidget):
     prev_item = pyqtSignal()
     progress_update = pyqtSignal(str, float, float, bool)
 
-    def __init__(self, player: AudioPlayer, parent=None) -> None:
+    def __init__(self, player: AudioPlayer, cover_cache: CoverCache | None = None, parent=None) -> None:
         super().__init__(parent)
         self._player = player
+        self._cover_cache = cover_cache
         self._current_book: SeriesBook | None = None
         self._series: Series | None = None
         self._series_books: list[SeriesBook] = []
@@ -201,9 +203,6 @@ class PlayerScreen(QWidget):
         server_url: str,
         token: str,
     ) -> None:
-        from PyQt6.QtCore import QUrl
-        from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest
-
         self._current_book = book
         self._series = series
         self._series_books = books
@@ -215,14 +214,10 @@ class PlayerScreen(QWidget):
         seq = f"Episode {book.sequence}" if book.sequence else ""
         self._episode_label.setText(seq)
 
-        # Fetch cover
+        # Fetch cover (via cache if available)
         cover_url = book.cover_url(server_url, token)
-        if not hasattr(self, "_cover_nam"):
-            self._cover_nam = QNetworkAccessManager(self)
-        req = QNetworkRequest(QUrl(cover_url))
-        req.setRawHeader(b"Authorization", f"Bearer {token}".encode())
-        reply = self._cover_nam.get(req)
-        reply.finished.connect(lambda r=reply: self._on_cover_loaded(r))
+        if self._cover_cache is not None:
+            self._cover_cache.fetch(cover_url, token, self._set_cover_pixmap)
 
         self._server_url = server_url
         self._token = token
@@ -232,20 +227,13 @@ class PlayerScreen(QWidget):
         self._player.play(content_url, start_time=start_time, auth_token=token)
         self._play_btn.setText("⏸")
 
-    def _on_cover_loaded(self, reply) -> None:
-        from PyQt6.QtNetwork import QNetworkReply
-        if reply.error() == QNetworkReply.NetworkError.NoError:
-            data = reply.readAll()
-            pix = QPixmap()
-            pix.loadFromData(data)
-            if not pix.isNull():
-                scaled = pix.scaled(
-                    280, 280,
-                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
-                self._cover_label.setPixmap(scaled)
-        reply.deleteLater()
+    def _set_cover_pixmap(self, pix: QPixmap) -> None:
+        scaled = pix.scaled(
+            280, 280,
+            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        self._cover_label.setPixmap(scaled)
 
     # ------------------------------------------------------------------
     # Player callbacks  (called from mpv thread — no Qt widget access here)

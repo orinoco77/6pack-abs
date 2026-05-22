@@ -14,6 +14,7 @@ from sixpack.api.models import Library, Series, SeriesBook, MediaProgress
 from sixpack.config import AppConfig, ServerConfig
 from sixpack.player.player import AudioPlayer, PlayerError
 from sixpack.ui import theme
+from sixpack.ui.cover_cache import CoverCache
 from sixpack.ui.screens.login import LoginScreen
 from sixpack.ui.screens.library import LibraryScreen
 from sixpack.ui.screens.series import SeriesScreen
@@ -100,13 +101,15 @@ class MainWindow(QMainWindow):
         self._stack = QStackedWidget()
         self.setCentralWidget(self._stack)
 
+        self._cover_cache = CoverCache(parent=self)
+
         self._login_screen = LoginScreen()
         self._library_screen = LibraryScreen()
-        self._series_screen = SeriesScreen()
+        self._series_screen = SeriesScreen(cover_cache=self._cover_cache)
         self._detail_screen = SeriesDetailScreen()
 
         if self._player:
-            self._player_screen = PlayerScreen(self._player)
+            self._player_screen = PlayerScreen(self._player, cover_cache=self._cover_cache)
         else:
             self._player_screen = None  # type: ignore[assignment]
 

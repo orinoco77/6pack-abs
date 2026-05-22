@@ -1,10 +1,14 @@
 """Series grid screen — browse all series in a library."""
 from __future__ import annotations
 
+<<<<<<< HEAD
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, pyqtSlot
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtCore import QPoint
+=======
+from PyQt6.QtCore import Qt, pyqtSignal
+>>>>>>> 062e3d3 (feat: disk-backed cover art cache)
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -16,6 +20,7 @@ from PyQt6.QtWidgets import (
 
 from sixpack.api.models import Library, Series
 from sixpack.ui import theme
+from sixpack.ui.cover_cache import CoverCache
 from sixpack.ui.widgets.focus_grid import FocusGrid
 from sixpack.ui.widgets.media_card import MediaCard
 
@@ -27,14 +32,14 @@ class SeriesScreen(QWidget):
     back_requested = pyqtSignal()
     library_switch_requested = pyqtSignal(object)  # Library
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, cover_cache: CoverCache | None = None, parent=None) -> None:
         super().__init__(parent)
         self._library: Library | None = None
         self._all_libraries: list[Library] = []
         self._series_list: list[Series] = []
         self._server_url = ""
         self._token = ""
-        self._nam: QNetworkAccessManager | None = None
+        self._cover_cache = cover_cache
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -92,21 +97,20 @@ class SeriesScreen(QWidget):
         self._count_label.setText(f"{len(series_list)} series")
 
         self._grid.clear()
-        if self._nam is None:
-            self._nam = QNetworkAccessManager(self)
-
         for series in series_list:
             card = MediaCard(
                 title=series.name,
                 subtitle=f"{series.book_count} episode{'s' if series.book_count != 1 else ''}",
             )
             self._grid.add_item(card)
-            cover_url = series.cover_url(server_url, token)
-            if cover_url:
-                self._fetch_cover(card, cover_url, token)
+            if self._cover_cache is not None:
+                cover_url = series.cover_url(server_url, token)
+                if cover_url:
+                    self._cover_cache.fetch(cover_url, token, card.set_cover)
 
         self._grid.set_focus_first()
 
+<<<<<<< HEAD
     def _fetch_cover(self, card: MediaCard, url: str, token: str) -> None:
         if self._nam is None:
             return
@@ -146,6 +150,8 @@ class SeriesScreen(QWidget):
         if lib is not None and (self._library is None or lib.id != self._library.id):
             self.library_switch_requested.emit(lib)
 
+=======
+>>>>>>> 062e3d3 (feat: disk-backed cover art cache)
     def _on_item_activated(self, index: int) -> None:
         if 0 <= index < len(self._series_list):
             self.series_selected.emit(self._series_list[index])
