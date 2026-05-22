@@ -1,7 +1,7 @@
 """Series detail screen — episode list with progress indicators."""
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -114,6 +114,7 @@ class SeriesDetailScreen(QWidget):
 
         self._back_btn = QPushButton("← Series")
         self._back_btn.setFixedWidth(140)
+        self._back_btn.setStyleSheet(f"font-size: {theme.FONT_BAR_BTN}pt;")
         self._back_btn.clicked.connect(self.back_requested)
         bar_layout.addWidget(self._back_btn)
 
@@ -126,6 +127,7 @@ class SeriesDetailScreen(QWidget):
 
         self._play_all_btn = QPushButton("▶  Play All")
         self._play_all_btn.setFixedWidth(160)
+        self._play_all_btn.setStyleSheet(f"font-size: {theme.FONT_BAR_BTN}pt;")
         self._play_all_btn.clicked.connect(self._on_play_all)
         bar_layout.addWidget(self._play_all_btn)
 
@@ -147,7 +149,7 @@ class SeriesDetailScreen(QWidget):
             prog = progress.get(book.id)
             ep_widget = EpisodeItem(book, prog)
             item = QListWidgetItem()
-            item.setSizeHint(ep_widget.sizeHint())
+            item.setSizeHint(QSize(0, 68))
             item.setData(Qt.ItemDataRole.UserRole, book)
             self._list.addItem(item)
             self._list.setItemWidget(item, ep_widget)

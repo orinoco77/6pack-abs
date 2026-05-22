@@ -13,16 +13,18 @@ TEXT_MUTED = "#606060"
 DANGER = "#e85555"
 SUCCESS = "#4caf50"
 
-# Font sizes (pt) — oversized for TV viewing distance
-FONT_HUGE = 36
-FONT_TITLE = 28
-FONT_HEADING = 22
-FONT_BODY = 18
-FONT_META = 14
+# Font sizes (pt) — sized for TV viewing distance
+FONT_HUGE = 32
+FONT_TITLE = 24
+FONT_HEADING = 20
+FONT_BODY = 16
+FONT_META = 13
+FONT_BAR_BTN = 13   # header-bar buttons — compact but readable
 
-CARD_WIDTH = 200
-CARD_HEIGHT = 260
-CARD_ART_HEIGHT = 190
+CARD_WIDTH = 210
+CARD_HEIGHT = 280
+CARD_ART_HEIGHT = 200
+CARD_INFO_HEIGHT = CARD_HEIGHT - CARD_ART_HEIGHT  # 80px
 CARD_RADIUS = 8
 FOCUS_BORDER = 3
 

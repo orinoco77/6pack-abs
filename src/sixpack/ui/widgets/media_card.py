@@ -5,6 +5,22 @@ from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont
 from PyQt6.QtWidgets import QFrame, QLabel, QVBoxLayout
 
+
+class _ElideLabel(QLabel):
+    """QLabel that elides text with '...' to fit its own width."""
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        elided = self.fontMetrics().elidedText(
+            self.text(), Qt.TextElideMode.ElideRight, self.width()
+        )
+        painter.setPen(self.palette().windowText().color())
+        painter.drawText(
+            self.rect(),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            elided,
+        )
+
 from sixpack.ui import theme
 
 
@@ -59,13 +75,11 @@ class MediaCard(QFrame):
         info_layout.setContentsMargins(8, 6, 8, 6)
         info_layout.setSpacing(2)
 
-        title_label = QLabel(self._title)
-        title_label.setWordWrap(True)
+        title_label = _ElideLabel(self._title)
         title_label.setStyleSheet(
             f"color: {theme.TEXT_PRIMARY}; font-size: {theme.FONT_META}pt; font-weight: bold;"
             f"background: transparent;"
         )
-        title_label.setMaximumHeight(42)
 
         info_layout.addWidget(title_label)
 
