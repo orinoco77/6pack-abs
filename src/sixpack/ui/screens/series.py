@@ -47,6 +47,7 @@ class SeriesScreen(QWidget):
 
         self._back_btn = QPushButton("← Libraries")
         self._back_btn.setFixedWidth(160)
+        self._back_btn.setStyleSheet(f"font-size: {theme.FONT_BAR_BTN}pt;")
         self._back_btn.clicked.connect(self.back_requested)
         bar_layout.addWidget(self._back_btn)
 

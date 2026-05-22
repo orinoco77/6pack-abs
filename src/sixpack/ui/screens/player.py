@@ -76,6 +76,7 @@ class PlayerScreen(QWidget):
         top = QHBoxLayout()
         self._back_btn = QPushButton("← Back")
         self._back_btn.setFixedWidth(120)
+        self._back_btn.setStyleSheet(f"font-size: {theme.FONT_BAR_BTN}pt;")
         self._back_btn.clicked.connect(self.back_requested)
         top.addWidget(self._back_btn)
         top.addStretch()
