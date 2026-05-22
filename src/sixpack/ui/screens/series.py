@@ -55,11 +55,11 @@ class SeriesScreen(QWidget):
         bar_layout.addWidget(self._back_btn)
 
         self._library_combo = QComboBox()
-        self._library_combo.setMinimumWidth(260)
+        self._library_combo.setMinimumWidth(220)
         self._library_combo.setStyleSheet(
-            f"font-size: {theme.FONT_HEADING}pt; font-weight: bold;"
+            f"font-size: {theme.FONT_BODY}pt; font-weight: bold;"
             f"color: {theme.TEXT_PRIMARY}; background-color: {theme.SURFACE_HIGH};"
-            f"border: 2px solid {theme.TEXT_MUTED}; border-radius: 6px; padding: 4px 12px;"
+            f"border: 1px solid {theme.TEXT_MUTED}; border-radius: 6px; padding: 4px 10px;"
         )
         self._library_combo.currentIndexChanged.connect(self._on_combo_changed)
         bar_layout.addWidget(self._library_combo)
