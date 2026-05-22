@@ -1,6 +1,7 @@
 """mpv-based audio player with Qt signal integration."""
 from __future__ import annotations
 
+import locale
 import threading
 from typing import Callable
 
@@ -35,9 +36,15 @@ class AudioPlayer:
         if not _MPV_AVAILABLE:
             raise PlayerError("python-mpv is not installed or libmpv is not found")
 
+        # Qt (via X11/IBus/XIM) resets LC_NUMERIC to the system locale during
+        # window initialisation. libmpv requires LC_NUMERIC=C to parse floats.
+        # Set it immediately before creating the mpv context.
+        locale.setlocale(locale.LC_NUMERIC, "C")
+
         self._mpv = _mpv.MPV(
             audio_display="no",
-            video=False,
+            vo="null",
+            vid=False,
             terminal=False,
             input_default_bindings=False,
             input_vo_keyboard=False,
