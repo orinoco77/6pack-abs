@@ -17,6 +17,7 @@ class FocusGrid(QWidget):
 
     def __init__(self, columns: int = 4, h_spacing: int = 16, v_spacing: int = 16, parent=None) -> None:
         super().__init__(parent)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._columns = columns
         self._items: list[QWidget] = []
         self._focused_index = 0
@@ -65,9 +66,19 @@ class FocusGrid(QWidget):
         if not self._items:
             return
         index = max(0, min(index, len(self._items) - 1))
+        # Clear visual focus on the old item
+        if 0 <= self._focused_index < len(self._items):
+            old = self._items[self._focused_index]
+            if hasattr(old, "set_focused"):
+                old.set_focused(False)
         self._focused_index = index
         widget = self._items[index]
-        widget.setFocus()
+        if hasattr(widget, "set_focused"):
+            widget.set_focused(True)
+        # Keep keyboard focus on the grid itself — not on the card.
+        # If focus were given to the card, arrow keys would bubble up through
+        # the QScrollArea which would scroll the view instead of navigating.
+        self.setFocus()
         self._scroll.ensureWidgetVisible(widget)
 
     def set_focus_first(self) -> None:

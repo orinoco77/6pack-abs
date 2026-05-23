@@ -166,7 +166,6 @@ class MainWindow(QMainWindow):
 
     def _show_libraries(self) -> None:
         self._stack.setCurrentWidget(self._library_screen)
-        self._library_screen.setFocus()
 
     def _show_series(self) -> None:
         self._stack.setCurrentWidget(self._series_screen)
@@ -360,7 +359,6 @@ class MainWindow(QMainWindow):
                 prog = self._detail_screen._progress.get(book.id)
                 self._chapter_screen.load(book, chapters, prog, self._server_url, self._token)
                 self._stack.setCurrentWidget(self._chapter_screen)
-                self._chapter_screen.setFocus()
             else:
                 prog = self._detail_screen._progress.get(book.id)
                 start_time = prog.current_time if prog and not prog.is_finished else 0.0

@@ -161,6 +161,36 @@ def test_focus_grid_empty_nav_no_crash(qtbot):
     qtbot.keyClick(grid, Qt.Key.Key_Return)
 
 
+def test_focus_grid_card_visual_focus(qtbot):
+    """focus_item() sets the accent border on the target card and clears the old one."""
+    from sixpack.ui import theme
+    grid = FocusGrid(columns=3)
+    qtbot.addWidget(grid)
+    for i in range(3):
+        grid.add_item(_make_card(f"Card {i}"))
+    grid.focus_item(0)
+    assert grid._items[0]._focused is True
+    assert grid._items[1]._focused is False
+    grid.focus_item(1)
+    assert grid._items[0]._focused is False
+    assert grid._items[1]._focused is True
+
+
+def test_focus_grid_keyboard_focus_stays_on_grid(qtbot):
+    """Arrow-key navigation must not move Qt keyboard focus to individual cards."""
+    grid = FocusGrid(columns=3)
+    qtbot.addWidget(grid)
+    grid.show()
+    for i in range(6):
+        grid.add_item(_make_card(f"Card {i}"))
+    grid.set_focus_first()
+    qtbot.keyClick(grid, Qt.Key.Key_Right)
+    # The grid itself must still hold focus, not a card widget
+    from PyQt6.QtWidgets import QApplication
+    focused = QApplication.focusWidget()
+    assert focused is grid or focused is None  # None acceptable in headless
+
+
 def test_focus_grid_card_activated_propagates(qtbot):
     grid = FocusGrid(columns=3)
     qtbot.addWidget(grid)
@@ -259,26 +289,23 @@ def test_media_card_progress_clamps_low(qtbot):
     card.set_progress(-0.5)  # < 0 should clamp
 
 
-def test_media_card_focus_changes_style(qtbot):
-    from PyQt6.QtGui import QFocusEvent
+def test_media_card_set_focused_style(qtbot):
+    from sixpack.ui import theme
     card = MediaCard(title="Test")
     qtbot.addWidget(card)
-    # Fire focus events directly — setFocus() requires an active window
-    in_evt = QFocusEvent(QFocusEvent.Type.FocusIn)
-    card.focusInEvent(in_evt)
+    card.set_focused(True)
     assert card._focused is True
-    out_evt = QFocusEvent(QFocusEvent.Type.FocusOut)
-    card.focusOutEvent(out_evt)
+    assert theme.ACCENT in card.styleSheet()
+    card.set_focused(False)
     assert card._focused is False
+    assert "transparent" in card.styleSheet()
 
 
-def test_media_card_mouse_press_focuses(qtbot):
+def test_media_card_mouse_press_no_crash(qtbot):
     card = MediaCard(title="Test")
     qtbot.addWidget(card)
     card.show()
-    qtbot.mouseClick(card, Qt.MouseButton.LeftButton)
-    # Mouse press should set focus
-    # Just assert no crash
+    qtbot.mouseClick(card, Qt.MouseButton.LeftButton)  # should not crash
 
 
 def test_media_card_subtitle(qtbot):
@@ -470,6 +497,17 @@ def test_player_screen_creates(qtbot):
     mock_player = MockAudioPlayer()
     screen = PlayerScreen(mock_player)
     qtbot.addWidget(screen)
+
+
+def test_player_screen_enter_key_pauses(qtbot):
+    from sixpack.ui.screens.player import PlayerScreen
+    mock_player = MockAudioPlayer()
+    screen = PlayerScreen(mock_player)
+    qtbot.addWidget(screen)
+    screen.show()
+    screen.setFocus()
+    qtbot.keyClick(screen, Qt.Key.Key_Return)
+    assert mock_player.toggle_count == 1
 
 
 def test_player_screen_play_pause_key(qtbot):

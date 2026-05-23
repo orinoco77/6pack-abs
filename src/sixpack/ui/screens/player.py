@@ -59,6 +59,7 @@ class PlayerScreen(QWidget):
         self._position = 0.0
         self._item_id = ""
 
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._build_ui()
         self._connect_player()
 
@@ -179,6 +180,7 @@ class PlayerScreen(QWidget):
         self._next_btn.clicked.connect(self.next_item)
 
         for btn in (self._prev_btn, self._rew_btn, self._play_btn, self._fwd_btn, self._next_btn):
+            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             controls.addWidget(btn)
 
         root.addLayout(controls)
@@ -315,11 +317,15 @@ class PlayerScreen(QWidget):
     # Keyboard / gamepad
     # ------------------------------------------------------------------
 
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self.setFocus()
+
     def keyPressEvent(self, event: QKeyEvent) -> None:
         key = event.key()
         if key == Qt.Key.Key_Escape:
             self.back_requested.emit()
-        elif key in (Qt.Key.Key_Space, Qt.Key.Key_P):
+        elif key in (Qt.Key.Key_Space, Qt.Key.Key_P, Qt.Key.Key_Return, Qt.Key.Key_Enter):
             self._player.toggle_pause()
         elif key == Qt.Key.Key_Right:
             self._player.seek_forward()

@@ -64,6 +64,11 @@ class LibraryScreen(QWidget):
         lib: Library = item.data(Qt.ItemDataRole.UserRole)
         self.library_selected.emit(lib)
 
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if self._list.count():
+            self._list.setFocus()
+
     def keyPressEvent(self, event) -> None:
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             current = self._list.currentItem()

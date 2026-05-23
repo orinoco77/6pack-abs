@@ -41,7 +41,8 @@ class MediaCard(QFrame):
     ) -> None:
         super().__init__(parent)
         self.setFixedSize(theme.CARD_WIDTH, theme.CARD_HEIGHT)
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        # NoFocus: keyboard focus stays on FocusGrid; set_focused() controls the border.
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         self._title = title
@@ -141,22 +142,19 @@ class MediaCard(QFrame):
         self._art_label.setPixmap(base)
 
     # ------------------------------------------------------------------
-    # Focus painting
+    # Focus state (driven by FocusGrid, not Qt keyboard focus)
     # ------------------------------------------------------------------
 
-    def focusInEvent(self, event) -> None:
-        self._focused = True
-        self.setStyleSheet(
-            f"QFrame {{ border-radius: {theme.CARD_RADIUS}px; border: {theme.FOCUS_BORDER}px solid {theme.ACCENT}; }}"
-        )
-        super().focusInEvent(event)
-
-    def focusOutEvent(self, event) -> None:
-        self._focused = False
-        self.setStyleSheet(
-            f"QFrame {{ border-radius: {theme.CARD_RADIUS}px; border: {theme.FOCUS_BORDER}px solid transparent; }}"
-        )
-        super().focusOutEvent(event)
+    def set_focused(self, focused: bool) -> None:
+        self._focused = focused
+        if focused:
+            self.setStyleSheet(
+                f"QFrame {{ border-radius: {theme.CARD_RADIUS}px; border: {theme.FOCUS_BORDER}px solid {theme.ACCENT}; }}"
+            )
+        else:
+            self.setStyleSheet(
+                f"QFrame {{ border-radius: {theme.CARD_RADIUS}px; border: {theme.FOCUS_BORDER}px solid transparent; }}"
+            )
 
     def keyPressEvent(self, event) -> None:
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
@@ -166,7 +164,3 @@ class MediaCard(QFrame):
 
     def mouseDoubleClickEvent(self, event) -> None:
         self.activated.emit()
-
-    def mousePressEvent(self, event) -> None:
-        self.setFocus()
-        super().mousePressEvent(event)
