@@ -35,6 +35,8 @@ class EpisodeItem(QWidget):
         self._build_ui(book, progress)
 
     def _build_ui(self, book: SeriesBook, progress: MediaProgress | None) -> None:
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.set_focused(False)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 12, 16, 12)
         layout.setSpacing(12)
@@ -44,7 +46,7 @@ class EpisodeItem(QWidget):
         self._cover_label.setFixedSize(44, 44)
         self._cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._cover_label.setStyleSheet(
-            f"background-color: {theme.SURFACE_HIGH}; border-radius: 4px;"
+            f"background-color: {theme.SURFACE_HIGH}; border-radius: 4px; border: none;"
         )
         layout.addWidget(self._cover_label)
 
@@ -56,13 +58,13 @@ class EpisodeItem(QWidget):
             seq_label = QLabel(book.sequence)
             seq_label.setFixedWidth(32)
             seq_label.setStyleSheet(
-                f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_META}pt; background: transparent;"
+                f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_META}pt; background: transparent; border: none;"
             )
             layout.addWidget(seq_label)
 
         title = QLabel(book.title)
         title.setStyleSheet(
-            f"color: {theme.TEXT_PRIMARY}; font-size: {theme.FONT_BODY}pt; font-weight: bold; background: transparent;"
+            f"color: {theme.TEXT_PRIMARY}; font-size: {theme.FONT_BODY}pt; font-weight: bold; background: transparent; border: none;"
         )
         layout.addWidget(title, stretch=1)
 
@@ -71,7 +73,7 @@ class EpisodeItem(QWidget):
         if chapter_count > 1:
             ch_label = QLabel(f"{chapter_count} ch")
             ch_label.setStyleSheet(
-                f"color: {theme.TEXT_MUTED}; font-size: {theme.FONT_META}pt; background: transparent;"
+                f"color: {theme.TEXT_MUTED}; font-size: {theme.FONT_META}pt; background: transparent; border: none;"
             )
             layout.addWidget(ch_label)
 
@@ -79,6 +81,12 @@ class EpisodeItem(QWidget):
         layout.addWidget(self._duration_label)
 
         self.update_progress(progress)
+
+    def set_focused(self, focused: bool) -> None:
+        border = theme.ACCENT if focused else "transparent"
+        self.setStyleSheet(
+            f"background: {theme.SURFACE}; border: 2px solid {border}; border-radius: 6px;"
+        )
 
     def set_cover(self, pix: QPixmap) -> None:
         scaled = pix.scaled(
@@ -91,15 +99,15 @@ class EpisodeItem(QWidget):
     def update_progress(self, progress: MediaProgress | None) -> None:
         if progress and progress.is_finished:
             self._dot.setStyleSheet(
-                f"background: {theme.SUCCESS}; border-radius: 7px;"
+                f"background: {theme.SUCCESS}; border-radius: 7px; border: none;"
             )
         elif progress and progress.current_time > 0:
             self._dot.setStyleSheet(
-                f"background: {theme.ACCENT}; border-radius: 7px;"
+                f"background: {theme.ACCENT}; border-radius: 7px; border: none;"
             )
         else:
             self._dot.setStyleSheet(
-                f"background: {theme.TEXT_MUTED}; border-radius: 7px;"
+                f"background: {theme.TEXT_MUTED}; border-radius: 7px; border: none;"
             )
 
         duration_text = _fmt_duration(self._book.duration)
@@ -107,12 +115,12 @@ class EpisodeItem(QWidget):
             elapsed = _fmt_duration(progress.current_time)
             self._duration_label.setText(f"{elapsed} / {duration_text}")
             self._duration_label.setStyleSheet(
-                f"color: {theme.ACCENT}; font-size: {theme.FONT_META}pt; background: transparent;"
+                f"color: {theme.ACCENT}; font-size: {theme.FONT_META}pt; background: transparent; border: none;"
             )
         else:
             self._duration_label.setText(duration_text)
             self._duration_label.setStyleSheet(
-                f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_META}pt; background: transparent;"
+                f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_META}pt; background: transparent; border: none;"
             )
 
 
@@ -175,28 +183,39 @@ class SeriesDetailScreen(QWidget):
 
         root.addWidget(bar)
 
-        # padding: 0 — global QListWidget::item padding clips custom widgets
+        # padding: 0 — global QListWidget::item padding clips custom widgets.
+        # All focus/selection rendering is done by EpisodeItem.set_focused(); we
+        # suppress Qt's own selection painter so it never touches child labels.
         self._list = QListWidget()
         self._list.setSpacing(2)
         self._list.setStyleSheet(f"""
+            QListWidget {{
+                background-color: {theme.BG};
+                outline: none;
+            }}
             QListWidget::item {{
                 padding: 0;
                 margin: 2px 0;
-                background-color: {theme.SURFACE};
-                border-radius: 6px;
-                border: 2px solid transparent;
+                background-color: transparent;
+                border: none;
             }}
             QListWidget::item:selected {{
-                background-color: {theme.SURFACE_HIGH};
-                border-color: {theme.ACCENT};
+                background-color: transparent;
             }}
             QListWidget::item:focus {{
-                border-color: {theme.ACCENT};
+                background-color: transparent;
                 outline: none;
             }}
         """)
+        self._list.currentRowChanged.connect(self._on_row_changed)
         self._list.itemActivated.connect(self._on_item_activated)
         root.addWidget(self._list)
+
+    def _on_row_changed(self, row: int) -> None:
+        for i in range(self._list.count()):
+            widget = self._list.itemWidget(self._list.item(i))
+            if isinstance(widget, EpisodeItem):
+                widget.set_focused(i == row)
 
     def show_loading(self, series: Series, server_url: str = "", token: str = "") -> None:
         """Display episodes immediately while progress is still being fetched."""
@@ -237,7 +256,9 @@ class SeriesDetailScreen(QWidget):
                 cover_url = book.cover_url(self._server_url, self._token)
                 self._cover_cache.fetch(cover_url, self._token, ep_widget.set_cover)
         if self._list.count():
-            self._list.setCurrentRow(self._find_resume_index())
+            idx = self._find_resume_index()
+            self._list.setCurrentRow(idx)
+            self._on_row_changed(idx)  # force visual update — currentRowChanged may not fire if row didn't change
             self._list.setFocus()
 
     def update_progress(self, progress: dict[str, MediaProgress]) -> None:
@@ -250,7 +271,9 @@ class SeriesDetailScreen(QWidget):
             widget = self._list.itemWidget(item)
             if isinstance(widget, EpisodeItem):
                 widget.update_progress(progress.get(book.id))
-        self._list.setCurrentRow(self._find_resume_index())
+        idx = self._find_resume_index()
+        self._list.setCurrentRow(idx)
+        self._on_row_changed(idx)
 
     def _find_resume_index(self) -> int:
         for i, book in enumerate(self._books):
