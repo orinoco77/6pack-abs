@@ -56,13 +56,13 @@ class EpisodeItem(QWidget):
             seq_label = QLabel(book.sequence)
             seq_label.setFixedWidth(32)
             seq_label.setStyleSheet(
-                f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_META}pt;"
+                f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_META}pt; background: transparent;"
             )
             layout.addWidget(seq_label)
 
         title = QLabel(book.title)
         title.setStyleSheet(
-            f"color: {theme.TEXT_PRIMARY}; font-size: {theme.FONT_BODY}pt; font-weight: bold;"
+            f"color: {theme.TEXT_PRIMARY}; font-size: {theme.FONT_BODY}pt; font-weight: bold; background: transparent;"
         )
         layout.addWidget(title, stretch=1)
 
@@ -71,7 +71,7 @@ class EpisodeItem(QWidget):
         if chapter_count > 1:
             ch_label = QLabel(f"{chapter_count} ch")
             ch_label.setStyleSheet(
-                f"color: {theme.TEXT_MUTED}; font-size: {theme.FONT_META}pt;"
+                f"color: {theme.TEXT_MUTED}; font-size: {theme.FONT_META}pt; background: transparent;"
             )
             layout.addWidget(ch_label)
 
@@ -107,12 +107,12 @@ class EpisodeItem(QWidget):
             elapsed = _fmt_duration(progress.current_time)
             self._duration_label.setText(f"{elapsed} / {duration_text}")
             self._duration_label.setStyleSheet(
-                f"color: {theme.ACCENT}; font-size: {theme.FONT_META}pt;"
+                f"color: {theme.ACCENT}; font-size: {theme.FONT_META}pt; background: transparent;"
             )
         else:
             self._duration_label.setText(duration_text)
             self._duration_label.setStyleSheet(
-                f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_META}pt;"
+                f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_META}pt; background: transparent;"
             )
 
 

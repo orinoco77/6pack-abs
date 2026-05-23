@@ -63,21 +63,21 @@ class ChapterItem(QWidget):
         num_label = QLabel(str(index + 1))
         num_label.setFixedWidth(36)
         num_label.setStyleSheet(
-            f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_META}pt;"
+            f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_META}pt; background: transparent;"
         )
         layout.addWidget(num_label)
 
         title_text = chapter.title if chapter.title else f"Chapter {index + 1}"
         title = QLabel(title_text)
         title.setStyleSheet(
-            f"color: {theme.TEXT_PRIMARY}; font-size: {theme.FONT_BODY}pt; font-weight: bold;"
+            f"color: {theme.TEXT_PRIMARY}; font-size: {theme.FONT_BODY}pt; font-weight: bold; background: transparent;"
         )
         layout.addWidget(title, stretch=1)
 
         duration = _fmt_duration(chapter.end - chapter.start)
         dur_label = QLabel(duration)
         dur_label.setStyleSheet(
-            f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_META}pt;"
+            f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_META}pt; background: transparent;"
         )
         layout.addWidget(dur_label)
 
