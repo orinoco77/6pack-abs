@@ -6,6 +6,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 
 from sixpack.api.models import (
+    Chapter,
     Library,
     LibraryItemMedia,
     MediaProgress,
@@ -192,53 +193,61 @@ def test_detail_screen_back_signal(qtbot):
         qtbot.keyClick(screen, Qt.Key.Key_Escape)
 
 
-def test_detail_screen_play_from_beginning(qtbot):
+def test_detail_screen_item_emits_episode_activated(qtbot):
+    """Clicking any item always emits episode_activated (chapter check happens in app)."""
     screen = SeriesDetailScreen()
     qtbot.addWidget(screen)
     series = _make_series()
     screen.load(series, {})
     screen._list.setCurrentRow(0)
 
-    with qtbot.waitSignal(screen.play_requested, timeout=1000) as blocker:
+    with qtbot.waitSignal(screen.episode_activated, timeout=1000) as blocker:
         screen._list.itemActivated.emit(screen._list.item(0))
 
-    book, start_time = blocker.args
-    assert book.id == "b1"
-    assert start_time == 0.0
+    assert blocker.args[0].id == "b1"
 
 
-def test_detail_screen_play_resumes(qtbot):
+def test_detail_screen_item_does_not_emit_play_requested(qtbot):
+    """Item click must not emit play_requested — that is handled by app after chapter fetch."""
+    screen = SeriesDetailScreen()
+    qtbot.addWidget(screen)
+    screen.load(_make_series(), {})
+
+    play_signals = []
+    screen.play_requested.connect(lambda b, t: play_signals.append((b, t)))
+    screen._list.itemActivated.emit(screen._list.item(0))
+    assert play_signals == []
+
+
+def test_detail_play_all_resumes_from_progress(qtbot):
+    """Play All still emits play_requested at correct resume position."""
     screen = SeriesDetailScreen()
     qtbot.addWidget(screen)
     series = _make_series()
-    progress = {
-        "b1": MediaProgress(libraryItemId="b1", currentTime=900.0, duration=1800.0)
-    }
+    progress = {"b1": MediaProgress(libraryItemId="b1", currentTime=900.0, duration=1800.0)}
     screen.load(series, progress)
-    screen._list.setCurrentRow(0)
 
     with qtbot.waitSignal(screen.play_requested, timeout=1000) as blocker:
-        screen._list.itemActivated.emit(screen._list.item(0))
+        screen._play_all_btn.click()
 
     book, start_time = blocker.args
     assert book.id == "b1"
     assert start_time == 900.0
 
 
-def test_detail_screen_finished_ep_starts_from_zero(qtbot):
+def test_detail_play_all_finished_restarts(qtbot):
+    """Play All starts a fully-finished book from 0.0."""
     screen = SeriesDetailScreen()
     qtbot.addWidget(screen)
     series = _make_series()
     progress = {
-        "b1": MediaProgress(
-            libraryItemId="b1", currentTime=1800.0, duration=1800.0, isFinished=True
-        )
+        "b1": MediaProgress(libraryItemId="b1", currentTime=1800.0, duration=1800.0, isFinished=True),
+        "b2": MediaProgress(libraryItemId="b2", currentTime=3600.0, duration=3600.0, isFinished=True),
     }
     screen.load(series, progress)
-    screen._list.setCurrentRow(0)
 
     with qtbot.waitSignal(screen.play_requested, timeout=1000) as blocker:
-        screen._list.itemActivated.emit(screen._list.item(0))
+        screen._play_all_btn.click()
 
     _, start_time = blocker.args
     assert start_time == 0.0
@@ -319,6 +328,164 @@ def test_detail_episode_item_update_progress(qtbot):
     widget.update_progress(prog)
     assert theme.ACCENT in widget._dot.styleSheet()
     assert "30m" in widget._duration_label.text()
+
+
+def test_detail_episode_item_has_cover_label(qtbot):
+    from sixpack.ui.screens.series_detail import EpisodeItem
+    media = LibraryItemMedia(metadata={"title": "Ep"}, duration=3600.0)
+    book = SeriesBook(id="b1", libraryId="lib1", media=media)
+    widget = EpisodeItem(book, None)
+    qtbot.addWidget(widget)
+    assert widget._cover_label is not None
+    assert widget._cover_label.width() == 44
+
+
+def test_detail_episode_item_chapter_badge(qtbot):
+    """Chapter count label present when book has >1 chapters."""
+    from sixpack.ui.screens.series_detail import EpisodeItem
+    from sixpack.api.models import Chapter
+    chapters = [Chapter(id=i, start=i * 900.0, end=(i + 1) * 900.0, title=f"Ch {i}") for i in range(4)]
+    media = LibraryItemMedia(metadata={"title": "Box Set"}, duration=3600.0, chapters=chapters)
+    book = SeriesBook(id="b1", libraryId="lib1", media=media)
+    widget = EpisodeItem(book, None)
+    qtbot.addWidget(widget)
+    # Find the chapter count label by text
+    from PyQt6.QtWidgets import QLabel
+    labels = widget.findChildren(QLabel)
+    ch_texts = [l.text() for l in labels if "ch" in l.text()]
+    assert any("4 ch" in t for t in ch_texts)
+
+
+def test_detail_episode_activated_any_book(qtbot):
+    """episode_activated is emitted for any book (box-set or single), not play_requested."""
+    chapters = [Chapter(id=i, start=i * 900.0, end=(i + 1) * 900.0, title=f"Ch {i}") for i in range(3)]
+    media_box = LibraryItemMedia(metadata={"title": "Box Set"}, duration=2700.0, chapters=chapters)
+    media_single = LibraryItemMedia(metadata={"title": "Single Book"}, duration=3600.0)
+    book_box = SeriesBook(id="bx", libraryId="lib1", media=media_box, sequence="1")
+    book_single = SeriesBook(id="bs", libraryId="lib1", media=media_single, sequence="2")
+    series = Series(id="s1", name="Drama", books=[book_box, book_single])
+
+    screen = SeriesDetailScreen()
+    qtbot.addWidget(screen)
+    screen.load(series, {})
+
+    ep_signals = []
+    play_signals = []
+    screen.episode_activated.connect(lambda b: ep_signals.append(b))
+    screen.play_requested.connect(lambda b, t: play_signals.append((b, t)))
+
+    screen._list.itemActivated.emit(screen._list.item(0))
+    screen._list.itemActivated.emit(screen._list.item(1))
+
+    assert len(ep_signals) == 2
+    assert ep_signals[0] is book_box
+    assert ep_signals[1] is book_single
+    assert play_signals == []
+
+
+# ---- ChapterSelectScreen ----
+
+def _make_chapters():
+    return [
+        Chapter(id=0, start=0.0, end=1500.0, title="Part One: The Arrival"),
+        Chapter(id=1, start=1500.0, end=3000.0, title="Part Two: The Attack"),
+        Chapter(id=2, start=3000.0, end=4200.0, title="Part Three: Aftermath"),
+    ]
+
+
+def _make_box_set_book():
+    from sixpack.api.models import Chapter
+    media = LibraryItemMedia(
+        metadata={"title": "Invasion of Earth"},
+        duration=4200.0,
+        chapters=_make_chapters(),
+    )
+    return SeriesBook(id="bx1", libraryId="lib1", media=media, sequence="1")
+
+
+def test_chapter_screen_creates(qtbot):
+    from sixpack.ui.screens.chapter_select import ChapterSelectScreen
+    screen = ChapterSelectScreen()
+    qtbot.addWidget(screen)
+    assert screen._list is not None
+
+
+def test_chapter_screen_load(qtbot):
+    from sixpack.ui.screens.chapter_select import ChapterSelectScreen
+    screen = ChapterSelectScreen()
+    qtbot.addWidget(screen)
+    book = _make_box_set_book()
+    screen.load(book, _make_chapters(), None)
+    assert screen._list.count() == 3
+    assert screen._title_label.text() == "Invasion of Earth"
+    assert "3 chapters" in screen._count_label.text()
+
+
+def test_chapter_screen_play_signal(qtbot):
+    from sixpack.ui.screens.chapter_select import ChapterSelectScreen
+    screen = ChapterSelectScreen()
+    qtbot.addWidget(screen)
+    book = _make_box_set_book()
+    screen.load(book, _make_chapters(), None)
+
+    signals = []
+    screen.play_requested.connect(lambda b, t: signals.append((b, t)))
+    screen._list.itemActivated.emit(screen._list.item(1))  # Part Two starts at 1500.0
+
+    assert len(signals) == 1
+    assert signals[0][0] is book
+    assert signals[0][1] == 1500.0
+
+
+def test_chapter_screen_back_signal(qtbot):
+    from sixpack.ui.screens.chapter_select import ChapterSelectScreen
+    screen = ChapterSelectScreen()
+    qtbot.addWidget(screen)
+    screen.load(_make_box_set_book(), _make_chapters(), None)
+
+    with qtbot.waitSignal(screen.back_requested, timeout=1000):
+        qtbot.keyClick(screen, Qt.Key.Key_Escape)
+
+
+def test_chapter_screen_resume_index_in_progress(qtbot):
+    """Resume index points to the chapter containing current_time."""
+    from sixpack.ui.screens.chapter_select import ChapterSelectScreen
+    screen = ChapterSelectScreen()
+    qtbot.addWidget(screen)
+    book = _make_box_set_book()
+    # current_time = 2000s → inside Part Two (1500–3000)
+    prog = MediaProgress(libraryItemId="bx1", currentTime=2000.0, duration=4200.0)
+    screen.load(book, _make_chapters(), prog)
+    assert screen._list.currentRow() == 1
+
+
+def test_chapter_screen_resume_index_finished(qtbot):
+    """Finished book restarts from chapter 0."""
+    from sixpack.ui.screens.chapter_select import ChapterSelectScreen
+    screen = ChapterSelectScreen()
+    qtbot.addWidget(screen)
+    book = _make_box_set_book()
+    prog = MediaProgress(libraryItemId="bx1", currentTime=4200.0, duration=4200.0, isFinished=True)
+    screen.load(book, _make_chapters(), prog)
+    assert screen._list.currentRow() == 0
+
+
+def test_chapter_status_finished_book(qtbot):
+    """All chapters show as finished when the book is finished."""
+    from sixpack.ui.screens.chapter_select import ChapterSelectScreen, _chapter_status
+    from sixpack.api.models import Chapter
+    ch = Chapter(id=0, start=0.0, end=1500.0, title="Part One")
+    assert _chapter_status(ch, 4200.0, is_finished=True) == "finished"
+    assert _chapter_status(ch, 0.0, is_finished=True) == "finished"
+
+
+def test_chapter_status_in_progress():
+    from sixpack.ui.screens.chapter_select import _chapter_status
+    from sixpack.api.models import Chapter
+    ch = Chapter(id=1, start=1500.0, end=3000.0, title="Part Two")
+    assert _chapter_status(ch, 2000.0, is_finished=False) == "in_progress"
+    assert _chapter_status(ch, 3001.0, is_finished=False) == "finished"
+    assert _chapter_status(ch, 1000.0, is_finished=False) == "unstarted"
 
 
 # ---- Config ----

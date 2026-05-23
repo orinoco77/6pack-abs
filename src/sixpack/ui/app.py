@@ -18,6 +18,7 @@ from sixpack.ui.cover_cache import CoverCache
 from sixpack.ui.screens.login import LoginScreen
 from sixpack.ui.screens.library import LibraryScreen
 from sixpack.ui.screens.series import SeriesScreen
+from sixpack.ui.screens.chapter_select import ChapterSelectScreen
 from sixpack.ui.screens.series_detail import SeriesDetailScreen
 from sixpack.ui.screens.player import PlayerScreen
 
@@ -67,6 +68,7 @@ class MainWindow(QMainWindow):
         self._server_url = ""
         self._token = ""
         self._current_series: Series | None = None
+        self._pending_book: SeriesBook | None = None
         self._libraries: list[Library] = []
 
         self._init_player()
@@ -106,7 +108,8 @@ class MainWindow(QMainWindow):
         self._login_screen = LoginScreen()
         self._library_screen = LibraryScreen()
         self._series_screen = SeriesScreen(cover_cache=self._cover_cache)
-        self._detail_screen = SeriesDetailScreen()
+        self._detail_screen = SeriesDetailScreen(cover_cache=self._cover_cache)
+        self._chapter_screen = ChapterSelectScreen(cover_cache=self._cover_cache)
 
         if self._player:
             self._player_screen = PlayerScreen(self._player, cover_cache=self._cover_cache)
@@ -117,6 +120,7 @@ class MainWindow(QMainWindow):
         self._stack.addWidget(self._library_screen)
         self._stack.addWidget(self._series_screen)
         self._stack.addWidget(self._detail_screen)
+        self._stack.addWidget(self._chapter_screen)
 
         if self._player_screen:
             self._stack.addWidget(self._player_screen)
@@ -131,7 +135,10 @@ class MainWindow(QMainWindow):
         self._series_screen.back_requested.connect(self._show_libraries)
         self._series_screen.library_switch_requested.connect(self._on_library_selected)
         self._detail_screen.play_requested.connect(self._on_play_requested)
+        self._detail_screen.episode_activated.connect(self._on_episode_activated)
         self._detail_screen.back_requested.connect(self._show_series)
+        self._chapter_screen.play_requested.connect(self._on_play_requested)
+        self._chapter_screen.back_requested.connect(self._show_detail)
 
         self._setup_quit_shortcut()
         self._show_login()
@@ -203,7 +210,7 @@ class MainWindow(QMainWindow):
     def _on_series_selected(self, series: Series) -> None:
         self._current_series = series
         logger.debug("Series selected: %s (%d books)", series.name, series.book_count)
-        self._detail_screen.show_loading(series)
+        self._detail_screen.show_loading(series, self._server_url, self._token)
         self._show_detail()
         self._worker.run("series_detail", self._async_fetch_series_progress(series))
 
@@ -223,6 +230,18 @@ class MainWindow(QMainWindow):
                 *(_fetch_one(client, book.id) for book in series.sorted_books)
             )
         return (series, dict(pairs))
+
+    # ------------------------------------------------------------------
+    # Chapter selection
+    # ------------------------------------------------------------------
+
+    def _on_episode_activated(self, book: SeriesBook) -> None:
+        self._pending_book = book
+        self._worker.run("book_chapters", self._async_get_book_chapters(book.id))
+
+    async def _async_get_book_chapters(self, book_id: str):
+        async with ABSClient(self._server_url, token=self._token) as client:
+            return await client.get_library_item(book_id)
 
     # ------------------------------------------------------------------
     # Playback
@@ -323,6 +342,22 @@ class MainWindow(QMainWindow):
                 clean_progress = {k: v for k, v in progress_map.items() if v is not None}
                 self._detail_screen.update_progress(clean_progress)
 
+        elif tag == "book_chapters":
+            library_item = result
+            book = self._pending_book
+            if book is None:
+                return
+            chapters = library_item.media.chapters
+            if len(chapters) > 1:
+                prog = self._detail_screen._progress.get(book.id)
+                self._chapter_screen.load(book, chapters, prog, self._server_url, self._token)
+                self._stack.setCurrentWidget(self._chapter_screen)
+                self._chapter_screen.setFocus()
+            else:
+                prog = self._detail_screen._progress.get(book.id)
+                start_time = prog.current_time if prog and not prog.is_finished else 0.0
+                self._on_play_requested(book, start_time)
+
         elif tag == "start_session":
             # result is a PlaybackSession — build URL and start playback
             session = result
@@ -341,6 +376,12 @@ class MainWindow(QMainWindow):
             self._login_screen.show_error(f"Login failed: {message}")
         elif tag == "autologin":
             self._show_login()
+        elif tag == "book_chapters":
+            book = self._pending_book
+            if book:
+                prog = self._detail_screen._progress.get(book.id)
+                start_time = prog.current_time if prog and not prog.is_finished else 0.0
+                self._on_play_requested(book, start_time)
         elif tag == "series_detail":
             if self._current_series:
                 self._detail_screen.update_progress({})
