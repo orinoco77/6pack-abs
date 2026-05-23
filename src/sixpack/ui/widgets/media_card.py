@@ -40,7 +40,8 @@ class MediaCard(QFrame):
         parent=None,
     ) -> None:
         super().__init__(parent)
-        self.setFixedSize(theme.CARD_WIDTH, theme.CARD_HEIGHT)
+        self.setFixedSize(theme.CARD_WIDTH + 2 * theme.FOCUS_BORDER, theme.CARD_HEIGHT)
+        self.setObjectName("media_card")
         # NoFocus: keyboard focus stays on FocusGrid; set_focused() controls the border.
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -96,7 +97,7 @@ class MediaCard(QFrame):
         layout.addWidget(info_frame)
 
         self.setStyleSheet(
-            f"QFrame {{ border-radius: {theme.CARD_RADIUS}px; border: {theme.FOCUS_BORDER}px solid transparent; }}"
+            f"#media_card {{ border-radius: {theme.CARD_RADIUS}px; border: {theme.FOCUS_BORDER}px solid transparent; }}"
         )
 
     def _render_placeholder(self) -> None:
@@ -147,14 +148,10 @@ class MediaCard(QFrame):
 
     def set_focused(self, focused: bool) -> None:
         self._focused = focused
-        if focused:
-            self.setStyleSheet(
-                f"QFrame {{ border-radius: {theme.CARD_RADIUS}px; border: {theme.FOCUS_BORDER}px solid {theme.ACCENT}; }}"
-            )
-        else:
-            self.setStyleSheet(
-                f"QFrame {{ border-radius: {theme.CARD_RADIUS}px; border: {theme.FOCUS_BORDER}px solid transparent; }}"
-            )
+        border = theme.ACCENT if focused else "transparent"
+        self.setStyleSheet(
+            f"#media_card {{ border-radius: {theme.CARD_RADIUS}px; border: {theme.FOCUS_BORDER}px solid {border}; }}"
+        )
 
     def keyPressEvent(self, event) -> None:
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):

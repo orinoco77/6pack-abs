@@ -46,6 +46,8 @@ class ChapterItem(QWidget):
         self._build_ui(index, chapter, status)
 
     def _build_ui(self, index: int, chapter: Chapter, status: str) -> None:
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.set_focused(False)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 12, 16, 12)
         layout.setSpacing(16)
@@ -53,33 +55,39 @@ class ChapterItem(QWidget):
         dot = QLabel()
         dot.setFixedSize(14, 14)
         if status == "finished":
-            dot.setStyleSheet(f"background: {theme.SUCCESS}; border-radius: 7px;")
+            dot.setStyleSheet(f"background: {theme.SUCCESS}; border-radius: 7px; border: none;")
         elif status == "in_progress":
-            dot.setStyleSheet(f"background: {theme.ACCENT}; border-radius: 7px;")
+            dot.setStyleSheet(f"background: {theme.ACCENT}; border-radius: 7px; border: none;")
         else:
-            dot.setStyleSheet(f"background: {theme.TEXT_MUTED}; border-radius: 7px;")
+            dot.setStyleSheet(f"background: {theme.TEXT_MUTED}; border-radius: 7px; border: none;")
         layout.addWidget(dot)
 
         num_label = QLabel(str(index + 1))
         num_label.setFixedWidth(36)
         num_label.setStyleSheet(
-            f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_META}pt; background: transparent;"
+            f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_META}pt; background: transparent; border: none;"
         )
         layout.addWidget(num_label)
 
         title_text = chapter.title if chapter.title else f"Chapter {index + 1}"
         title = QLabel(title_text)
         title.setStyleSheet(
-            f"color: {theme.TEXT_PRIMARY}; font-size: {theme.FONT_BODY}pt; font-weight: bold; background: transparent;"
+            f"color: {theme.TEXT_PRIMARY}; font-size: {theme.FONT_BODY}pt; font-weight: bold; background: transparent; border: none;"
         )
         layout.addWidget(title, stretch=1)
 
         duration = _fmt_duration(chapter.end - chapter.start)
         dur_label = QLabel(duration)
         dur_label.setStyleSheet(
-            f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_META}pt; background: transparent;"
+            f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_META}pt; background: transparent; border: none;"
         )
         layout.addWidget(dur_label)
+
+    def set_focused(self, focused: bool) -> None:
+        border = theme.ACCENT if focused else "transparent"
+        self.setStyleSheet(
+            f"background: {theme.SURFACE}; border: 2px solid {border}; border-radius: 6px;"
+        )
 
 
 class ChapterSelectScreen(QWidget):
@@ -127,27 +135,37 @@ class ChapterSelectScreen(QWidget):
 
         root.addWidget(bar)
 
+        # All focus/selection rendering is done by ChapterItem.set_focused().
         self._list = QListWidget()
         self._list.setSpacing(2)
         self._list.setStyleSheet(f"""
+            QListWidget {{
+                background-color: {theme.BG};
+                outline: none;
+            }}
             QListWidget::item {{
                 padding: 0;
                 margin: 2px 0;
-                background-color: {theme.SURFACE};
-                border-radius: 6px;
-                border: 2px solid transparent;
+                background-color: transparent;
+                border: none;
             }}
             QListWidget::item:selected {{
-                background-color: {theme.SURFACE_HIGH};
-                border-color: {theme.ACCENT};
+                background-color: transparent;
             }}
             QListWidget::item:focus {{
-                border-color: {theme.ACCENT};
+                background-color: transparent;
                 outline: none;
             }}
         """)
+        self._list.currentRowChanged.connect(self._on_row_changed)
         self._list.itemActivated.connect(self._on_item_activated)
         root.addWidget(self._list)
+
+    def _on_row_changed(self, row: int) -> None:
+        for i in range(self._list.count()):
+            widget = self._list.itemWidget(self._list.item(i))
+            if isinstance(widget, ChapterItem):
+                widget.set_focused(i == row)
 
     def load(
         self,
@@ -176,7 +194,9 @@ class ChapterSelectScreen(QWidget):
             self._list.setItemWidget(item, ch_widget)
 
         if self._list.count():
-            self._list.setCurrentRow(self._find_resume_index(current_time, is_finished))
+            idx = self._find_resume_index(current_time, is_finished)
+            self._list.setCurrentRow(idx)
+            self._on_row_changed(idx)
             self._list.setFocus()
 
     def _find_resume_index(self, current_time: float, is_finished: bool) -> int:

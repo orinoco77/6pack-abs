@@ -229,7 +229,7 @@ def test_media_card_fixed_size(qtbot):
     from sixpack.ui import theme
     card = MediaCard(title="Test")
     qtbot.addWidget(card)
-    assert card.width() == theme.CARD_WIDTH
+    assert card.width() == theme.CARD_WIDTH + 2 * theme.FOCUS_BORDER
     assert card.height() == theme.CARD_HEIGHT
 
 
