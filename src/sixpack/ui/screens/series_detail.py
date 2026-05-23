@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
+from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -14,6 +15,7 @@ from PyQt6.QtWidgets import (
 
 from sixpack.api.models import MediaProgress, Series, SeriesBook
 from sixpack.ui import theme
+from sixpack.ui.cover_cache import CoverCache
 
 
 def _fmt_duration(seconds: float) -> str:
@@ -34,8 +36,17 @@ class EpisodeItem(QWidget):
 
     def _build_ui(self, book: SeriesBook, progress: MediaProgress | None) -> None:
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(16)
+        layout.setContentsMargins(12, 12, 16, 12)
+        layout.setSpacing(12)
+
+        # Cover art thumbnail
+        self._cover_label = QLabel()
+        self._cover_label.setFixedSize(44, 44)
+        self._cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._cover_label.setStyleSheet(
+            f"background-color: {theme.SURFACE_HIGH}; border-radius: 4px;"
+        )
+        layout.addWidget(self._cover_label)
 
         self._dot = QLabel()
         self._dot.setFixedSize(14, 14)
@@ -43,7 +54,7 @@ class EpisodeItem(QWidget):
 
         if book.sequence:
             seq_label = QLabel(book.sequence)
-            seq_label.setFixedWidth(40)
+            seq_label.setFixedWidth(32)
             seq_label.setStyleSheet(
                 f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_META}pt;"
             )
@@ -55,10 +66,27 @@ class EpisodeItem(QWidget):
         )
         layout.addWidget(title, stretch=1)
 
+        # Chapter count hint — shown only for box sets
+        chapter_count = len(book.media.chapters)
+        if chapter_count > 1:
+            ch_label = QLabel(f"{chapter_count} ch")
+            ch_label.setStyleSheet(
+                f"color: {theme.TEXT_MUTED}; font-size: {theme.FONT_META}pt;"
+            )
+            layout.addWidget(ch_label)
+
         self._duration_label = QLabel()
         layout.addWidget(self._duration_label)
 
         self.update_progress(progress)
+
+    def set_cover(self, pix: QPixmap) -> None:
+        scaled = pix.scaled(
+            44, 44,
+            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        self._cover_label.setPixmap(scaled)
 
     def update_progress(self, progress: MediaProgress | None) -> None:
         if progress and progress.is_finished:
@@ -91,16 +119,21 @@ class EpisodeItem(QWidget):
 class SeriesDetailScreen(QWidget):
     """
     Shows the episode list for a series. Emits play_requested(book, start_time)
-    when the user selects an episode, and back_requested() on Back.
+    for single-track books, chapters_requested(book) for box sets, and
+    back_requested() on Back.
     """
 
-    play_requested = pyqtSignal(object, float)  # SeriesBook, start_time
+    play_requested = pyqtSignal(object, float)   # SeriesBook, start_time
+    episode_activated = pyqtSignal(object)        # SeriesBook — fetch chapters then route
     back_requested = pyqtSignal()
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, cover_cache: CoverCache | None = None, parent=None) -> None:
         super().__init__(parent)
         self._books: list[SeriesBook] = []
         self._progress: dict[str, MediaProgress] = {}
+        self._cover_cache = cover_cache
+        self._server_url = ""
+        self._token = ""
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -108,7 +141,6 @@ class SeriesDetailScreen(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # Top bar
         bar = QWidget()
         bar.setFixedHeight(72)
         bar.setStyleSheet(f"background-color: {theme.SURFACE};")
@@ -143,8 +175,7 @@ class SeriesDetailScreen(QWidget):
 
         root.addWidget(bar)
 
-        # Episode list — padding: 0 because items use custom widgets (global stylesheet
-        # has padding: 14px which clips custom widgets to unusable height).
+        # padding: 0 — global QListWidget::item padding clips custom widgets
         self._list = QListWidget()
         self._list.setSpacing(2)
         self._list.setStyleSheet(f"""
@@ -167,17 +198,27 @@ class SeriesDetailScreen(QWidget):
         self._list.itemActivated.connect(self._on_item_activated)
         root.addWidget(self._list)
 
-    def show_loading(self, series: Series) -> None:
+    def show_loading(self, series: Series, server_url: str = "", token: str = "") -> None:
         """Display episodes immediately while progress is still being fetched."""
         self._books = series.sorted_books
         self._progress = {}
+        self._server_url = server_url
+        self._token = token
         self._title_label.setText(series.name)
         self._loading_label.show()
         self._populate_list()
 
-    def load(self, series: Series, progress: dict[str, MediaProgress]) -> None:
+    def load(
+        self,
+        series: Series,
+        progress: dict[str, MediaProgress],
+        server_url: str = "",
+        token: str = "",
+    ) -> None:
         self._books = series.sorted_books
         self._progress = progress
+        self._server_url = server_url
+        self._token = token
         self._title_label.setText(series.name)
         self._loading_label.hide()
         self._populate_list()
@@ -192,6 +233,9 @@ class SeriesDetailScreen(QWidget):
             item.setData(Qt.ItemDataRole.UserRole, book)
             self._list.addItem(item)
             self._list.setItemWidget(item, ep_widget)
+            if self._cover_cache and self._server_url:
+                cover_url = book.cover_url(self._server_url, self._token)
+                self._cover_cache.fetch(cover_url, self._token, ep_widget.set_cover)
         if self._list.count():
             self._list.setCurrentRow(self._find_resume_index())
             self._list.setFocus()
@@ -209,18 +253,15 @@ class SeriesDetailScreen(QWidget):
         self._list.setCurrentRow(self._find_resume_index())
 
     def _find_resume_index(self) -> int:
-        """Return the index of the first unfinished episode."""
         for i, book in enumerate(self._books):
             prog = self._progress.get(book.id)
-            if prog is None or (not prog.is_finished):
+            if prog is None or not prog.is_finished:
                 return i
         return 0
 
     def _on_item_activated(self, item: QListWidgetItem) -> None:
         book: SeriesBook = item.data(Qt.ItemDataRole.UserRole)
-        prog = self._progress.get(book.id)
-        start_time = prog.current_time if prog and not prog.is_finished else 0.0
-        self.play_requested.emit(book, start_time)
+        self.episode_activated.emit(book)
 
     def _on_play_all(self) -> None:
         if self._books:
