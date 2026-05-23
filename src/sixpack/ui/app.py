@@ -202,16 +202,27 @@ class MainWindow(QMainWindow):
 
     def _on_series_selected(self, series: Series) -> None:
         self._current_series = series
-        self._worker.run("series_detail", self._async_get_series_detail(series.id))
+        logger.debug("Series selected: %s (%d books)", series.name, series.book_count)
+        self._detail_screen.show_loading(series)
+        self._show_detail()
+        self._worker.run("series_detail", self._async_fetch_series_progress(series))
 
-    async def _async_get_series_detail(self, series_id: str):
+    async def _async_fetch_series_progress(self, series: Series):
+        sem = asyncio.Semaphore(10)
+
+        async def _fetch_one(client: ABSClient, book_id: str) -> tuple[str, MediaProgress | None]:
+            async with sem:
+                try:
+                    return book_id, await client.get_progress(book_id)
+                except Exception as exc:
+                    logger.warning("Progress fetch failed for %s: %s", book_id, exc)
+                    return book_id, None
+
         async with ABSClient(self._server_url, token=self._token) as client:
-            detail = await client.get_series_detail(series_id)
-            # Fetch progress for all books in parallel
-            progress_map: dict[str, MediaProgress | None] = {}
-            for book in detail.sorted_books:
-                progress_map[book.id] = await client.get_progress(book.id)
-            return (detail, progress_map)
+            pairs = await asyncio.gather(
+                *(_fetch_one(client, book.id) for book in series.sorted_books)
+            )
+        return (series, dict(pairs))
 
     # ------------------------------------------------------------------
     # Playback
@@ -307,10 +318,10 @@ class MainWindow(QMainWindow):
 
         elif tag == "series_detail":
             series, progress_map = result
-            self._current_series = series
-            clean_progress = {k: v for k, v in progress_map.items() if v is not None}
-            self._detail_screen.load(series, clean_progress)
-            self._show_detail()
+            logger.debug("Series detail loaded: %s (%d books)", series.name, series.book_count)
+            if self._current_series and series.id == self._current_series.id:
+                clean_progress = {k: v for k, v in progress_map.items() if v is not None}
+                self._detail_screen.update_progress(clean_progress)
 
         elif tag == "start_session":
             # result is a PlaybackSession — build URL and start playback
@@ -330,6 +341,9 @@ class MainWindow(QMainWindow):
             self._login_screen.show_error(f"Login failed: {message}")
         elif tag == "autologin":
             self._show_login()
+        elif tag == "series_detail":
+            if self._current_series:
+                self._detail_screen.update_progress({})
 
     # ------------------------------------------------------------------
     # Quit
