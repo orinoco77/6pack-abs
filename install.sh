@@ -22,24 +22,69 @@ die()   { echo -e "${RED}✗${NC} $*" >&2; exit 1; }
 install_system_deps() {
     if command -v apt-get &>/dev/null; then
         info "Checking system packages (apt)…"
-        # If any libmpv is already loadable by the dynamic linker, nothing to do.
-        # Note: grep -q exits early → SIGPIPE kills ldconfig → pipefail sees exit 141.
-        # Capture first, then grep to avoid the issue.
+
+        # ── libmpv: package name changed from libmpv1 → libmpv2 in Ubuntu 23.04+ ──
+        # Note: we capture apt-cache/ldconfig output before grepping throughout.
+        # grep -q exits on first match → SIGPIPE to the producer → pipefail
+        # sees the non-zero exit and treats the condition as false. Capturing
+        # into a variable sidesteps this.
         _ldconfig=$(ldconfig -p 2>/dev/null || true)
         if echo "$_ldconfig" | grep -q 'libmpv'; then
-            info "libmpv already present — skipping."
+            MPV_PKG=""   # already installed
         else
-            # Pick whichever package has an installable candidate.
-            # (libmpv2 in Ubuntu 23.04+/Debian 12+; libmpv1 on older releases)
-            if apt-cache policy libmpv2 2>/dev/null | grep -q 'Candidate: [^(]'; then
+            _pol_mpv2=$(apt-cache policy libmpv2 2>/dev/null || true)
+            _pol_mpv1=$(apt-cache policy libmpv1 2>/dev/null || true)
+            if echo "$_pol_mpv2" | grep -q 'Candidate: [^(]'; then
                 MPV_PKG="libmpv2"
-            elif apt-cache policy libmpv1 2>/dev/null | grep -q 'Candidate: [^(]'; then
+            elif echo "$_pol_mpv1" | grep -q 'Candidate: [^(]'; then
                 MPV_PKG="libmpv1"
             else
                 die "Cannot find libmpv1 or libmpv2 in apt. Install libmpv manually and retry."
             fi
-            info "Installing: $MPV_PKG"
-            sudo apt-get install -y "$MPV_PKG"
+        fi
+
+        # ── Qt6 XCB platform plugin runtime deps ─────────────────────────────────
+        # PyQt6 bundles Qt6 but the XCB plugin still links against these system libs.
+        # libxcb-util name changed: libxcb-util0 (older) → libxcb-util1 (Ubuntu 22.04+)
+        _pol_xcbutil=$(apt-cache policy libxcb-util1 2>/dev/null || true)
+        if echo "$_pol_xcbutil" | grep -q 'Candidate: [^(]'; then
+            XCBUTIL="libxcb-util1"
+        else
+            XCBUTIL="libxcb-util0"
+        fi
+        XCB_PKGS=(
+            libxcb-cursor0
+            libxcb-icccm4
+            libxcb-image0
+            libxcb-keysyms1
+            libxcb-randr0
+            libxcb-render0
+            libxcb-render-util0
+            libxcb-shape0
+            libxcb-shm0
+            libxcb-sync1
+            libxcb-xfixes0
+            libxcb-xkb1
+            "$XCBUTIL"
+            libx11-xcb1
+            libxkbcommon0
+            libxkbcommon-x11-0
+            libegl1
+            libgl1
+        )
+
+        # Collect only the packages that aren't already installed
+        MISSING=()
+        [[ -n "$MPV_PKG" ]] && MISSING+=("$MPV_PKG")
+        for pkg in "${XCB_PKGS[@]}"; do
+            dpkg -s "$pkg" &>/dev/null || MISSING+=("$pkg")
+        done
+
+        if [[ ${#MISSING[@]} -gt 0 ]]; then
+            info "Installing missing packages: ${MISSING[*]}"
+            sudo apt-get install -y "${MISSING[@]}"
+        else
+            info "All system packages already installed."
         fi
 
     elif command -v dnf &>/dev/null; then
