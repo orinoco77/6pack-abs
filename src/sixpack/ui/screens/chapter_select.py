@@ -191,6 +191,11 @@ class ChapterSelectScreen(QWidget):
         chapter: Chapter = item.data(Qt.ItemDataRole.UserRole)
         self.play_requested.emit(self._book, chapter.start)
 
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if self._list.count():
+            self._list.setFocus()
+
     def keyPressEvent(self, event) -> None:
         key = event.key()
         if key == Qt.Key.Key_Escape:

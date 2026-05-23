@@ -271,6 +271,11 @@ class SeriesDetailScreen(QWidget):
             start_time = prog.current_time if prog and not prog.is_finished else 0.0
             self.play_requested.emit(book, start_time)
 
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if self._list.count():
+            self._list.setFocus()
+
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key.Key_Escape:
             self.back_requested.emit()

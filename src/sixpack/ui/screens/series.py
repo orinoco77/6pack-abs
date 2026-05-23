@@ -127,6 +127,10 @@ class SeriesScreen(QWidget):
         if 0 <= index < len(self._series_list):
             self.series_selected.emit(self._series_list[index])
 
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._grid.setFocus()
+
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key.Key_Escape:
             self.back_requested.emit()
