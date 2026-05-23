@@ -21,6 +21,7 @@ from sixpack.ui.screens.series import SeriesScreen
 from sixpack.ui.screens.chapter_select import ChapterSelectScreen
 from sixpack.ui.screens.series_detail import SeriesDetailScreen
 from sixpack.ui.screens.player import PlayerScreen
+from sixpack.ui.screens.splash import SplashScreen
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +106,7 @@ class MainWindow(QMainWindow):
 
         self._cover_cache = CoverCache(parent=self)
 
+        self._splash_screen = SplashScreen()
         self._login_screen = LoginScreen()
         self._library_screen = LibraryScreen()
         self._series_screen = SeriesScreen(cover_cache=self._cover_cache)
@@ -116,6 +118,7 @@ class MainWindow(QMainWindow):
         else:
             self._player_screen = None  # type: ignore[assignment]
 
+        self._stack.addWidget(self._splash_screen)
         self._stack.addWidget(self._login_screen)
         self._stack.addWidget(self._library_screen)
         self._stack.addWidget(self._series_screen)
@@ -141,17 +144,22 @@ class MainWindow(QMainWindow):
         self._chapter_screen.back_requested.connect(self._show_detail)
 
         self._setup_quit_shortcut()
-        self._show_login()
+        self._show_splash()
 
     def _try_autologin(self) -> None:
         server = self._config.active_server
         if server and server.token:
             self._login_screen.set_prefill(server.url, server.username)
             self._do_connect_with_token(server.url, server.token)
+        else:
+            self._show_login()
 
     # ------------------------------------------------------------------
     # Screen navigation
     # ------------------------------------------------------------------
+
+    def _show_splash(self) -> None:
+        self._stack.setCurrentWidget(self._splash_screen)
 
     def _show_login(self) -> None:
         self._stack.setCurrentWidget(self._login_screen)
