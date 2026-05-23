@@ -19,6 +19,32 @@ from sixpack.ui.screens.series import SeriesScreen
 from sixpack.ui.screens.series_detail import SeriesDetailScreen
 
 
+# ---- SplashScreen ----
+
+def test_splash_screen_creates(qtbot):
+    from sixpack.ui.screens.splash import SplashScreen
+    from PyQt6.QtWidgets import QLabel
+    screen = SplashScreen()
+    qtbot.addWidget(screen)
+    labels = screen.findChildren(QLabel)
+    assert any("SixPack" in lbl.text() for lbl in labels)
+
+
+def test_splash_screen_set_status(qtbot):
+    from sixpack.ui.screens.splash import SplashScreen
+    screen = SplashScreen()
+    qtbot.addWidget(screen)
+    screen.set_status("Checking saved session…")
+    assert screen._status_label.text() == "Checking saved session…"
+
+
+def test_splash_screen_default_status(qtbot):
+    from sixpack.ui.screens.splash import SplashScreen
+    screen = SplashScreen()
+    qtbot.addWidget(screen)
+    assert screen._status_label.text() == "Connecting…"
+
+
 # ---- LoginScreen ----
 
 def test_login_screen_creates(qtbot):
