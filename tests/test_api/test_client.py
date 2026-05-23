@@ -190,6 +190,22 @@ async def test_get_series(server_url, auth_token):
 
 
 @pytest.mark.asyncio
+async def test_get_series_includes_books(server_url, auth_token):
+    """The list endpoint often returns full book data — verify it is parsed."""
+    payload = _series_payload("s1")
+    payload["books"] = [_book_payload("b1"), _book_payload("b2")]
+    async with respx.mock(base_url=server_url) as mock:
+        mock.get("/api/libraries/lib1/series").mock(
+            return_value=httpx.Response(200, json={"results": [payload]})
+        )
+        async with ABSClient(server_url, token=auth_token) as client:
+            series = await client.get_series("lib1")
+    assert len(series) == 1
+    assert series[0].book_count == 2
+    assert series[0].books[0].title == "Episode 1"
+
+
+@pytest.mark.asyncio
 async def test_get_series_detail(server_url, auth_token):
     payload = _series_payload("s1")
     payload["books"] = [_book_payload()]

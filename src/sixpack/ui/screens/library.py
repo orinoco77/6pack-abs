@@ -53,7 +53,7 @@ class LibraryScreen(QWidget):
         self._list.clear()
         for lib in libraries:
             item = QListWidgetItem()
-            item.setText(f"  {lib.name}  ({lib.media_type})")
+            item.setText(f"  {lib.name}")
             item.setData(Qt.ItemDataRole.UserRole, lib)
             self._list.addItem(item)
         if self._list.count():

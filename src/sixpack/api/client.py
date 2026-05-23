@@ -1,9 +1,12 @@
 """Audiobookshelf REST API client."""
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 from .models import (
     Library,
@@ -115,7 +118,13 @@ class ABSClient:
         )
         self._raise_for_status(response)
         data = response.json()
-        return [Series.model_validate(s) for s in data.get("results", [])]
+        series_list = [Series.model_validate(s) for s in data.get("results", [])]
+        if series_list:
+            logger.debug(
+                "get_series: %d series returned; first series '%s' has %d books",
+                len(series_list), series_list[0].name, len(series_list[0].books),
+            )
+        return series_list
 
     async def get_series_detail(self, series_id: str) -> Series:
         response = await self._http.get(

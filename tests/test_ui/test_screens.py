@@ -272,6 +272,55 @@ def test_detail_resume_index_all_finished(qtbot):
     assert screen._find_resume_index() == 0  # all done → restart from first
 
 
+def test_detail_show_loading_renders_episodes(qtbot):
+    """show_loading() renders episodes immediately with grey dots."""
+    screen = SeriesDetailScreen()
+    qtbot.addWidget(screen)
+    screen.show_loading(_make_series())
+    assert screen._list.count() == 2
+    assert not screen._loading_label.isHidden()
+
+
+def test_detail_update_progress_hides_loading(qtbot):
+    screen = SeriesDetailScreen()
+    qtbot.addWidget(screen)
+    screen.show_loading(_make_series())
+    assert not screen._loading_label.isHidden()
+    screen.update_progress({})
+    assert screen._loading_label.isHidden()
+
+
+def test_detail_update_progress_dot_colour(qtbot):
+    """After update_progress, finished episode dot changes to SUCCESS colour."""
+    from sixpack.ui import theme
+    screen = SeriesDetailScreen()
+    qtbot.addWidget(screen)
+    screen.show_loading(_make_series())
+
+    progress = {"b1": MediaProgress(libraryItemId="b1", isFinished=True)}
+    screen.update_progress(progress)
+
+    item = screen._list.item(0)
+    widget = screen._list.itemWidget(item)
+    assert theme.SUCCESS in widget._dot.styleSheet()
+
+
+def test_detail_episode_item_update_progress(qtbot):
+    media = LibraryItemMedia(metadata={"title": "Ep"}, duration=3600.0)
+    book = SeriesBook(id="b1", libraryId="lib1", media=media, sequence="1")
+    from sixpack.ui.screens.series_detail import EpisodeItem
+    from sixpack.ui import theme
+    widget = EpisodeItem(book, None)
+    qtbot.addWidget(widget)
+
+    assert theme.TEXT_MUTED in widget._dot.styleSheet()
+
+    prog = MediaProgress(libraryItemId="b1", currentTime=1800.0, duration=3600.0)
+    widget.update_progress(prog)
+    assert theme.ACCENT in widget._dot.styleSheet()
+    assert "30m" in widget._duration_label.text()
+
+
 # ---- Config ----
 
 def test_config_save_load(tmp_path, monkeypatch):
