@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <rect width="128" height="128" rx="24" fill="#1c1c1c"/>
+  <text x="64" y="52" font-family="sans-serif" font-size="52" font-weight="bold"
+        fill="#4a9eff" text-anchor="middle" dominant-baseline="middle">6P</text>
+  <!-- Soundwave bars -->
+  <rect x="24" y="76" width="10" height="20" rx="3" fill="#4a9eff" opacity="0.7"/>
+  <rect x="38" y="68" width="10" height="28" rx="3" fill="#4a9eff" opacity="0.85"/>
+  <rect x="52" y="72" width="10" height="24" rx="3" fill="#4a9eff"/>
+  <rect x="66" y="64" width="10" height="32" rx="3" fill="#4a9eff" opacity="0.85"/>
+  <rect x="80" y="70" width="10" height="26" rx="3" fill="#4a9eff" opacity="0.7"/>
+  <rect x="94" y="78" width="10" height="18" rx="3" fill="#4a9eff" opacity="0.55"/>
+</svg>
