@@ -1,4 +1,4 @@
-"""Series grid screen — browse all series in a library."""
+"""Playlists grid screen — browse all playlists."""
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint
@@ -11,26 +11,26 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from sixpack.api.models import Library, Series
+from sixpack.api.models import Library, Playlist
 from sixpack.ui import theme
 from sixpack.ui.cover_cache import CoverCache
 from sixpack.ui.widgets.focus_grid import FocusGrid
 from sixpack.ui.widgets.media_card import MediaCard
 
 
-class SeriesScreen(QWidget):
-    """Grid of series cards for a given library. Emits series_selected(series)."""
+class PlaylistsScreen(QWidget):
+    """Grid of playlist cards. Emits playlist_selected(playlist)."""
 
-    series_selected = pyqtSignal(object)         # Series
+    playlist_selected = pyqtSignal(object)         # Playlist
     back_requested = pyqtSignal()
     library_switch_requested = pyqtSignal(object)  # Library
-    view_switch_requested = pyqtSignal(str)      # "series" or "playlists"
+    view_switch_requested = pyqtSignal(str)       # "series" or "playlists"
 
     def __init__(self, cover_cache: CoverCache | None = None, parent=None) -> None:
         super().__init__(parent)
         self._library: Library | None = None
         self._all_libraries: list[Library] = []
-        self._series_list: list[Series] = []
+        self._playlists: list[Playlist] = []
         self._server_url = ""
         self._token = ""
         self._cover_cache = cover_cache
@@ -41,7 +41,7 @@ class SeriesScreen(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # Top bar
+        # Top bar — Kodi-style
         bar = QWidget()
         bar.setFixedHeight(72)
         bar.setStyleSheet(f"background-color: {theme.SURFACE};")
@@ -61,7 +61,7 @@ class SeriesScreen(QWidget):
         bar_layout.addWidget(self._library_btn)
 
         # View switcher — Kodi-style
-        self._view_switcher = QPushButton("Series  ▾")
+        self._view_switcher = QPushButton("Playlists  ▾")
         self._view_switcher.setFixedWidth(140)
         self._view_switcher.setStyleSheet(f"font-size: {theme.FONT_BAR_BTN}pt;")
         self._view_switcher.clicked.connect(self._show_view_menu)
@@ -81,32 +81,33 @@ class SeriesScreen(QWidget):
 
     def load(
         self,
-        library: Library,
-        series_list: list[Series],
+        library: Library | None,
+        playlists: list[Playlist],
         server_url: str,
         token: str,
         all_libraries: list[Library] | None = None,
     ) -> None:
         self._library = library
-        self._series_list = series_list
+        self._playlists = playlists
         self._server_url = server_url
         self._token = token
 
         if all_libraries is not None:
             self._all_libraries = all_libraries
 
-        self._library_btn.setText(f"{library.name}  ▾")
-        self._count_label.setText(f"{len(series_list)} series")
+        lib_name = library.name if library else "All Libraries"
+        self._library_btn.setText(f"{lib_name}  ▾")
+        self._count_label.setText(f"{len(playlists)} playlist{'s' if len(playlists) != 1 else ''}")
 
         self._grid.clear()
-        for series in series_list:
+        for playlist in playlists:
             card = MediaCard(
-                title=series.name,
-                subtitle=f"{series.book_count} episode{'s' if series.book_count != 1 else ''}",
+                title=playlist.name,
+                subtitle=f"{playlist.item_count} item{'s' if playlist.item_count != 1 else ''}",
             )
             self._grid.add_item(card)
             if self._cover_cache is not None:
-                cover_url = series.cover_url(server_url, token)
+                cover_url = playlist.cover_url(server_url, token)
                 if cover_url:
                     self._cover_cache.fetch(cover_url, token, card.set_cover)
 
@@ -114,6 +115,12 @@ class SeriesScreen(QWidget):
 
     def _make_library_menu(self) -> QMenu:
         menu = QMenu(self)
+        # Add "All Libraries" option
+        action_all = menu.addAction("All Libraries")
+        action_all.setCheckable(True)
+        action_all.setChecked(self._library is None)
+        action_all.setData(None)
+        menu.addSeparator()
         for lib in self._all_libraries:
             action = menu.addAction(lib.name)
             action.setCheckable(True)
@@ -129,29 +136,31 @@ class SeriesScreen(QWidget):
 
     def _on_menu_action(self, action) -> None:
         lib: Library | None = action.data()
-        if lib is not None and (self._library is None or lib.id != self._library.id):
+        if (lib is None and self._library is not None) or (
+            lib is not None and (self._library is None or lib.id != self._library.id)
+        ):
             self.library_switch_requested.emit(lib)
 
     def _show_view_menu(self) -> None:
         menu = QMenu(self)
         action_series = menu.addAction("Series")
         action_series.setCheckable(True)
-        action_series.setChecked(True)
+        action_series.setChecked(False)
         action_playlists = menu.addAction("Playlists")
         action_playlists.setCheckable(True)
-        action_playlists.setChecked(False)
+        action_playlists.setChecked(True)
         menu.triggered.connect(self._on_view_menu_action)
         pos = self._view_switcher.mapToGlobal(QPoint(0, self._view_switcher.height()))
         menu.exec(pos)
 
     def _on_view_menu_action(self, action) -> None:
         view_name = action.text().lower()
-        if view_name == "playlists":
-            self.view_switch_requested.emit("playlists")
+        if view_name == "series":
+            self.view_switch_requested.emit("series")
 
     def _on_item_activated(self, index: int) -> None:
-        if 0 <= index < len(self._series_list):
-            self.series_selected.emit(self._series_list[index])
+        if 0 <= index < len(self._playlists):
+            self.playlist_selected.emit(self._playlists[index])
 
     def showEvent(self, event) -> None:
         super().showEvent(event)

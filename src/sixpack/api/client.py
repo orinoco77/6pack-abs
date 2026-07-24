@@ -14,6 +14,7 @@ from .models import (
     LoginResponse,
     MediaProgress,
     PlaybackSession,
+    Playlist,
     Series,
     User,
 )
@@ -133,6 +134,37 @@ class ABSClient:
         )
         self._raise_for_status(response)
         return Series.model_validate(response.json())
+
+    # ------------------------------------------------------------------
+    # Playlists
+    # ------------------------------------------------------------------
+
+    async def get_playlists(
+        self,
+        library_id: str | None = None,
+        limit: int = 100,
+        page: int = 0,
+    ) -> list[Playlist]:
+        """Fetch playlists. If library_id is provided, filters to that library."""
+        params: dict[str, Any] = {"limit": limit, "page": page}
+        if library_id:
+            params["library"] = library_id
+        response = await self._http.get("/api/playlists", params=params)
+        self._raise_for_status(response)
+        data = response.json()
+        playlists = [Playlist.model_validate(p) for p in data.get("results", [])]
+        if playlists:
+            logger.debug(
+                "get_playlists: %d playlists returned; first playlist '%s' has %d items",
+                len(playlists), playlists[0].name, len(playlists[0].items),
+            )
+        return playlists
+
+    async def get_playlist_detail(self, playlist_id: str) -> Playlist:
+        """Fetch full playlist details including all items."""
+        response = await self._http.get(f"/api/playlists/{playlist_id}")
+        self._raise_for_status(response)
+        return Playlist.model_validate(response.json())
 
     # ------------------------------------------------------------------
     # Library Items

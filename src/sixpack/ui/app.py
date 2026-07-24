@@ -10,7 +10,7 @@ from PyQt6.QtGui import QKeyEvent, QKeySequence, QShortcut
 from PyQt6.QtWidgets import QMainWindow, QStackedWidget, QApplication
 
 from sixpack.api.client import ABSClient, AuthenticationError, APIError
-from sixpack.api.models import Library, Series, SeriesBook, MediaProgress
+from sixpack.api.models import Library, Series, SeriesBook, MediaProgress, Playlist, PlaylistItem
 from sixpack.config import AppConfig, ServerConfig
 from sixpack.player.player import AudioPlayer, PlayerError
 from sixpack.ui import theme
@@ -18,6 +18,8 @@ from sixpack.ui.cover_cache import CoverCache
 from sixpack.ui.screens.login import LoginScreen
 from sixpack.ui.screens.library import LibraryScreen
 from sixpack.ui.screens.series import SeriesScreen
+from sixpack.ui.screens.playlists import PlaylistsScreen
+from sixpack.ui.screens.playlist_detail import PlaylistDetailScreen
 from sixpack.ui.screens.chapter_select import ChapterSelectScreen
 from sixpack.ui.screens.series_detail import SeriesDetailScreen
 from sixpack.ui.screens.player import PlayerScreen
@@ -69,7 +71,9 @@ class MainWindow(QMainWindow):
         self._server_url = ""
         self._token = ""
         self._current_series: Series | None = None
+        self._current_playlist: Playlist | None = None
         self._pending_book: SeriesBook | None = None
+        self._pending_playlist_item: PlaylistItem | None = None
         self._libraries: list[Library] = []
 
         self._init_player()
@@ -110,7 +114,9 @@ class MainWindow(QMainWindow):
         self._login_screen = LoginScreen()
         self._library_screen = LibraryScreen()
         self._series_screen = SeriesScreen(cover_cache=self._cover_cache)
+        self._playlists_screen = PlaylistsScreen(cover_cache=self._cover_cache)
         self._detail_screen = SeriesDetailScreen(cover_cache=self._cover_cache)
+        self._playlist_detail_screen = PlaylistDetailScreen(cover_cache=self._cover_cache)
         self._chapter_screen = ChapterSelectScreen(cover_cache=self._cover_cache)
 
         if self._player:
@@ -122,7 +128,9 @@ class MainWindow(QMainWindow):
         self._stack.addWidget(self._login_screen)
         self._stack.addWidget(self._library_screen)
         self._stack.addWidget(self._series_screen)
+        self._stack.addWidget(self._playlists_screen)
         self._stack.addWidget(self._detail_screen)
+        self._stack.addWidget(self._playlist_detail_screen)
         self._stack.addWidget(self._chapter_screen)
 
         if self._player_screen:
@@ -137,10 +145,19 @@ class MainWindow(QMainWindow):
         self._series_screen.series_selected.connect(self._on_series_selected)
         self._series_screen.back_requested.connect(self._show_libraries)
         self._series_screen.library_switch_requested.connect(self._on_library_selected)
+        self._series_screen.view_switch_requested.connect(self._on_view_switch_requested)
+        self._playlists_screen.playlist_selected.connect(self._on_playlist_selected)
+        self._playlists_screen.back_requested.connect(self._show_libraries)
+        self._playlists_screen.library_switch_requested.connect(self._on_playlist_library_selected)
+        self._playlists_screen.view_switch_requested.connect(self._on_view_switch_requested)
         self._detail_screen.play_requested.connect(self._on_play_requested)
         self._detail_screen.episode_activated.connect(self._on_episode_activated)
         self._detail_screen.back_requested.connect(self._show_series)
+        self._playlist_detail_screen.play_requested.connect(self._on_playlist_item_play_requested)
+        self._playlist_detail_screen.item_activated.connect(self._on_playlist_item_activated)
+        self._playlist_detail_screen.back_requested.connect(self._show_playlists)
         self._chapter_screen.play_requested.connect(self._on_play_requested)
+        self._chapter_screen.playlist_item_play_requested.connect(self._on_playlist_item_play_requested)
         self._chapter_screen.back_requested.connect(self._show_detail)
 
         self._setup_quit_shortcut()
@@ -170,8 +187,26 @@ class MainWindow(QMainWindow):
     def _show_series(self) -> None:
         self._stack.setCurrentWidget(self._series_screen)
 
+    def _show_playlists(self) -> None:
+        self._stack.setCurrentWidget(self._playlists_screen)
+
     def _show_detail(self) -> None:
         self._stack.setCurrentWidget(self._detail_screen)
+
+    def _show_playlist_detail(self) -> None:
+        self._stack.setCurrentWidget(self._playlist_detail_screen)
+
+    def _on_view_switch_requested(self, view_name: str) -> None:
+        """Handle switching between Series and Playlists views."""
+        if view_name == "playlists":
+            # Switch to playlists view for current library
+            lib = getattr(self, "_current_library", None)
+            self._worker.run("playlists", self._async_get_playlists(lib.id if lib else None))
+        elif view_name == "series":
+            # Switch back to series view
+            lib = getattr(self, "_current_library", None)
+            if lib:
+                self._worker.run("series_list", self._async_get_series(lib.id))
 
     # ------------------------------------------------------------------
     # Login / auth
@@ -237,6 +272,70 @@ class MainWindow(QMainWindow):
                 *(_fetch_one(client, book.id) for book in series.sorted_books)
             )
         return (series, dict(pairs))
+
+    # ------------------------------------------------------------------
+    # Playlists
+    # ------------------------------------------------------------------
+
+    def _on_playlist_library_selected(self, library: Library | None) -> None:
+        """Switch library for playlists view (None = all libraries)."""
+        self._current_library = library
+        if library:
+            server = self._config.active_server
+            if server and server.last_library_id != library.id:
+                server.last_library_id = library.id
+                self._config.save()
+        self._worker.run("playlists", self._async_get_playlists(library.id if library else None))
+
+    async def _async_get_playlists(self, library_id: str | None):
+        async with ABSClient(self._server_url, token=self._token) as client:
+            return await client.get_playlists(library_id)
+
+    def _on_playlist_selected(self, playlist: Playlist) -> None:
+        self._current_playlist = playlist
+        logger.debug("Playlist selected: %s (%d items)", playlist.name, playlist.item_count)
+        self._playlist_detail_screen.show_loading(playlist, self._server_url, self._token)
+        self._show_playlist_detail()
+        self._worker.run("playlist_detail", self._async_fetch_playlist_progress(playlist))
+
+    async def _async_fetch_playlist_progress(self, playlist: Playlist):
+        sem = asyncio.Semaphore(10)
+
+        async def _fetch_one(client: ABSClient, item_id: str) -> tuple[str, MediaProgress | None]:
+            async with sem:
+                try:
+                    return item_id, await client.get_progress(item_id)
+                except Exception as exc:
+                    logger.warning("Progress fetch failed for %s: %s", item_id, exc)
+                    return item_id, None
+
+        async with ABSClient(self._server_url, token=self._token) as client:
+            pairs = await asyncio.gather(
+                *(_fetch_one(client, item.library_item_id) for item in playlist.items)
+            )
+        return (playlist, dict(pairs))
+
+    def _on_playlist_item_activated(self, item: PlaylistItem) -> None:
+        self._pending_playlist_item = item
+        self._worker.run("playlist_item_chapters", self._async_get_book_chapters(item.library_item_id))
+
+    def _on_playlist_item_play_requested(self, item: PlaylistItem, start_time: float) -> None:
+        if not self._player or not self._player_screen:
+            return
+        self._current_playlist_item = item
+        self._current_start_time = start_time
+        playlist = self._current_playlist
+        if playlist is None:
+            return
+        # Convert playlist items to a format the player can use
+        # We'll create a simple series-like structure for the player
+        self._player_screen.play_playlist_item(
+            item, start_time, playlist, playlist.items,
+            self._server_url, self._token,
+        )
+        self._worker.run("start_session", self._async_start_session(item.library_item_id, start_time))
+        self._stack.setCurrentWidget(self._player_screen)
+        self._player_screen.setFocus()
 
     # ------------------------------------------------------------------
     # Chapter selection
@@ -342,6 +441,20 @@ class MainWindow(QMainWindow):
                 )
                 self._show_series()
 
+        elif tag == "playlists":
+            self._playlists_screen.load(
+                getattr(self, "_current_library", None), result, self._server_url, self._token,
+                all_libraries=self._libraries,
+            )
+            self._show_playlists()
+
+        elif tag == "playlist_detail":
+            playlist, progress_map = result
+            logger.debug("Playlist detail loaded: %s (%d items)", playlist.name, playlist.item_count)
+            if self._current_playlist and playlist.id == self._current_playlist.id:
+                clean_progress = {k: v for k, v in progress_map.items() if v is not None}
+                self._playlist_detail_screen.update_progress(clean_progress)
+
         elif tag == "series_detail":
             series, progress_map = result
             logger.debug("Series detail loaded: %s (%d books)", series.name, series.book_count)
@@ -363,6 +476,21 @@ class MainWindow(QMainWindow):
                 prog = self._detail_screen._progress.get(book.id)
                 start_time = prog.current_time if prog and not prog.is_finished else 0.0
                 self._on_play_requested(book, start_time)
+
+        elif tag == "playlist_item_chapters":
+            library_item = result
+            item = self._pending_playlist_item
+            if item is None:
+                return
+            chapters = library_item.media.chapters
+            if len(chapters) > 1:
+                prog = self._playlist_detail_screen._progress.get(item.library_item_id)
+                self._chapter_screen.load_from_playlist_item(item, chapters, prog, self._server_url, self._token)
+                self._stack.setCurrentWidget(self._chapter_screen)
+            else:
+                prog = self._playlist_detail_screen._progress.get(item.library_item_id)
+                start_time = prog.current_time if prog and not prog.is_finished else 0.0
+                self._on_playlist_item_play_requested(item, start_time)
 
         elif tag == "start_session":
             # result is a PlaybackSession — build URL and start playback
@@ -388,9 +516,18 @@ class MainWindow(QMainWindow):
                 prog = self._detail_screen._progress.get(book.id)
                 start_time = prog.current_time if prog and not prog.is_finished else 0.0
                 self._on_play_requested(book, start_time)
+        elif tag == "playlist_item_chapters":
+            item = self._pending_playlist_item
+            if item:
+                prog = self._playlist_detail_screen._progress.get(item.library_item_id)
+                start_time = prog.current_time if prog and not prog.is_finished else 0.0
+                self._on_playlist_item_play_requested(item, start_time)
         elif tag == "series_detail":
             if self._current_series:
                 self._detail_screen.update_progress({})
+        elif tag == "playlist_detail":
+            if self._current_playlist:
+                self._playlist_detail_screen.update_progress({})
 
     # ------------------------------------------------------------------
     # Quit

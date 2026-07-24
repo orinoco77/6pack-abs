@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from sixpack.api.models import MediaProgress, Series, SeriesBook
+from sixpack.api.models import MediaProgress, Series, SeriesBook, Playlist, PlaylistItem
 from sixpack.player.player import AudioPlayer
 from sixpack.ui import theme
 from sixpack.ui.cover_cache import CoverCache
@@ -54,6 +54,9 @@ class PlayerScreen(QWidget):
         self._current_book: SeriesBook | None = None
         self._series: Series | None = None
         self._series_books: list[SeriesBook] = []
+        self._current_playlist_item: PlaylistItem | None = None
+        self._playlist: Playlist | None = None
+        self._playlist_items: list[PlaylistItem] = []
         self._current_index = 0
         self._duration = 0.0
         self._position = 0.0
@@ -218,6 +221,35 @@ class PlayerScreen(QWidget):
 
         # Fetch cover (via cache if available)
         cover_url = book.cover_url(server_url, token)
+        if self._cover_cache is not None:
+            self._cover_cache.fetch(cover_url, token, self._set_cover_pixmap)
+
+        self._server_url = server_url
+        self._token = token
+        self._sync_timer.start()
+
+    def play_playlist_item(
+        self,
+        item: PlaylistItem,
+        start_time: float,
+        playlist: Playlist,
+        items: list[PlaylistItem],
+        server_url: str,
+        token: str,
+    ) -> None:
+        """Play an item from a playlist (similar to play_book but for playlists)."""
+        self._current_playlist_item = item
+        self._playlist = playlist
+        self._playlist_items = items
+        self._current_index = items.index(item) if item in items else 0
+        self._item_id = item.library_item_id
+
+        self._title_label.setText(item.title)
+        self._series_label.setText(playlist.name)
+        self._episode_label.setText(f"Item {self._current_index + 1} of {len(items)}")
+
+        # Fetch cover (via cache if available)
+        cover_url = item.cover_url(server_url, token)
         if self._cover_cache is not None:
             self._cover_cache.fetch(cover_url, token, self._set_cover_pixmap)
 

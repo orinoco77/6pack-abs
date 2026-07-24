@@ -130,6 +130,58 @@ class Series(BaseModel):
         return self.sorted_books[0].cover_url(server_url, token)
 
 
+class PlaylistItem(BaseModel):
+    """A library item as it appears inside a playlist."""
+
+    id: str
+    library_item_id: str = Field(alias="libraryItemId")
+    media_type: str = Field("book", alias="mediaType")
+    media: LibraryItemMedia
+    added_at: int | None = Field(None, alias="addedAt")
+
+    model_config = {"populate_by_name": True, "extra": "allow"}
+
+    @property
+    def title(self) -> str:
+        return self.media.title
+
+    @property
+    def duration(self) -> float:
+        return self.media.duration or 0.0
+
+    def cover_url(self, server_url: str, token: str) -> str:
+        return f"{server_url}/api/items/{self.library_item_id}/cover?token={token}"
+
+
+class Playlist(BaseModel):
+    """A user-created playlist of audiobooks/podcasts."""
+
+    id: str
+    name: str
+    description: str | None = None
+    library_id: str = Field("", alias="libraryId")
+    user_id: str = Field("", alias="userId")
+    items: list[PlaylistItem] = Field(default_factory=list)
+    created_at: int | None = Field(None, alias="createdAt")
+    updated_at: int | None = Field(None, alias="updatedAt")
+
+    model_config = {"populate_by_name": True}
+
+    @property
+    def item_count(self) -> int:
+        return len(self.items)
+
+    @property
+    def total_duration(self) -> float:
+        return sum(item.duration for item in self.items)
+
+    def cover_url(self, server_url: str, token: str) -> str | None:
+        """Return cover of first item, or None if empty."""
+        if not self.items:
+            return None
+        return self.items[0].cover_url(server_url, token)
+
+
 class Library(BaseModel):
     id: str
     name: str
