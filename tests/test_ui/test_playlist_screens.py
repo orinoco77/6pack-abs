@@ -6,6 +6,7 @@ from PyQt6.QtCore import Qt
 
 from sixpack.api.models import (
     Library,
+    LibraryItem,
     LibraryItemMedia,
     MediaProgress,
     Playlist,
@@ -17,11 +18,20 @@ from sixpack.ui.screens.playlist_detail import PlaylistDetailScreen
 
 # ---- Fixtures ----
 
+def _make_item(library_item_id, title, duration):
+    """Build a PlaylistItem with the real nested ``libraryItem`` shape."""
+    library_item = LibraryItem(
+        id=library_item_id,
+        libraryId="lib1",
+        mediaType="book",
+        media=LibraryItemMedia(metadata={"title": title}, duration=duration),
+    )
+    return PlaylistItem(libraryItemId=library_item_id, libraryItem=library_item)
+
+
 def _make_playlists():
-    media1 = LibraryItemMedia(metadata={"title": "Book 1"}, duration=1800.0)
-    media2 = LibraryItemMedia(metadata={"title": "Book 2"}, duration=3600.0)
-    item1 = PlaylistItem(id="pli1", libraryItemId="li1", media=media1)
-    item2 = PlaylistItem(id="pli2", libraryItemId="li2", media=media2)
+    item1 = _make_item("li1", "Book 1", 1800.0)
+    item2 = _make_item("li2", "Book 2", 3600.0)
     return [
         Playlist(id="p1", name="Favorites", items=[item1]),
         Playlist(id="p2", name="To Read", items=[item1, item2]),
@@ -142,10 +152,8 @@ def test_playlists_screen_view_switch_emits(qtbot):
 # ---- PlaylistDetailScreen ----
 
 def _make_playlist():
-    media1 = LibraryItemMedia(metadata={"title": "Item 1"}, duration=1800.0)
-    media2 = LibraryItemMedia(metadata={"title": "Item 2"}, duration=3600.0)
-    item1 = PlaylistItem(id="pli1", libraryItemId="li1", media=media1)
-    item2 = PlaylistItem(id="pli2", libraryItemId="li2", media=media2)
+    item1 = _make_item("li1", "Item 1", 1800.0)
+    item2 = _make_item("li2", "Item 2", 3600.0)
     return Playlist(id="p1", name="My Playlist", items=[item1, item2])
 
 
@@ -188,7 +196,7 @@ def test_playlist_detail_screen_item_emits_activated(qtbot):
     with qtbot.waitSignal(screen.item_activated, timeout=1000) as blocker:
         screen._list.itemActivated.emit(screen._list.item(0))
 
-    assert blocker.args[0].id == "pli1"
+    assert blocker.args[0].library_item_id == "li1"
 
 
 def test_playlist_detail_screen_play_all(qtbot):
@@ -262,8 +270,7 @@ def test_playlist_item_widget_update_progress(qtbot):
     from sixpack.ui.screens.playlist_detail import PlaylistItemWidget
     from sixpack.ui import theme
 
-    media = LibraryItemMedia(metadata={"title": "Item"}, duration=3600.0)
-    item = PlaylistItem(id="pli1", libraryItemId="li1", media=media)
+    item = _make_item("li1", "Item", 3600.0)
     widget = PlaylistItemWidget(item, None)
     qtbot.addWidget(widget)
 

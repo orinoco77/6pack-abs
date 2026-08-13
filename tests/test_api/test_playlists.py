@@ -5,28 +5,37 @@ import pytest
 import respx
 import httpx
 
-from sixpack.api.models import Playlist, PlaylistItem, LibraryItemMedia
+from sixpack.api.models import Playlist, PlaylistItem, LibraryItem, LibraryItemMedia
 from sixpack.api.client import ABSClient
+
+
+def _make_item(library_item_id="li1", title="Test Book", duration=3600.0, library_id="lib1"):
+    """Build a PlaylistItem matching the real Audiobookshelf shape.
+
+    Playlist entries embed the full library item under ``libraryItem``; ``media``
+    is nested inside that, not on the entry itself.
+    """
+    library_item = LibraryItem(
+        id=library_item_id,
+        libraryId=library_id,
+        mediaType="book",
+        media=LibraryItemMedia(metadata={"title": title}, duration=duration),
+    )
+    return PlaylistItem(libraryItemId=library_item_id, libraryItem=library_item)
 
 
 # ---- PlaylistItem ----
 
 def test_playlist_item_fields():
-    media = LibraryItemMedia(metadata={"title": "Test Book"}, duration=3600.0)
-    item = PlaylistItem(
-        id="pi1",
-        libraryItemId="li1",  # Use alias
-        media=media,
-    )
-    assert item.id == "pi1"
+    item = _make_item(library_item_id="li1", title="Test Book", duration=3600.0)
     assert item.library_item_id == "li1"
     assert item.title == "Test Book"
     assert item.duration == 3600.0
+    assert item.media.title == "Test Book"
 
 
 def test_playlist_item_cover_url(server_url, auth_token):
-    media = LibraryItemMedia()
-    item = PlaylistItem(id="pi1", libraryItemId="li1", media=media)
+    item = _make_item(library_item_id="li1")
     url = item.cover_url(server_url, auth_token)
     assert url == f"{server_url}/api/items/li1/cover?token={auth_token}"
 
@@ -34,8 +43,7 @@ def test_playlist_item_cover_url(server_url, auth_token):
 # ---- Playlist ----
 
 def test_playlist_fields():
-    media = LibraryItemMedia(metadata={"title": "Book 1"}, duration=1800.0)
-    item = PlaylistItem(id="pi1", libraryItemId="li1", media=media)
+    item = _make_item(library_item_id="li1", title="Book 1", duration=1800.0)
     playlist = Playlist(
         id="p1",
         name="My Favorites",
@@ -58,17 +66,14 @@ def test_playlist_empty():
 
 
 def test_playlist_total_duration():
-    media1 = LibraryItemMedia(duration=1800.0)
-    media2 = LibraryItemMedia(duration=2400.0)
-    item1 = PlaylistItem(id="pi1", libraryItemId="li1", media=media1)
-    item2 = PlaylistItem(id="pi2", libraryItemId="li2", media=media2)
+    item1 = _make_item(library_item_id="li1", duration=1800.0)
+    item2 = _make_item(library_item_id="li2", duration=2400.0)
     playlist = Playlist(id="p1", name="Test", items=[item1, item2])
     assert playlist.total_duration == 4200.0
 
 
 def test_playlist_cover_url(server_url, auth_token):
-    media = LibraryItemMedia()
-    item = PlaylistItem(id="pi1", libraryItemId="li1", media=media)
+    item = _make_item(library_item_id="li1")
     playlist = Playlist(id="p1", name="Test", items=[item])
     url = playlist.cover_url(server_url, auth_token)
     assert url is not None
@@ -85,34 +90,38 @@ def test_playlist_from_api_response():
         "userId": "u1",
         "items": [
             {
-                "id": "pli_1",
                 "libraryItemId": "li_1",
-                "mediaType": "book",
-                "media": {
-                    "metadata": {"title": "Dune", "authorName": "Frank Herbert"},
-                    "duration": 12600.0,
-                    "chapters": [],
-                    "audioFiles": [],
-                    "tracks": [],
+                "libraryItem": {
+                    "id": "li_1",
+                    "libraryId": "lib1",
+                    "mediaType": "book",
+                    "media": {
+                        "metadata": {"title": "Dune", "authorName": "Frank Herbert"},
+                        "duration": 12600.0,
+                        "chapters": [],
+                        "audioFiles": [],
+                        "tracks": [],
+                    },
                 },
-                "addedAt": 1699900000000,
             },
             {
-                "id": "pli_2",
                 "libraryItemId": "li_2",
-                "mediaType": "book",
-                "media": {
-                    "metadata": {"title": "Neuromancer", "authorName": "William Gibson"},
-                    "duration": 8400.0,
-                    "chapters": [],
-                    "audioFiles": [],
-                    "tracks": [],
+                "libraryItem": {
+                    "id": "li_2",
+                    "libraryId": "lib1",
+                    "mediaType": "book",
+                    "media": {
+                        "metadata": {"title": "Neuromancer", "authorName": "William Gibson"},
+                        "duration": 8400.0,
+                        "chapters": [],
+                        "audioFiles": [],
+                        "tracks": [],
+                    },
                 },
-                "addedAt": 1699900001000,
             },
         ],
         "createdAt": 1699800000000,
-        "updatedAt": 1699900000000,
+        "lastUpdate": 1699900000000,
     }
     playlist = Playlist.model_validate(data)
     assert playlist.id == "pl_123"
@@ -125,24 +134,27 @@ def test_playlist_from_api_response():
 
 # ---- API Client ----
 
-def _playlist_payload(playlist_id="pl1", name="Test Playlist"):
+def _playlist_payload(playlist_id="pl1", name="Test Playlist", library_id="lib1"):
     return {
         "id": playlist_id,
         "name": name,
         "description": "A test playlist",
-        "libraryId": "lib1",
+        "libraryId": library_id,
         "userId": "u1",
         "items": [
             {
-                "id": "pli1",
                 "libraryItemId": "li1",
-                "mediaType": "book",
-                "media": {
-                    "metadata": {"title": "Book 1"},
-                    "duration": 1800.0,
-                    "chapters": [],
-                    "audioFiles": [],
-                    "tracks": [],
+                "libraryItem": {
+                    "id": "li1",
+                    "libraryId": library_id,
+                    "mediaType": "book",
+                    "media": {
+                        "metadata": {"title": "Book 1"},
+                        "duration": 1800.0,
+                        "chapters": [],
+                        "audioFiles": [],
+                        "tracks": [],
+                    },
                 },
             }
         ],
@@ -156,7 +168,7 @@ async def test_get_playlists(server_url, auth_token):
             return_value=httpx.Response(
                 200,
                 json={
-                    "results": [
+                    "playlists": [
                         _playlist_payload("pl1", "Favorites"),
                         _playlist_payload("pl2", "To Read"),
                     ]
@@ -172,13 +184,23 @@ async def test_get_playlists(server_url, auth_token):
 
 @pytest.mark.asyncio
 async def test_get_playlists_with_library_filter(server_url, auth_token):
+    """The server returns all playlists; the client filters by library_id."""
     async with respx.mock(base_url=server_url) as mock:
-        route = mock.get("/api/playlists?library=lib1&limit=100&page=0").mock(
-            return_value=httpx.Response(200, json={"results": [_playlist_payload()]})
+        route = mock.get("/api/playlists").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "playlists": [
+                        _playlist_payload("pl1", "In lib1", library_id="lib1"),
+                        _playlist_payload("pl2", "In lib2", library_id="lib2"),
+                    ]
+                },
+            )
         )
         async with ABSClient(server_url, token=auth_token) as client:
             playlists = await client.get_playlists(library_id="lib1")
     assert len(playlists) == 1
+    assert playlists[0].name == "In lib1"
     assert route.called
 
 
@@ -186,7 +208,7 @@ async def test_get_playlists_with_library_filter(server_url, auth_token):
 async def test_get_playlists_empty(server_url, auth_token):
     async with respx.mock(base_url=server_url) as mock:
         mock.get("/api/playlists").mock(
-            return_value=httpx.Response(200, json={"results": []})
+            return_value=httpx.Response(200, json={"playlists": []})
         )
         async with ABSClient(server_url, token=auth_token) as client:
             playlists = await client.get_playlists()

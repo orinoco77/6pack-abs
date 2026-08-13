@@ -145,14 +145,19 @@ class ABSClient:
         limit: int = 100,
         page: int = 0,
     ) -> list[Playlist]:
-        """Fetch playlists. If library_id is provided, filters to that library."""
+        """Fetch playlists. If library_id is provided, filters to that library.
+
+        ``GET /api/playlists`` returns every playlist for the authenticated user
+        across all libraries under a ``playlists`` key (it does not filter by
+        library server-side), so we filter by ``library_id`` here.
+        """
         params: dict[str, Any] = {"limit": limit, "page": page}
-        if library_id:
-            params["library"] = library_id
         response = await self._http.get("/api/playlists", params=params)
         self._raise_for_status(response)
         data = response.json()
-        playlists = [Playlist.model_validate(p) for p in data.get("results", [])]
+        playlists = [Playlist.model_validate(p) for p in data.get("playlists", [])]
+        if library_id:
+            playlists = [p for p in playlists if p.library_id == library_id]
         if playlists:
             logger.debug(
                 "get_playlists: %d playlists returned; first playlist '%s' has %d items",

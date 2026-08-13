@@ -131,15 +131,28 @@ class Series(BaseModel):
 
 
 class PlaylistItem(BaseModel):
-    """A library item as it appears inside a playlist."""
+    """A library item as it appears inside a playlist.
 
-    id: str
+    Audiobookshelf nests the full library item under ``libraryItem`` rather than
+    exposing ``media`` directly on the playlist entry, so ``media``/``title``/etc.
+    are surfaced here as properties that delegate to the embedded library item.
+    """
+
     library_item_id: str = Field(alias="libraryItemId")
-    media_type: str = Field("book", alias="mediaType")
-    media: LibraryItemMedia
+    library_item: LibraryItem = Field(alias="libraryItem")
+    id: str = ""
+    episode_id: str | None = Field(None, alias="episodeId")
     added_at: int | None = Field(None, alias="addedAt")
 
     model_config = {"populate_by_name": True, "extra": "allow"}
+
+    @property
+    def media(self) -> LibraryItemMedia:
+        return self.library_item.media
+
+    @property
+    def media_type(self) -> str:
+        return self.library_item.media_type
 
     @property
     def title(self) -> str:
@@ -163,7 +176,7 @@ class Playlist(BaseModel):
     user_id: str = Field("", alias="userId")
     items: list[PlaylistItem] = Field(default_factory=list)
     created_at: int | None = Field(None, alias="createdAt")
-    updated_at: int | None = Field(None, alias="updatedAt")
+    updated_at: int | None = Field(None, alias="lastUpdate")
 
     model_config = {"populate_by_name": True}
 
