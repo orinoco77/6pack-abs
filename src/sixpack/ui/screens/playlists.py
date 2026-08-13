@@ -167,7 +167,10 @@ class PlaylistsScreen(QWidget):
         self._grid.setFocus()
 
     def keyPressEvent(self, event) -> None:
-        if event.key() == Qt.Key.Key_Escape:
+        from sixpack.input.keyboard import key_to_action
+        from sixpack.input.actions import InputAction
+
+        if key_to_action(event.key()) == InputAction.BACK:
             self.back_requested.emit()
         else:
             super().keyPressEvent(event)

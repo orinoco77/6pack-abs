@@ -243,13 +243,14 @@ def test_media_card_activated_on_enter(qtbot):
         qtbot.keyClick(card, Qt.Key.Key_Return)
 
 
-def test_media_card_activated_on_space(qtbot):
+def test_media_card_space_does_not_activate(qtbot):
+    """Space is play/pause in Kodi — it must not activate a card."""
     card = MediaCard(title="Test")
     qtbot.addWidget(card)
     card.show()
     card.setFocus()
 
-    with qtbot.waitSignal(card.activated, timeout=1000):
+    with qtbot.assertNotEmitted(card.activated):
         qtbot.keyClick(card, Qt.Key.Key_Space)
 
 
@@ -432,11 +433,14 @@ class MockAudioPlayer:
         self._eof_cbs = []
         self._duration_cbs = []
         self.paused = False
+        self.toggle_count = 0
         self.seek_forward_count = 0
         self.seek_back_count = 0
+        self.seek_forward_long_count = 0
+        self.seek_back_long_count = 0
+        self.stop_count = 0
         self.next_chapter_count = 0
         self.prev_chapter_count = 0
-        self.toggle_count = 0
 
     def on_position_changed(self, cb):
         self._position_cbs.append(cb)
@@ -453,11 +457,20 @@ class MockAudioPlayer:
     def toggle_pause(self):
         self.toggle_count += 1
 
+    def stop(self):
+        self.stop_count += 1
+
     def seek_forward(self):
         self.seek_forward_count += 1
 
     def seek_back(self):
         self.seek_back_count += 1
+
+    def seek_forward_long(self):
+        self.seek_forward_long_count += 1
+
+    def seek_back_long(self):
+        self.seek_back_long_count += 1
 
     def next_chapter(self):
         self.next_chapter_count += 1
@@ -499,7 +512,8 @@ def test_player_screen_creates(qtbot):
     qtbot.addWidget(screen)
 
 
-def test_player_screen_enter_key_pauses(qtbot):
+def test_player_screen_enter_key_does_not_pause(qtbot):
+    """Kodi: Enter in FullscreenVideo shows OSD, not play/pause. Space/P pause."""
     from sixpack.ui.screens.player import PlayerScreen
     mock_player = MockAudioPlayer()
     screen = PlayerScreen(mock_player)
@@ -507,7 +521,7 @@ def test_player_screen_enter_key_pauses(qtbot):
     screen.show()
     screen.setFocus()
     qtbot.keyClick(screen, Qt.Key.Key_Return)
-    assert mock_player.toggle_count == 1
+    assert mock_player.toggle_count == 0
 
 
 def test_player_screen_play_pause_key(qtbot):
@@ -610,6 +624,83 @@ def test_player_screen_prev_item_key(qtbot):
 
     with qtbot.waitSignal(screen.prev_item, timeout=1000):
         qtbot.keyClick(screen, Qt.Key.Key_B)
+
+
+def test_player_screen_page_up_next_item(qtbot):
+    """Kodi: PageUp = next chapter in FullscreenVideo."""
+    from sixpack.ui.screens.player import PlayerScreen
+    mock_player = MockAudioPlayer()
+    screen = PlayerScreen(mock_player)
+    qtbot.addWidget(screen)
+    screen.show()
+    screen.setFocus()
+
+    with qtbot.waitSignal(screen.next_item, timeout=1000):
+        qtbot.keyClick(screen, Qt.Key.Key_PageUp)
+
+
+def test_player_screen_page_down_prev_item(qtbot):
+    """Kodi: PageDown = prev chapter in FullscreenVideo."""
+    from sixpack.ui.screens.player import PlayerScreen
+    mock_player = MockAudioPlayer()
+    screen = PlayerScreen(mock_player)
+    qtbot.addWidget(screen)
+    screen.show()
+    screen.setFocus()
+
+    with qtbot.waitSignal(screen.prev_item, timeout=1000):
+        qtbot.keyClick(screen, Qt.Key.Key_PageDown)
+
+
+def test_player_screen_x_stops_and_backs(qtbot):
+    """Kodi: X = stop playback and return to library."""
+    from sixpack.ui.screens.player import PlayerScreen
+    mock_player = MockAudioPlayer()
+    screen = PlayerScreen(mock_player)
+    qtbot.addWidget(screen)
+    screen.show()
+    screen.setFocus()
+
+    with qtbot.waitSignal(screen.back_requested, timeout=1000):
+        qtbot.keyClick(screen, Qt.Key.Key_X)
+    assert mock_player.stop_count == 1
+
+
+def test_player_screen_f_seeks_long_forward(qtbot):
+    """Kodi: F = fast forward (long seek)."""
+    from sixpack.ui.screens.player import PlayerScreen
+    mock_player = MockAudioPlayer()
+    screen = PlayerScreen(mock_player)
+    qtbot.addWidget(screen)
+    screen.show()
+    screen.setFocus()
+    qtbot.keyClick(screen, Qt.Key.Key_F)
+    assert mock_player.seek_forward_long_count == 1
+
+
+def test_player_screen_r_seeks_long_back(qtbot):
+    """Kodi: R = rewind (long seek back)."""
+    from sixpack.ui.screens.player import PlayerScreen
+    mock_player = MockAudioPlayer()
+    screen = PlayerScreen(mock_player)
+    qtbot.addWidget(screen)
+    screen.show()
+    screen.setFocus()
+    qtbot.keyClick(screen, Qt.Key.Key_R)
+    assert mock_player.seek_back_long_count == 1
+
+
+def test_player_screen_backspace_goes_back(qtbot):
+    """Kodi: Backspace = go back (same as Escape)."""
+    from sixpack.ui.screens.player import PlayerScreen
+    mock_player = MockAudioPlayer()
+    screen = PlayerScreen(mock_player)
+    qtbot.addWidget(screen)
+    screen.show()
+    screen.setFocus()
+
+    with qtbot.waitSignal(screen.back_requested, timeout=1000):
+        qtbot.keyClick(screen, Qt.Key.Key_Backspace)
 
 
 def test_player_screen_transport_buttons(qtbot):

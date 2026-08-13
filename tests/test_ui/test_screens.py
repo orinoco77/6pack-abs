@@ -514,6 +514,83 @@ def test_chapter_status_in_progress():
     assert _chapter_status(ch, 1000.0, is_finished=False) == "unstarted"
 
 
+def test_chapter_screen_load_from_library_item(qtbot):
+    from sixpack.ui.screens.chapter_select import ChapterSelectScreen
+    from sixpack.api.models import LibraryItem, LibraryItemMedia
+
+    screen = ChapterSelectScreen()
+    qtbot.addWidget(screen)
+    li = LibraryItem(
+        id="li1", libraryId="lib1", mediaType="book",
+        media=LibraryItemMedia(
+            metadata={"title": "Doctor Who: Invasion", "authorName": "BBC"},
+            duration=4200.0, chapters=_make_chapters(),
+        ),
+    )
+    screen.load_from_library_item(li, _make_chapters(), None)
+    assert screen._list.count() == 3
+    assert screen._title_label.text() == "Doctor Who: Invasion"
+    assert "3 chapters" in screen._count_label.text()
+    assert screen._library_item is li
+    assert screen._book is None
+    assert screen._playlist_item is None
+
+
+def test_chapter_screen_library_item_play_signal(qtbot):
+    from sixpack.ui.screens.chapter_select import ChapterSelectScreen
+    from sixpack.api.models import LibraryItem, LibraryItemMedia
+
+    screen = ChapterSelectScreen()
+    qtbot.addWidget(screen)
+    li = LibraryItem(
+        id="li1", libraryId="lib1", mediaType="book",
+        media=LibraryItemMedia(metadata={"title": "Book A"}, duration=3000.0),
+    )
+    screen.load_from_library_item(li, _make_chapters(), None)
+
+    play_signals, lib_signals = [], []
+    screen.play_requested.connect(lambda b, t: play_signals.append((b, t)))
+    screen.library_item_play_requested.connect(lambda item, t: lib_signals.append((item, t)))
+    screen._list.itemActivated.emit(screen._list.item(0))
+
+    assert len(play_signals) == 0
+    assert len(lib_signals) == 1
+    assert lib_signals[0][0] is li
+    assert lib_signals[0][1] == 0.0
+
+
+def test_chapter_screen_load_clears_library_item(qtbot):
+    from sixpack.ui.screens.chapter_select import ChapterSelectScreen
+    from sixpack.api.models import LibraryItem, LibraryItemMedia
+
+    screen = ChapterSelectScreen()
+    qtbot.addWidget(screen)
+    li = LibraryItem(
+        id="li1", libraryId="lib1", mediaType="book",
+        media=LibraryItemMedia(metadata={"title": "Book"}, duration=1000.0),
+    )
+    screen.load_from_library_item(li, _make_chapters(), None)
+    assert screen._library_item is li
+
+    screen.load(_make_box_set_book(), _make_chapters(), None)
+    assert screen._library_item is None
+
+
+def test_chapter_screen_load_from_library_item_resume(qtbot):
+    from sixpack.ui.screens.chapter_select import ChapterSelectScreen
+    from sixpack.api.models import LibraryItem, LibraryItemMedia, MediaProgress
+
+    screen = ChapterSelectScreen()
+    qtbot.addWidget(screen)
+    li = LibraryItem(
+        id="li1", libraryId="lib1", mediaType="book",
+        media=LibraryItemMedia(metadata={"title": "Book"}, duration=4200.0),
+    )
+    prog = MediaProgress(libraryItemId="li1", currentTime=2000.0, duration=4200.0)
+    screen.load_from_library_item(li, _make_chapters(), prog)
+    assert screen._list.currentRow() == 1  # chapter at 1500–3000
+
+
 # ---- Config ----
 
 def test_config_save_load(tmp_path, monkeypatch):

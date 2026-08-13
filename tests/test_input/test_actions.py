@@ -16,6 +16,7 @@ def test_action_names():
         "SELECT", "BACK",
         "PLAY_PAUSE", "STOP",
         "SEEK_FORWARD", "SEEK_BACK",
+        "SEEK_FORWARD_LONG", "SEEK_BACK_LONG",
         "NEXT_CHAPTER", "PREV_CHAPTER",
         "NEXT_ITEM", "PREV_ITEM",
         "MENU",

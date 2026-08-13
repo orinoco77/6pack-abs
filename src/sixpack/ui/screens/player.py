@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from sixpack.api.models import MediaProgress, Series, SeriesBook, Playlist, PlaylistItem
+from sixpack.api.models import LibraryItem, MediaProgress, Series, SeriesBook, Playlist, PlaylistItem
 from sixpack.player.player import AudioPlayer
 from sixpack.ui import theme
 from sixpack.ui.cover_cache import CoverCache
@@ -228,6 +228,35 @@ class PlayerScreen(QWidget):
         self._token = token
         self._sync_timer.start()
 
+    def play_library_item(
+        self,
+        item: LibraryItem,
+        start_time: float,
+        server_url: str,
+        token: str,
+    ) -> None:
+        """Play a standalone library item (from the browse screen, no series context)."""
+        self._current_book = None
+        self._series = None
+        self._series_books = []
+        self._current_playlist_item = None
+        self._playlist = None
+        self._playlist_items = []
+        self._current_index = 0
+        self._item_id = item.id
+
+        self._title_label.setText(item.title)
+        self._series_label.setText(item.subtitle)
+        self._episode_label.setText("")
+
+        cover_url = item.cover_url(server_url, token)
+        if self._cover_cache is not None:
+            self._cover_cache.fetch(cover_url, token, self._set_cover_pixmap)
+
+        self._server_url = server_url
+        self._token = token
+        self._sync_timer.start()
+
     def play_playlist_item(
         self,
         item: PlaylistItem,
@@ -354,22 +383,32 @@ class PlayerScreen(QWidget):
         self.setFocus()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        key = event.key()
-        if key == Qt.Key.Key_Escape:
+        from sixpack.input.keyboard import key_to_action
+        from sixpack.input.actions import InputAction
+
+        action = key_to_action(event.key(), player_mode=True)
+        if action == InputAction.BACK:
             self.back_requested.emit()
-        elif key in (Qt.Key.Key_Space, Qt.Key.Key_P, Qt.Key.Key_Return, Qt.Key.Key_Enter):
+        elif action == InputAction.PLAY_PAUSE:
             self._player.toggle_pause()
-        elif key == Qt.Key.Key_Right:
+        elif action == InputAction.STOP:
+            self._player.stop()
+            self.back_requested.emit()
+        elif action == InputAction.SEEK_FORWARD:
             self._player.seek_forward()
-        elif key == Qt.Key.Key_Left:
+        elif action == InputAction.SEEK_BACK:
             self._player.seek_back()
-        elif key == Qt.Key.Key_Period:
+        elif action == InputAction.SEEK_FORWARD_LONG:
+            self._player.seek_forward_long()
+        elif action == InputAction.SEEK_BACK_LONG:
+            self._player.seek_back_long()
+        elif action == InputAction.NEXT_CHAPTER:
             self._player.next_chapter()
-        elif key == Qt.Key.Key_Comma:
+        elif action == InputAction.PREV_CHAPTER:
             self._player.prev_chapter()
-        elif key == Qt.Key.Key_N:
+        elif action == InputAction.NEXT_ITEM:
             self.next_item.emit()
-        elif key == Qt.Key.Key_B:
+        elif action == InputAction.PREV_ITEM:
             self.prev_item.emit()
         else:
             super().keyPressEvent(event)

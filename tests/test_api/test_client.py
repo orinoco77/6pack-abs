@@ -377,3 +377,96 @@ def test_auth_header_with_token():
 def test_auth_header_empty():
     client = ABSClient("http://x")
     assert client._auth_headers() == {}
+
+
+# ---- Personalized shelves ----
+
+def _li_payload(item_id="li1", title="Book 1", author="Author A"):
+    return {
+        "id": item_id,
+        "libraryId": "lib1",
+        "mediaType": "book",
+        "media": {
+            "metadata": {"title": title, "authorName": author},
+            "chapters": [],
+            "audioFiles": [],
+            "tracks": [],
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_personalized_shelves(server_url, auth_token):
+    payload = [
+        {
+            "id": "shelf1",
+            "label": "Continue Listening",
+            "type": "book",
+            "entities": [_li_payload("li1", "My Book")],
+        },
+        {
+            "id": "shelf2",
+            "label": "Recently Added",
+            "type": "book",
+            "entities": [],
+        },
+    ]
+    async with respx.mock(base_url=server_url) as mock:
+        mock.get("/api/libraries/lib1/personalized").mock(
+            return_value=httpx.Response(200, json=payload)
+        )
+        async with ABSClient(server_url, token=auth_token) as client:
+            shelves = await client.get_personalized_shelves("lib1")
+    assert len(shelves) == 2
+    assert shelves[0].label == "Continue Listening"
+    assert len(shelves[0].entities) == 1
+    assert shelves[0].entities[0].title == "My Book"
+    assert shelves[1].label == "Recently Added"
+    assert shelves[1].entities == []
+
+
+@pytest.mark.asyncio
+async def test_get_personalized_shelves_skips_invalid(server_url, auth_token):
+    """Shelves with missing required fields are silently skipped."""
+    payload = [
+        {"id": "bad", "entities": []},  # no label — invalid
+        {"id": "s2", "label": "Continue Listening", "entities": []},
+    ]
+    async with respx.mock(base_url=server_url) as mock:
+        mock.get("/api/libraries/lib1/personalized").mock(
+            return_value=httpx.Response(200, json=payload)
+        )
+        async with ABSClient(server_url, token=auth_token) as client:
+            shelves = await client.get_personalized_shelves("lib1")
+    assert len(shelves) == 1
+    assert shelves[0].label == "Continue Listening"
+
+
+@pytest.mark.asyncio
+async def test_get_library_items_recent(server_url, auth_token):
+    payload = {
+        "results": [
+            _li_payload("li1", "Newest Book"),
+            _li_payload("li2", "Older Book"),
+        ]
+    }
+    async with respx.mock(base_url=server_url) as mock:
+        mock.get("/api/libraries/lib1/items").mock(
+            return_value=httpx.Response(200, json=payload)
+        )
+        async with ABSClient(server_url, token=auth_token) as client:
+            items = await client.get_library_items_recent("lib1", limit=20)
+    assert len(items) == 2
+    assert items[0].title == "Newest Book"
+    assert items[1].title == "Older Book"
+
+
+@pytest.mark.asyncio
+async def test_get_library_items_recent_empty(server_url, auth_token):
+    async with respx.mock(base_url=server_url) as mock:
+        mock.get("/api/libraries/lib1/items").mock(
+            return_value=httpx.Response(200, json={"results": []})
+        )
+        async with ABSClient(server_url, token=auth_token) as client:
+            items = await client.get_library_items_recent("lib1")
+    assert items == []

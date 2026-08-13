@@ -70,7 +70,11 @@ class LibraryScreen(QWidget):
             self._list.setFocus()
 
     def keyPressEvent(self, event) -> None:
-        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+        from sixpack.input.keyboard import key_to_action
+        from sixpack.input.actions import InputAction
+
+        action = key_to_action(event.key())
+        if action == InputAction.SELECT:
             current = self._list.currentItem()
             if current:
                 self._on_activated(current)

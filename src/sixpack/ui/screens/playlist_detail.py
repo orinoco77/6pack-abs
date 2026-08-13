@@ -295,9 +295,13 @@ class PlaylistDetailScreen(QWidget):
             self._list.setFocus()
 
     def keyPressEvent(self, event) -> None:
-        if event.key() == Qt.Key.Key_Escape:
+        from sixpack.input.keyboard import key_to_action
+        from sixpack.input.actions import InputAction
+
+        action = key_to_action(event.key())
+        if action == InputAction.BACK:
             self.back_requested.emit()
-        elif event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+        elif action == InputAction.SELECT:
             current = self._list.currentItem()
             if current:
                 self._on_item_activated(current)
