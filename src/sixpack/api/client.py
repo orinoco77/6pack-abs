@@ -13,6 +13,7 @@ from .models import (
     LibraryItem,
     LoginResponse,
     MediaProgress,
+    PersonalizedShelf,
     PlaybackSession,
     Playlist,
     Series,
@@ -184,6 +185,29 @@ class ABSClient:
         response = await self._http.get(
             f"/api/libraries/{library_id}/items",
             params={"limit": limit, "page": page},
+        )
+        self._raise_for_status(response)
+        data = response.json()
+        return [LibraryItem.model_validate(item) for item in data.get("results", [])]
+
+    async def get_personalized_shelves(self, library_id: str) -> list[PersonalizedShelf]:
+        """Fetch personalized shelves for a library (Continue Listening, Recently Added, etc.)."""
+        response = await self._http.get(f"/api/libraries/{library_id}/personalized")
+        self._raise_for_status(response)
+        data = response.json()
+        shelves = []
+        for item in data:
+            try:
+                shelves.append(PersonalizedShelf.model_validate(item))
+            except Exception:
+                pass
+        return shelves
+
+    async def get_library_items_recent(self, library_id: str, limit: int = 20) -> list[LibraryItem]:
+        """Fetch recently added items for a library, sorted by addedAt descending."""
+        response = await self._http.get(
+            f"/api/libraries/{library_id}/items",
+            params={"limit": limit, "sort": "addedAt", "desc": 1},
         )
         self._raise_for_status(response)
         data = response.json()

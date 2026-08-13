@@ -153,6 +153,12 @@ class AudioPlayer:
     def seek_back(self) -> None:
         self.seek_relative(-SEEK_SHORT)
 
+    def seek_forward_long(self) -> None:
+        self.seek_relative(SEEK_LONG)
+
+    def seek_back_long(self) -> None:
+        self.seek_relative(-SEEK_LONG)
+
     # ------------------------------------------------------------------
     # Chapter navigation
     # ------------------------------------------------------------------

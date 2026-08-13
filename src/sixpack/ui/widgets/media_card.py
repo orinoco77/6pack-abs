@@ -154,7 +154,10 @@ class MediaCard(QFrame):
         )
 
     def keyPressEvent(self, event) -> None:
-        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+        from sixpack.input.keyboard import key_to_action
+        from sixpack.input.actions import InputAction
+
+        if key_to_action(event.key()) == InputAction.SELECT:
             self.activated.emit()
         else:
             super().keyPressEvent(event)

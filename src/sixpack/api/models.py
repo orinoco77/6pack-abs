@@ -65,6 +65,10 @@ class LibraryItem(BaseModel):
         return self.media.title
 
     @property
+    def subtitle(self) -> str:
+        return self.media.author
+
+    @property
     def author(self) -> str:
         return self.media.author
 
@@ -115,6 +119,15 @@ class Series(BaseModel):
     total_duration: float | None = Field(None, alias="totalDuration")
 
     model_config = {"populate_by_name": True}
+
+    @property
+    def title(self) -> str:
+        return self.name
+
+    @property
+    def subtitle(self) -> str:
+        n = len(self.books)
+        return f"{n} book" if n == 1 else f"{n} books"
 
     @property
     def book_count(self) -> int:
@@ -181,6 +194,15 @@ class Playlist(BaseModel):
     model_config = {"populate_by_name": True}
 
     @property
+    def title(self) -> str:
+        return self.name
+
+    @property
+    def subtitle(self) -> str:
+        n = len(self.items)
+        return f"{n} item" if n == 1 else f"{n} items"
+
+    @property
     def item_count(self) -> int:
         return len(self.items)
 
@@ -193,6 +215,17 @@ class Playlist(BaseModel):
         if not self.items:
             return None
         return self.items[0].cover_url(server_url, token)
+
+
+class PersonalizedShelf(BaseModel):
+    """A shelf returned by /api/libraries/{id}/personalized (e.g. 'Continue Listening')."""
+
+    id: str = ""
+    label: str
+    type: str = "book"
+    entities: list[LibraryItem] = Field(default_factory=list)
+
+    model_config = {"populate_by_name": True, "extra": "ignore"}
 
 
 class Library(BaseModel):

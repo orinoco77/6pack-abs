@@ -89,28 +89,31 @@ class FocusGrid(QWidget):
     # ------------------------------------------------------------------
 
     def keyPressEvent(self, event) -> None:
-        key = event.key()
+        from sixpack.input.keyboard import key_to_action
+        from sixpack.input.actions import InputAction
+
         count = len(self._items)
         if count == 0:
             super().keyPressEvent(event)
             return
 
+        action = key_to_action(event.key())
         idx = self._focused_index
         cols = self._columns
 
-        if key == Qt.Key.Key_Right:
+        if action == InputAction.RIGHT:
             self.focus_item((idx + 1) % count)
-        elif key == Qt.Key.Key_Left:
+        elif action == InputAction.LEFT:
             self.focus_item((idx - 1) % count)
-        elif key == Qt.Key.Key_Down:
+        elif action == InputAction.DOWN:
             new = idx + cols
             if new < count:
                 self.focus_item(new)
-        elif key == Qt.Key.Key_Up:
+        elif action == InputAction.UP:
             new = idx - cols
             if new >= 0:
                 self.focus_item(new)
-        elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+        elif action == InputAction.SELECT:
             self.item_activated.emit(idx)
         else:
             super().keyPressEvent(event)

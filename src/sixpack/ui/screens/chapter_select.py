@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from sixpack.api.models import Chapter, MediaProgress, SeriesBook, PlaylistItem
+from sixpack.api.models import Chapter, LibraryItem, MediaProgress, SeriesBook, PlaylistItem
 from sixpack.ui import theme
 from sixpack.ui.cover_cache import CoverCache
 
@@ -93,14 +93,16 @@ class ChapterItem(QWidget):
 class ChapterSelectScreen(QWidget):
     """Chapter list for a single book/box-set. Emits play_requested(book, start_time)."""
 
-    play_requested = pyqtSignal(object, float)   # SeriesBook, start_time
-    playlist_item_play_requested = pyqtSignal(object, float)  # PlaylistItem, start_time
+    play_requested = pyqtSignal(object, float)                  # SeriesBook, start_time
+    playlist_item_play_requested = pyqtSignal(object, float)    # PlaylistItem, start_time
+    library_item_play_requested = pyqtSignal(object, float)     # LibraryItem, start_time
     back_requested = pyqtSignal()
 
     def __init__(self, cover_cache: CoverCache | None = None, parent=None) -> None:
         super().__init__(parent)
         self._book: SeriesBook | None = None
         self._playlist_item: PlaylistItem | None = None
+        self._library_item: LibraryItem | None = None
         self._chapters: list[Chapter] = []
         self._cover_cache = cover_cache
         self._build_ui()
@@ -169,6 +171,41 @@ class ChapterSelectScreen(QWidget):
             if isinstance(widget, ChapterItem):
                 widget.set_focused(i == row)
 
+    def load_from_library_item(
+        self,
+        item: LibraryItem,
+        chapters: list[Chapter],
+        progress: MediaProgress | None,
+        server_url: str = "",
+        token: str = "",
+    ) -> None:
+        """Load chapters for a standalone library item (from the browse screen)."""
+        self._library_item = item
+        self._book = None
+        self._playlist_item = None
+        self._chapters = chapters
+        self._title_label.setText(item.title)
+        self._count_label.setText(f"{len(self._chapters)} chapters")
+
+        is_finished = progress.is_finished if progress else False
+        current_time = progress.current_time if (progress and not is_finished) else 0.0
+
+        self._list.clear()
+        for i, chapter in enumerate(self._chapters):
+            status = _chapter_status(chapter, current_time, is_finished)
+            ch_widget = ChapterItem(i, chapter, status)
+            list_item = QListWidgetItem()
+            list_item.setSizeHint(QSize(0, 68))
+            list_item.setData(Qt.ItemDataRole.UserRole, chapter)
+            self._list.addItem(list_item)
+            self._list.setItemWidget(list_item, ch_widget)
+
+        if self._list.count():
+            idx = self._find_resume_index(current_time, is_finished)
+            self._list.setCurrentRow(idx)
+            self._on_row_changed(idx)
+            self._list.setFocus()
+
     def load(
         self,
         book: SeriesBook,
@@ -178,7 +215,8 @@ class ChapterSelectScreen(QWidget):
         token: str = "",
     ) -> None:
         self._book = book
-        self._playlist_item = None  # Clear playlist item when loading series book
+        self._playlist_item = None
+        self._library_item = None
         self._chapters = chapters
         self._title_label.setText(book.title)
         self._count_label.setText(f"{len(self._chapters)} chapters")
@@ -212,7 +250,8 @@ class ChapterSelectScreen(QWidget):
     ) -> None:
         """Load chapters for a playlist item (similar to load but for playlists)."""
         self._playlist_item = item
-        self._book = None  # Clear book when loading playlist item
+        self._book = None
+        self._library_item = None
         self._chapters = chapters
         self._title_label.setText(item.title)
         self._count_label.setText(f"{len(self._chapters)} chapters")
@@ -246,7 +285,9 @@ class ChapterSelectScreen(QWidget):
 
     def _on_item_activated(self, item: QListWidgetItem) -> None:
         chapter: Chapter = item.data(Qt.ItemDataRole.UserRole)
-        if self._book:
+        if self._library_item:
+            self.library_item_play_requested.emit(self._library_item, chapter.start)
+        elif self._book:
             self.play_requested.emit(self._book, chapter.start)
         elif self._playlist_item:
             self.playlist_item_play_requested.emit(self._playlist_item, chapter.start)
@@ -257,10 +298,13 @@ class ChapterSelectScreen(QWidget):
             self._list.setFocus()
 
     def keyPressEvent(self, event) -> None:
-        key = event.key()
-        if key == Qt.Key.Key_Escape:
+        from sixpack.input.keyboard import key_to_action
+        from sixpack.input.actions import InputAction
+
+        action = key_to_action(event.key())
+        if action == InputAction.BACK:
             self.back_requested.emit()
-        elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+        elif action == InputAction.SELECT:
             current = self._list.currentItem()
             if current:
                 self._on_item_activated(current)
