@@ -154,6 +154,7 @@ class MainWindow(QMainWindow):
         self._browse_screen.playlist_selected.connect(self._on_playlist_selected)
         self._browse_screen.book_selected.connect(self._on_browse_book_selected)
         self._browse_screen.library_changed.connect(self._on_browse_library_changed)
+        self._browse_screen.see_all_requested.connect(self._on_see_all_requested)
         self._library_screen.library_selected.connect(self._on_library_selected)
         self._series_screen.series_selected.connect(self._on_series_selected)
         self._series_screen.back_requested.connect(self._show_libraries)
@@ -285,7 +286,7 @@ class MainWindow(QMainWindow):
     def _fetch_browse_content(self, library_id: str) -> None:
         self._worker.run("browse_content", self._async_get_browse_content(library_id))
 
-    async def _async_get_browse_content(self, library_id: str) -> dict:
+    async def _async_get_browse_content(self, library_id: str) -> tuple:
         async with ABSClient(self._server_url, token=self._token) as client:
             shelves, recent, series_list, playlists = await asyncio.gather(
                 client.get_personalized_shelves(library_id),
@@ -298,12 +299,36 @@ class MainWindow(QMainWindow):
             if "continue" in shelf.label.lower():
                 continue_listening = shelf.entities[:20]
                 break
-        return {
+        rows = {
             RowType.CONTINUE_LISTENING: continue_listening,
             RowType.RECENTLY_ADDED: recent[:20],
             RowType.SERIES: series_list[:20],
             RowType.PLAYLISTS: playlists[:20],
         }
+        return library_id, rows
+
+    def _on_see_all_requested(self, row_type: RowType) -> None:
+        lib = getattr(self, "_current_library", None)
+        if not lib:
+            return
+        self._worker.run("see_all", self._async_get_see_all(row_type, lib.id))
+
+    async def _async_get_see_all(self, row_type: RowType, library_id: str) -> tuple:
+        async with ABSClient(self._server_url, token=self._token) as client:
+            if row_type == RowType.CONTINUE_LISTENING:
+                shelves = await client.get_personalized_shelves(library_id)
+                items = []
+                for shelf in shelves:
+                    if "continue" in shelf.label.lower():
+                        items = shelf.entities
+                        break
+            elif row_type == RowType.RECENTLY_ADDED:
+                items = await client.get_library_items_recent(library_id, limit=100)
+            elif row_type == RowType.SERIES:
+                items = await client.get_series(library_id, limit=500)
+            else:  # PLAYLISTS
+                items = await client.get_playlists(library_id)
+        return row_type, items
 
     def _on_browse_book_selected(self, item: LibraryItem) -> None:
         self._pending_browse_item = item
@@ -543,8 +568,17 @@ class MainWindow(QMainWindow):
             self._show_browse()
 
         elif tag == "browse_content":
-            for row_type, items in result.items():
+            result_lib_id, rows = result
+            current_lib = getattr(self, "_current_library", None)
+            if current_lib and result_lib_id != current_lib.id:
+                return  # stale result from a previously selected library
+            for row_type, items in rows.items():
                 self._browse_screen.set_row_items(row_type, items)
+            self._browse_screen.show_content()
+
+        elif tag == "see_all":
+            row_type, items = result
+            self._browse_screen.populate_grid(items)
 
         elif tag == "browse_book":
             full_item, progress = result
