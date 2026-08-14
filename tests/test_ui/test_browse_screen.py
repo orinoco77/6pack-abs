@@ -328,6 +328,22 @@ def test_library_changed_not_emitted_twice_same_library(qtbot):
     assert len(signals) == 1
 
 
+def test_library_changed_emitted_on_sidebar_down(qtbot):
+    """Down arrow in sidebar immediately emits library_changed for the new library."""
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    libs = [_lib("l1", "A"), _lib("l2", "B")]
+    screen.load_libraries(libs, "http://s", "tok")
+    screen.show()
+    signals = []
+    screen.library_changed.connect(lambda lib: signals.append(lib))
+    _press(qtbot, screen, Qt.Key.Key_Right)  # l1 → emits (enter rows)
+    _press(qtbot, screen, Qt.Key.Key_Backspace)  # back to sidebar
+    _press(qtbot, screen, Qt.Key.Key_Down)  # highlight l2 → emits immediately
+    assert len(signals) == 2
+    assert signals[1].id == "l2"
+
+
 def test_library_changed_emitted_for_second_library(qtbot):
     screen = BrowseScreen()
     qtbot.addWidget(screen)
@@ -338,10 +354,31 @@ def test_library_changed_emitted_for_second_library(qtbot):
     screen.library_changed.connect(lambda lib: signals.append(lib))
     _press(qtbot, screen, Qt.Key.Key_Right)       # enters rows for l1
     _press(qtbot, screen, Qt.Key.Key_Backspace)   # back to sidebar
-    _press(qtbot, screen, Qt.Key.Key_Down)        # select l2
-    _press(qtbot, screen, Qt.Key.Key_Right)       # enters rows for l2
+    _press(qtbot, screen, Qt.Key.Key_Down)        # highlight l2 → eager emit
+    _press(qtbot, screen, Qt.Key.Key_Right)       # enters rows for l2 — already loaded, no re-emit
     assert len(signals) == 2
     assert signals[1].id == "l2"
+
+
+def test_reset_rows_shows_loading_page(qtbot):
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    screen.load_libraries([_lib("l1", "A")], "http://s", "tok")
+    screen._reset_rows()
+    assert screen._loading is True
+    assert screen._content_stack.currentIndex() == 2
+
+
+def test_show_content_switches_to_rows_page(qtbot):
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    screen.load_libraries([_lib("l1", "A")], "http://s", "tok")
+    screen._reset_rows()
+    assert screen._content_stack.currentIndex() == 2
+    screen._zone = "rows"
+    screen.show_content()
+    assert screen._loading is False
+    assert screen._content_stack.currentIndex() == 0
 
 
 # ---------------------------------------------------------------------------
@@ -403,12 +440,55 @@ def test_rows_right_moves_item_index(qtbot):
     assert screen._row_item_idxs[0] == 1
 
 
-def test_rows_right_clamps_at_last_item(qtbot):
+def test_rows_right_at_last_item_focuses_see_all(qtbot):
     screen = _make_screen_with_items(qtbot)
     screen._row_item_idxs[0] = 1  # already at last item (2 items)
     screen.setFocus()
     _press(qtbot, screen, Qt.Key.Key_Right)
-    assert screen._row_item_idxs[0] == 1  # unchanged
+    assert screen._see_all_focused is True
+    assert screen._zone == "rows"  # stays in rows until Enter is pressed
+
+
+def test_see_all_left_returns_to_last_card(qtbot):
+    screen = _make_screen_with_items(qtbot)
+    screen._row_item_idxs[0] = 1
+    screen.setFocus()
+    _press(qtbot, screen, Qt.Key.Key_Right)   # focus see-all
+    assert screen._see_all_focused is True
+    _press(qtbot, screen, Qt.Key.Key_Left)    # back to last card
+    assert screen._see_all_focused is False
+    assert screen._zone == "rows"
+
+
+def test_see_all_select_emits_signal(qtbot):
+    screen = _make_screen_with_items(qtbot)
+    screen._row_item_idxs[0] = 1
+    screen.setFocus()
+    _press(qtbot, screen, Qt.Key.Key_Right)   # focus see-all
+    with qtbot.waitSignal(screen.see_all_requested, timeout=500) as blocker:
+        _press(qtbot, screen, Qt.Key.Key_Return)
+    assert blocker.args[0] == RowType.CONTINUE_LISTENING
+    assert screen._zone == "grid"
+
+
+def test_see_all_up_clears_focus(qtbot):
+    screen = _make_screen_with_items(qtbot)
+    screen._row_item_idxs[0] = 1
+    screen.setFocus()
+    _press(qtbot, screen, Qt.Key.Key_Right)   # focus see-all
+    assert screen._see_all_focused is True
+    _press(qtbot, screen, Qt.Key.Key_Up)      # change row
+    assert screen._see_all_focused is False
+
+
+def test_populate_grid_fills_cards(qtbot):
+    screen = _make_screen_with_items(qtbot)
+    screen._zone = "grid"
+    screen._grid_row_idx = 2  # SERIES row
+    items = [_series(f"s{i}", f"S{i}") for i in range(10)]
+    screen.populate_grid(items)
+    assert len(screen._grid_cards) == 10
+    assert screen._grid_body_stack.currentIndex() == 1
 
 
 def test_rows_left_moves_item_index(qtbot):
@@ -551,6 +631,8 @@ def test_grid_back_exits_grid(qtbot):
 def test_grid_select_emits_signal(qtbot):
     screen = _make_screen_in_grid(qtbot, 2)  # SERIES row
     screen.setFocus()
+    # _enter_grid populates _grid_items from _row_items
+    assert len(screen._grid_items) > 0
     with qtbot.waitSignal(screen.series_selected, timeout=500) as blocker:
         screen._activate_grid_item(0)
     assert blocker.args[0].id == "s1"

@@ -76,11 +76,23 @@ class _SidebarItem(QWidget):
 # Row widget — one titled horizontal strip of MediaCards
 # ---------------------------------------------------------------------------
 
+_BODY_H = theme.CARD_HEIGHT + 12  # fixed height for the card body area
+
+
 class _RowWidget(QWidget):
+    """
+    Titled horizontal strip with three body states:
+      loading  — shows "Loading…" while content is being fetched
+      empty    — shows "Nothing here" when fetch returned no items
+      cards    — shows the horizontal scroll of MediaCards
+    """
+
     def __init__(self, title: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._cards: list[MediaCard] = []
         self._focused_idx = -1
+        self._row_is_focused = False
+        self._see_all_is_focused = False
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 4, 0, 4)
@@ -99,14 +111,13 @@ class _RowWidget(QWidget):
         tb_layout.addWidget(self._title_lbl)
         tb_layout.addStretch()
 
-        self._see_all = QLabel("See all  →")
+        self._see_all = QLabel("See all →")
         self._see_all.setStyleSheet(
             f"color: {theme.TEXT_MUTED}; font-size: {theme.FONT_META}pt;"
         )
         tb_layout.addWidget(self._see_all)
         outer.addWidget(title_bar)
 
-        # Horizontal card strip
         self._strip = QWidget()
         self._strip.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._strip_layout = QHBoxLayout(self._strip)
@@ -114,16 +125,15 @@ class _RowWidget(QWidget):
         self._strip_layout.setSpacing(16)
         self._strip_layout.addStretch()
 
-        scroll = QScrollArea()
-        scroll.setWidget(self._strip)
-        scroll.setWidgetResizable(True)
-        scroll.setFixedHeight(theme.CARD_HEIGHT + 12)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        scroll.setStyleSheet("border: none; background: transparent;")
-        self._scroll = scroll
-        outer.addWidget(scroll)
+        self._scroll = QScrollArea()
+        self._scroll.setWidget(self._strip)
+        self._scroll.setFixedHeight(_BODY_H)
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._scroll.setStyleSheet("border: none; background: transparent;")
+        outer.addWidget(self._scroll)
 
     # ------------------------------------------------------------------
 
@@ -159,10 +169,27 @@ class _RowWidget(QWidget):
             self._cards[self._focused_idx].set_focused(False)
 
     def set_row_focused(self, focused: bool) -> None:
-        color = theme.ACCENT if focused else theme.TEXT_MUTED
-        self._see_all.setStyleSheet(
-            f"color: {color}; font-size: {theme.FONT_META}pt;"
-        )
+        self._row_is_focused = focused
+        self._refresh_see_all_style()
+
+    def set_see_all_focused(self, focused: bool) -> None:
+        self._see_all_is_focused = focused
+        self._refresh_see_all_style()
+
+    def _refresh_see_all_style(self) -> None:
+        if self._see_all_is_focused:
+            self._see_all.setStyleSheet(
+                f"color: {theme.TEXT_PRIMARY}; background-color: {theme.ACCENT}; "
+                f"font-size: {theme.FONT_META}pt; border-radius: 4px; padding: 2px 8px;"
+            )
+        elif self._row_is_focused:
+            self._see_all.setStyleSheet(
+                f"color: {theme.ACCENT}; background: transparent; font-size: {theme.FONT_META}pt;"
+            )
+        else:
+            self._see_all.setStyleSheet(
+                f"color: {theme.TEXT_MUTED}; background: transparent; font-size: {theme.FONT_META}pt;"
+            )
 
     @property
     def focused_idx(self) -> int:
@@ -180,16 +207,21 @@ class BrowseScreen(QWidget):
     Left sidebar lists libraries; right pane shows horizontal content rows.
     All keyboard navigation is handled here — no child widget takes Qt focus.
 
+    Content starts loading as soon as a library is highlighted in the sidebar
+    (not just when the user presses Right to enter the rows zone), so there is
+    always something to show (or a loading indicator) immediately.
+
     Zones:
       "sidebar"  — arrow Up/Down moves sidebar selection
       "rows"     — arrow Left/Right scrolls within a row; Up/Down changes rows
-      "grid"     — expanded full-pane grid for one row
+      "grid"     — expanded full-pane grid for one row (sidebar stays visible)
     """
 
     series_selected = pyqtSignal(object)    # Series
     playlist_selected = pyqtSignal(object)  # Playlist
     book_selected = pyqtSignal(object)      # LibraryItem
-    library_changed = pyqtSignal(object)    # Library — emitted when entering rows for a new lib
+    library_changed = pyqtSignal(object)    # Library — emitted whenever a new library is selected
+    see_all_requested = pyqtSignal(object)  # RowType — user wants the full uncapped dataset
 
     def __init__(
         self,
@@ -203,6 +235,9 @@ class BrowseScreen(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         self._zone = "sidebar"
+        self._loading = False
+        self._see_all_focused = False
+        self._grid_items: list[Any] = []
         self._libraries: list[Library] = []
         self._loaded_library: Library | None = None
         self._sidebar_idx = 0
@@ -308,6 +343,23 @@ class BrowseScreen(QWidget):
         )
         grid_page_layout.addWidget(self._grid_title_lbl)
 
+        self._grid_body_stack = QStackedWidget()
+        self._grid_body_stack.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
+        # Page 0: loading label shown while full dataset is fetched
+        grid_loading = QWidget()
+        grid_loading.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        gl_layout = QVBoxLayout(grid_loading)
+        gl_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        gl_lbl = QLabel("Loading…")
+        gl_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        gl_lbl.setStyleSheet(
+            f"color: {theme.TEXT_MUTED}; font-size: {theme.FONT_HEADING}pt;"
+        )
+        gl_layout.addWidget(gl_lbl)
+        self._grid_body_stack.addWidget(grid_loading)
+
+        # Page 1: the actual grid
         self._grid_container = QWidget()
         self._grid_container.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._grid_layout = QGridLayout(self._grid_container)
@@ -321,8 +373,23 @@ class BrowseScreen(QWidget):
         self._grid_scroll.setWidgetResizable(True)
         self._grid_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._grid_scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        grid_page_layout.addWidget(self._grid_scroll)
+        self._grid_body_stack.addWidget(self._grid_scroll)
+
+        grid_page_layout.addWidget(self._grid_body_stack)
         self._content_stack.addWidget(grid_page)
+
+        # --- Page 2: full-pane loading indicator ---
+        loading_page = QWidget()
+        loading_page.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        lp_layout = QVBoxLayout(loading_page)
+        lp_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._loading_lbl = QLabel("Loading…")
+        self._loading_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._loading_lbl.setStyleSheet(
+            f"color: {theme.TEXT_MUTED}; font-size: {theme.FONT_HEADING}pt;"
+        )
+        lp_layout.addWidget(self._loading_lbl)
+        self._content_stack.addWidget(loading_page)
 
         return self._content_stack
 
@@ -340,6 +407,23 @@ class BrowseScreen(QWidget):
         self._sidebar_idx = 0
         self._loaded_library = None
         self._update_sidebar_styles()
+        self._reset_rows()  # show Loading… immediately
+
+    def _reset_rows(self) -> None:
+        """Clear all rows and show the full-pane loading indicator."""
+        for i, rw in enumerate(self._row_widgets):
+            self._row_items[i] = []
+            self._row_item_idxs[i] = 0
+            rw.clear()
+        self._focused_row = 0
+        self._loading = True
+        self._content_stack.setCurrentIndex(2)
+
+    def show_content(self) -> None:
+        """Switch from the loading page to the rows page once content is ready."""
+        self._loading = False
+        if self._zone in ("sidebar", "rows"):
+            self._content_stack.setCurrentIndex(0)
 
     def set_row_items(self, row_type: RowType, items: list[Any]) -> None:
         try:
@@ -416,16 +500,55 @@ class BrowseScreen(QWidget):
 
     def _handle_sidebar(self, action: InputAction) -> None:
         n = len(self._sidebar_items)
+        moved = False
+
         if action == InputAction.UP and self._sidebar_idx > 0:
             self._sidebar_idx -= 1
-            self._update_sidebar_styles()
+            moved = True
         elif action == InputAction.DOWN and self._sidebar_idx < n - 1:
             self._sidebar_idx += 1
+            moved = True
+
+        if moved:
             self._update_sidebar_styles()
+            self._start_loading_selected_library()
         elif action in (InputAction.RIGHT, InputAction.SELECT) and self._libraries:
             self._enter_rows()
 
+    def _start_loading_selected_library(self) -> None:
+        """Eagerly trigger a content fetch for the currently highlighted library."""
+        if not self._libraries:
+            return
+        lib = self._libraries[self._sidebar_idx]
+        if lib is self._loaded_library:
+            return
+        self._loaded_library = lib
+        self._reset_rows()
+        self.library_changed.emit(lib)
+
     def _handle_rows(self, action: InputAction) -> None:
+        # When "See all" is focused, only a subset of actions are meaningful
+        if self._see_all_focused:
+            if action == InputAction.SELECT:
+                self._trigger_see_all()
+            elif action == InputAction.LEFT:
+                self._set_see_all_focused(False)
+                items = self._row_items[self._focused_row]
+                if items:
+                    self._row_widgets[self._focused_row].focus_card(
+                        self._row_item_idxs[self._focused_row]
+                    )
+            elif action == InputAction.BACK:
+                self._set_see_all_focused(False)
+                self._enter_sidebar()
+            elif action in (InputAction.UP, InputAction.DOWN):
+                self._set_see_all_focused(False)
+                # fall through to normal Up/Down handling below
+            else:
+                return
+            if action not in (InputAction.UP, InputAction.DOWN):
+                return
+
         n_rows = len(self._row_types)
         focused_items = self._row_items[self._focused_row]
 
@@ -459,10 +582,10 @@ class BrowseScreen(QWidget):
             if cur < len(focused_items) - 1:
                 self._row_item_idxs[self._focused_row] = cur + 1
                 self._row_widgets[self._focused_row].focus_card(cur + 1)
+            elif focused_items:
+                self._set_see_all_focused(True)
         elif action == InputAction.SELECT:
             self._activate_row_item(self._focused_row, self._row_item_idxs[self._focused_row])
-        elif action == InputAction.MENU:
-            self._enter_grid(self._focused_row)
         elif action == InputAction.BACK:
             self._enter_sidebar()
 
@@ -492,21 +615,74 @@ class BrowseScreen(QWidget):
     # ------------------------------------------------------------------
 
     def _enter_rows(self) -> None:
-        lib = self._libraries[self._sidebar_idx] if self._libraries else None
-        if lib and lib is not self._loaded_library:
-            self._loaded_library = lib
-            self.library_changed.emit(lib)
+        # Trigger a content load if this library hasn't been loaded yet
+        # (handles the case where user goes Right without having moved Up/Down)
+        if self._libraries:
+            lib = self._libraries[self._sidebar_idx]
+            if lib is not self._loaded_library:
+                self._loaded_library = lib
+                self._reset_rows()
+                self.library_changed.emit(lib)
         self._zone = "rows"
-        self._content_stack.setCurrentIndex(0)
+        if not self._loading:
+            self._content_stack.setCurrentIndex(0)
         self._update_sidebar_styles()
         self._update_row_styles()
-        # Focus first item in the focused row if available
         if self._row_items[self._focused_row]:
             self._row_widgets[self._focused_row].focus_card(
                 self._row_item_idxs[self._focused_row]
             )
 
+    def _set_see_all_focused(self, focused: bool) -> None:
+        self._see_all_focused = focused
+        self._row_widgets[self._focused_row].set_see_all_focused(focused)
+
+    def _trigger_see_all(self) -> None:
+        """Enter the grid in loading state and ask app.py for the full dataset."""
+        row_idx = self._focused_row
+        self._set_see_all_focused(False)
+        self._zone = "grid"
+        self._grid_row_idx = row_idx
+        self._grid_focus_idx = 0
+        self._grid_items = []
+        self._grid_title_lbl.setText(self._row_types[row_idx].value)
+        for card in self._grid_cards:
+            self._grid_layout.removeWidget(card)
+            card.deleteLater()
+        self._grid_cards.clear()
+        self._grid_body_stack.setCurrentIndex(0)  # loading page
+        self._content_stack.setCurrentIndex(1)
+        self.setFocus()
+        self.see_all_requested.emit(self._row_types[row_idx])
+
+    def populate_grid(self, items: list[Any]) -> None:
+        """Fill the grid with the full dataset returned by app.py."""
+        self._grid_items = items
+        for card in self._grid_cards:
+            self._grid_layout.removeWidget(card)
+            card.deleteLater()
+        self._grid_cards.clear()
+        for i, item in enumerate(items):
+            cover = item.cover_url(self._server_url, self._token) if callable(
+                getattr(item, "cover_url", None)
+            ) else None
+            card = MediaCard(
+                title=getattr(item, "title", ""),
+                subtitle=getattr(item, "subtitle", ""),
+            )
+            card.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            if cover and self._cover_cache is not None:
+                self._cover_cache.fetch(cover, self._token, card.set_cover)
+            row, col = divmod(i, _GRID_COLS)
+            self._grid_layout.addWidget(card, row, col)
+            self._grid_cards.append(card)
+        self._grid_body_stack.setCurrentIndex(1)  # content page
+        if self._grid_cards:
+            self._set_grid_focus(0)
+
     def _enter_sidebar(self) -> None:
+        if self._see_all_focused:
+            self._set_see_all_focused(False)
         self._row_widgets[self._focused_row].unfocus()
         self._zone = "sidebar"
         self._update_sidebar_styles()
@@ -521,7 +697,6 @@ class BrowseScreen(QWidget):
         self._grid_focus_idx = self._row_item_idxs[row_idx]
         self._grid_title_lbl.setText(self._row_types[row_idx].value)
 
-        # Clear old cards
         for card in self._grid_cards:
             self._grid_layout.removeWidget(card)
             card.deleteLater()
@@ -542,13 +717,14 @@ class BrowseScreen(QWidget):
             self._grid_layout.addWidget(card, row, col)
             self._grid_cards.append(card)
 
+        self._grid_items = list(items)
+        self._grid_body_stack.setCurrentIndex(1)  # content page
         self._content_stack.setCurrentIndex(1)
         self._set_grid_focus(self._grid_focus_idx)
         self.setFocus()
 
     def _exit_grid(self) -> None:
         self._zone = "rows"
-        # Sync row position to where we were in the grid
         self._row_item_idxs[self._grid_row_idx] = self._grid_focus_idx
         self._row_widgets[self._grid_row_idx].focus_card(self._grid_focus_idx)
         self._content_stack.setCurrentIndex(0)
@@ -576,10 +752,9 @@ class BrowseScreen(QWidget):
         self._emit_item(self._row_types[row_idx], items[item_idx])
 
     def _activate_grid_item(self, idx: int) -> None:
-        items = self._row_items[self._grid_row_idx]
-        if not items or idx >= len(items):
+        if not self._grid_items or idx >= len(self._grid_items):
             return
-        self._emit_item(self._row_types[self._grid_row_idx], items[idx])
+        self._emit_item(self._row_types[self._grid_row_idx], self._grid_items[idx])
 
     def _emit_item(self, row_type: RowType, item: Any) -> None:
         if row_type == RowType.SERIES:
