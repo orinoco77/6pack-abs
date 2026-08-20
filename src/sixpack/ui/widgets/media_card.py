@@ -1,25 +1,31 @@
 """Focusable media card widget for grid browsing."""
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal, QSize
+from PyQt6.QtCore import Qt, pyqtSignal, QSize, QPropertyAnimation
 from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont
-from PyQt6.QtWidgets import QFrame, QLabel, QVBoxLayout
+from PyQt6.QtWidgets import (
+    QFrame, QLabel, QVBoxLayout, QGraphicsDropShadowEffect, QGraphicsOpacityEffect,
+)
 
 
 class _ElideLabel(QLabel):
     """QLabel that elides text with '...' to fit its own width."""
 
     def paintEvent(self, event) -> None:
-        painter = QPainter(self)
-        elided = self.fontMetrics().elidedText(
-            self.text(), Qt.TextElideMode.ElideRight, self.width()
-        )
-        painter.setPen(self.palette().windowText().color())
-        painter.drawText(
-            self.rect(),
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            elided,
-        )
+        try:
+            painter = QPainter(self)
+            elided = self.fontMetrics().elidedText(
+                self.text(), Qt.TextElideMode.ElideRight, self.width()
+            )
+            painter.setPen(self.palette().windowText().color())
+            painter.drawText(
+                self.rect(),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                elided,
+            )
+        except RuntimeError:
+            # Widget was deleted on the C++ side during teardown; skip painting.
+            pass
 
 from sixpack.ui import theme
 
@@ -32,11 +38,14 @@ class MediaCard(QFrame):
 
     activated = pyqtSignal()
 
+    _PLACEHOLDER_GLYPH = {"book": "📖", "podcast": "🎙"}
+
     def __init__(
         self,
         title: str,
         subtitle: str = "",
         meta: str = "",
+        media_type: str = "book",
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -49,8 +58,10 @@ class MediaCard(QFrame):
         self._title = title
         self._subtitle = subtitle
         self._meta = meta
+        self._media_type = media_type
         self._pixmap: QPixmap | None = None
         self._focused = False
+        self._glow_anim: QPropertyAnimation | None = None
 
         self._build_ui()
 
@@ -108,7 +119,8 @@ class MediaCard(QFrame):
         font = QFont()
         font.setPointSize(32)
         painter.setFont(font)
-        painter.drawText(pix.rect(), Qt.AlignmentFlag.AlignCenter, "♪")
+        glyph = self._PLACEHOLDER_GLYPH.get(self._media_type, "♪")
+        painter.drawText(pix.rect(), Qt.AlignmentFlag.AlignCenter, glyph)
         painter.end()
         self._art_label.setPixmap(pix)
 
@@ -147,11 +159,35 @@ class MediaCard(QFrame):
     # ------------------------------------------------------------------
 
     def set_focused(self, focused: bool) -> None:
+        was_focused = self._focused
         self._focused = focused
         border = theme.ACCENT if focused else "transparent"
         self.setStyleSheet(
-            f"#media_card {{ border-radius: {theme.CARD_RADIUS}px; border: {theme.FOCUS_BORDER}px solid {border}; }}"
+            f"#media_card {{ border-radius: {theme.CARD_RADIUS}px; "
+            f"border: {theme.FOCUS_BORDER}px solid {border}; }}"
         )
+        if focused:
+            glow = QGraphicsDropShadowEffect(self)
+            glow.setColor(QColor(theme.ACCENT_GLOW))
+            glow.setOffset(0, 0)
+            glow.setBlurRadius(0)
+            self.setGraphicsEffect(glow)
+            anim = QPropertyAnimation(glow, b"blurRadius", self)
+            anim.setDuration(theme.FOCUS_ANIM_MS)
+            anim.setStartValue(0)
+            anim.setEndValue(theme.FOCUS_GLOW_RADIUS)
+            anim.start()
+            self._glow_anim = anim  # keep a ref so it isn't GC'd mid-animation
+        elif was_focused:
+            # Only dim when transitioning away from focused state.
+            self._glow_anim = None
+            dim = QGraphicsOpacityEffect(self)
+            dim.setOpacity(theme.UNFOCUSED_OPACITY)
+            self.setGraphicsEffect(dim)
+        else:
+            # Card was never focused; clear any leftover effect.
+            self._glow_anim = None
+            self.setGraphicsEffect(None)
 
     def keyPressEvent(self, event) -> None:
         from sixpack.input.keyboard import key_to_action
