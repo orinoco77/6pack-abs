@@ -323,6 +323,32 @@ def test_media_card_no_crash_other_key(qtbot):
     qtbot.keyClick(card, Qt.Key.Key_A)  # unmapped — should not crash
 
 
+def test_media_card_media_type_param(qtbot):
+    card = MediaCard(title="Pod", media_type="podcast")
+    qtbot.addWidget(card)
+    assert card._media_type == "podcast"
+
+
+def test_media_card_focus_installs_glow(qtbot):
+    from PyQt6.QtWidgets import QGraphicsDropShadowEffect
+    card = MediaCard(title="Test")
+    qtbot.addWidget(card)
+    card.set_focused(True)
+    eff = card.graphicsEffect()
+    assert isinstance(eff, QGraphicsDropShadowEffect)
+
+
+def test_media_card_unfocus_installs_dim(qtbot):
+    from PyQt6.QtWidgets import QGraphicsOpacityEffect
+    card = MediaCard(title="Test")
+    qtbot.addWidget(card)
+    card.set_focused(True)
+    card.set_focused(False)
+    eff = card.graphicsEffect()
+    assert isinstance(eff, QGraphicsOpacityEffect)
+    assert abs(eff.opacity() - __import__("sixpack.ui.theme", fromlist=["x"]).UNFOCUSED_OPACITY) < 1e-6
+
+
 # ===========================================================================
 # SeriesScreen tests
 # ===========================================================================
