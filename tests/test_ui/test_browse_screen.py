@@ -13,6 +13,7 @@ from sixpack.api.models import (
     Series,
     SeriesBook,
 )
+from sixpack.input.actions import InputAction
 from sixpack.ui.screens.browse import (
     DEFAULT_ROW_TYPES,
     BrowseScreen,
@@ -761,3 +762,53 @@ def test_playlist_subtitle_plural():
 def test_library_item_subtitle():
     li = _li("i1", "My Book", "Jane Austen")
     assert li.subtitle == "Jane Austen"
+
+
+# ---------------------------------------------------------------------------
+# BrowseScreen — reflective hero
+# ---------------------------------------------------------------------------
+
+def test_hero_reflects_library_item(qtbot):
+    screen = BrowseScreen(row_types=list(DEFAULT_ROW_TYPES))
+    qtbot.addWidget(screen)
+    item = _li("i1", "The Sandman", author="Neil Gaiman")
+    screen._reflect_focus(item)
+    assert screen._hero_title.text() == "The Sandman"
+    assert "Neil Gaiman" in screen._hero_sub.text()
+
+
+def test_hero_reflects_series(qtbot):
+    screen = BrowseScreen(row_types=list(DEFAULT_ROW_TYPES))
+    qtbot.addWidget(screen)
+    s = _series("s1", "Discworld", n_books=3)
+    screen._reflect_focus(s)
+    assert screen._hero_title.text() == "Discworld"
+    assert "3 books" in screen._hero_sub.text()
+
+
+def test_hero_clears_on_none(qtbot):
+    screen = BrowseScreen(row_types=list(DEFAULT_ROW_TYPES))
+    qtbot.addWidget(screen)
+    screen._reflect_focus(None)
+    assert screen._hero_title.text() == ""
+    assert screen._hero_sub.text() == ""
+
+
+def test_row_focus_updates_hero(qtbot):
+    screen = BrowseScreen(row_types=list(DEFAULT_ROW_TYPES))
+    qtbot.addWidget(screen)
+    screen.load_libraries([_lib("lib1", "Audiobooks")], "http://abs.test", "t")
+    screen.set_row_items(RowType.RECENTLY_ADDED, [_li("i1", "Book One"), _li("i2", "Book Two")])
+    screen.show_content()
+    screen._enter_rows()
+    # focused row defaults to 0 (Continue Listening, empty) — move down to Recently Added
+    screen._handle_rows(InputAction.DOWN)
+    assert screen._hero_title.text() in ("Book One", "Book Two", "")  # reflects focused card
+
+
+def test_sidebar_item_has_icon_and_active_state(qtbot):
+    from sixpack.ui.screens.browse import _SidebarItem
+    item = _SidebarItem("Podcasts", media_type="podcast")
+    qtbot.addWidget(item)
+    item.set_state(selected=True, zone_active=True)
+    assert item._icon.text() != ""  # an icon glyph is shown

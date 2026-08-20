@@ -4,7 +4,8 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QRect, Qt, pyqtSignal
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
@@ -19,7 +20,8 @@ from sixpack.api.models import Library
 from sixpack.input.actions import InputAction
 from sixpack.input.keyboard import key_to_action
 from sixpack.ui import theme
-from sixpack.ui.cover_cache import CoverCache
+from sixpack.ui.cover_cache import CoverCache, dominant_color
+from sixpack.ui.widgets.backdrop import Backdrop
 from sixpack.ui.widgets.media_card import MediaCard
 
 _SIDEBAR_W = 220
@@ -45,31 +47,42 @@ DEFAULT_ROW_TYPES: list[RowType] = [
 # Sidebar item
 # ---------------------------------------------------------------------------
 
+_LIB_ICONS = {"book": "📚", "podcast": "🎙", "ebook": "📖"}
+
+
 class _SidebarItem(QWidget):
-    def __init__(self, text: str, parent: QWidget | None = None) -> None:
+    def __init__(
+        self, text: str, media_type: str = "book", parent: QWidget | None = None
+    ) -> None:
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(20, 12, 20, 12)
-        layout.setSpacing(0)
+        layout.setSpacing(10)
+        self._icon = QLabel(_LIB_ICONS.get(media_type, "📚"))
+        self._icon.setStyleSheet("background: transparent;")
         self._label = QLabel(text)
         self._label.setStyleSheet("background: transparent;")
+        layout.addWidget(self._icon)
         layout.addWidget(self._label)
+        layout.addStretch()
         self.set_state(selected=False, zone_active=False)
 
     def set_state(self, *, selected: bool, zone_active: bool) -> None:
         if selected and zone_active:
-            bg, fg = theme.ACCENT, theme.TEXT_PRIMARY
+            bg, fg, bar = theme.ACCENT, theme.TEXT_PRIMARY, theme.ACCENT
         elif selected:
-            bg, fg = theme.SURFACE_HIGH, theme.ACCENT
+            bg, fg, bar = theme.SURFACE_HIGH, theme.ACCENT, theme.ACCENT
         else:
-            bg, fg = "transparent", theme.TEXT_SECONDARY
+            bg, fg, bar = "transparent", theme.TEXT_SECONDARY, "transparent"
         self.setStyleSheet(
-            f"QWidget {{ background-color: {bg}; border-radius: 4px; }}"
+            f"QWidget {{ background-color: {bg}; border-radius: 4px; "
+            f"border-left: 3px solid {bar}; }}"
         )
         self._label.setStyleSheet(
-            f"color: {fg}; font-size: {theme.FONT_BODY}pt; background: transparent;"
+            f"color: {fg}; font-size: {theme.FONT_BODY}pt; background: transparent; border: none;"
         )
+        self._icon.setStyleSheet("background: transparent; border: none;")
 
 
 # ---------------------------------------------------------------------------
@@ -188,7 +201,8 @@ class _RowWidget(QWidget):
             )
         else:
             self._see_all.setStyleSheet(
-                f"color: {theme.TEXT_MUTED}; background: transparent; font-size: {theme.FONT_META}pt;"
+                f"color: {theme.TEXT_SECONDARY}; background-color: {theme.SURFACE_HIGH}; "
+                f"font-size: {theme.FONT_META}pt; border-radius: 4px; padding: 2px 8px;"
             )
 
     @property
@@ -260,18 +274,55 @@ class BrowseScreen(QWidget):
     # Construction
     # ------------------------------------------------------------------
 
+    _HERO_H = 150
+
     def _build_ui(self) -> None:
+        self.setObjectName("screen_root")
+        self._backdrop = Backdrop(self)
+        self._backdrop.lower()
+        self._dom_colors: dict[str, QColor] = {}
+
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
         root.addWidget(self._build_sidebar())
         root.addWidget(self._build_content(), stretch=1)
+        self._build_hero()  # overlay child on the content pane
+
+    def resizeEvent(self, event) -> None:
+        self._backdrop.setGeometry(self.rect())
+        if hasattr(self, "_hero"):
+            self._hero.setGeometry(self._hero_geometry())
+        super().resizeEvent(event)
+
+    def _build_hero(self) -> None:
+        self._hero = QWidget(self)
+        self._hero.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        lay = QVBoxLayout(self._hero)
+        lay.setContentsMargins(36, 24, 36, 8)
+        lay.setSpacing(4)
+        self._hero_title = QLabel("")
+        self._hero_title.setStyleSheet(
+            f"font-size: {theme.FONT_HUGE}pt; font-weight: bold; "
+            f"color: {theme.TEXT_PRIMARY}; background: transparent;"
+        )
+        self._hero_sub = QLabel("")
+        self._hero_sub.setStyleSheet(
+            f"font-size: {theme.FONT_HEADING}pt; color: {theme.TEXT_SECONDARY}; "
+            f"background: transparent;"
+        )
+        lay.addWidget(self._hero_title)
+        lay.addWidget(self._hero_sub)
+        self._hero.raise_()
+
+    def _hero_geometry(self) -> QRect:
+        return QRect(_SIDEBAR_W, 0, max(0, self.width() - _SIDEBAR_W), self._HERO_H)
 
     def _build_sidebar(self) -> QWidget:
         sidebar = QWidget()
         sidebar.setFixedWidth(_SIDEBAR_W)
         sidebar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        sidebar.setStyleSheet(f"background-color: {theme.SURFACE};")
+        sidebar.setStyleSheet("background-color: rgba(21,21,21,200);")
         sidebar.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         layout = QVBoxLayout(sidebar)
@@ -312,7 +363,7 @@ class BrowseScreen(QWidget):
         rows_inner = QWidget()
         rows_inner.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         rows_layout = QVBoxLayout(rows_inner)
-        rows_layout.setContentsMargins(32, 24, 32, 24)
+        rows_layout.setContentsMargins(32, self._HERO_H, 32, 24)
         rows_layout.setSpacing(12)
 
         self._row_widgets: list[_RowWidget] = []
@@ -439,7 +490,7 @@ class BrowseScreen(QWidget):
             w.deleteLater()
         self._sidebar_items.clear()
         for lib in self._libraries:
-            item = _SidebarItem(lib.name)
+            item = _SidebarItem(lib.name, media_type=getattr(lib, "media_type", "book"))
             self._sidebar_items.append(item)
             self._sidebar_items_layout.addWidget(item)
 
@@ -456,11 +507,61 @@ class BrowseScreen(QWidget):
                 subtitle=getattr(item, "subtitle", ""),
             )
             if cover and self._cover_cache is not None:
-                self._cover_cache.fetch(cover, self._token, card.set_cover)
+                self._fetch_cover(card, cover, getattr(item, "id", "") or cover)
             rw.add_card(card)
 
         if self._zone == "rows" and row_idx == self._focused_row and items:
             rw.focus_card(self._row_item_idxs[row_idx])
+
+    # ------------------------------------------------------------------
+    # Cover art + reflective hero
+    # ------------------------------------------------------------------
+
+    def _fetch_cover(self, card: MediaCard, cover_url: str, key: str) -> None:
+        def _cb(pm):
+            card.set_cover(pm)
+            if key not in self._dom_colors:
+                self._dom_colors[key] = dominant_color(pm)
+
+        self._cover_cache.fetch(cover_url, self._token, _cb)
+
+    def _reflect_focus(self, item: Any) -> None:
+        title = getattr(item, "title", "") if item is not None else ""
+        sub = getattr(item, "subtitle", "") if item is not None else ""
+        self._hero_title.setText(title or "")
+        self._hero_sub.setText(sub or "")
+        if item is None or self._cover_cache is None:
+            return
+        cover = item.cover_url(self._server_url, self._token) if callable(
+            getattr(item, "cover_url", None)
+        ) else None
+        if not cover:
+            return
+        key = getattr(item, "id", "") or cover
+        color = self._dom_colors.get(key)
+        if color is not None:
+            self._backdrop.show_color(color)
+        self._cover_cache.fetch_backdrop(cover, self._token, self._backdrop.show_image)
+
+    def _current_focused_item(self) -> Any | None:
+        if self._zone == "grid":
+            if self._grid_items and 0 <= self._grid_focus_idx < len(self._grid_items):
+                return self._grid_items[self._grid_focus_idx]
+            return None
+        if self._zone == "rows":
+            items = self._row_items[self._focused_row]
+            idx = self._row_item_idxs[self._focused_row]
+            if items and 0 <= idx < len(items):
+                return items[idx]
+            return None
+        # sidebar zone: preview the first item of the first non-empty row
+        for items in self._row_items:
+            if items:
+                return items[0]
+        return None
+
+    def _reflect_current(self) -> None:
+        self._reflect_focus(self._current_focused_item())
 
     # ------------------------------------------------------------------
     # Style helpers
@@ -538,6 +639,7 @@ class BrowseScreen(QWidget):
                     self._row_widgets[self._focused_row].focus_card(
                         self._row_item_idxs[self._focused_row]
                     )
+                self._reflect_current()
             elif action == InputAction.BACK:
                 self._set_see_all_focused(False)
                 self._enter_sidebar()
@@ -588,6 +690,7 @@ class BrowseScreen(QWidget):
             self._activate_row_item(self._focused_row, self._row_item_idxs[self._focused_row])
         elif action == InputAction.BACK:
             self._enter_sidebar()
+        self._reflect_current()
 
     def _handle_grid(self, action: InputAction) -> None:
         count = len(self._grid_cards)
@@ -609,6 +712,7 @@ class BrowseScreen(QWidget):
             self._activate_grid_item(idx)
         elif action == InputAction.BACK:
             self._exit_grid()
+        self._reflect_current()
 
     # ------------------------------------------------------------------
     # Zone transitions
@@ -632,6 +736,7 @@ class BrowseScreen(QWidget):
             self._row_widgets[self._focused_row].focus_card(
                 self._row_item_idxs[self._focused_row]
             )
+        self._reflect_current()
 
     def _set_see_all_focused(self, focused: bool) -> None:
         self._see_all_focused = focused
@@ -672,7 +777,7 @@ class BrowseScreen(QWidget):
             )
             card.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             if cover and self._cover_cache is not None:
-                self._cover_cache.fetch(cover, self._token, card.set_cover)
+                self._fetch_cover(card, cover, getattr(item, "id", "") or cover)
             row, col = divmod(i, _GRID_COLS)
             self._grid_layout.addWidget(card, row, col)
             self._grid_cards.append(card)
@@ -687,6 +792,7 @@ class BrowseScreen(QWidget):
         self._zone = "sidebar"
         self._update_sidebar_styles()
         self._update_row_styles()
+        self._reflect_current()
 
     def _enter_grid(self, row_idx: int) -> None:
         items = self._row_items[row_idx]
@@ -712,7 +818,7 @@ class BrowseScreen(QWidget):
             )
             card.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             if cover and self._cover_cache is not None:
-                self._cover_cache.fetch(cover, self._token, card.set_cover)
+                self._fetch_cover(card, cover, getattr(item, "id", "") or cover)
             row, col = divmod(i, _GRID_COLS)
             self._grid_layout.addWidget(card, row, col)
             self._grid_cards.append(card)
@@ -740,6 +846,7 @@ class BrowseScreen(QWidget):
         self._grid_focus_idx = idx
         self._grid_cards[idx].set_focused(True)
         self._grid_scroll.ensureWidgetVisible(self._grid_cards[idx])
+        self._reflect_current()
 
     # ------------------------------------------------------------------
     # Activation
