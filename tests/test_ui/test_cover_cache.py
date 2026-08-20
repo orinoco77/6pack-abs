@@ -4,7 +4,6 @@ from __future__ import annotations
 import hashlib
 import os
 
-import pytest
 from PyQt6.QtCore import QSize
 from PyQt6.QtGui import QColor, QPixmap
 
