@@ -77,8 +77,14 @@ class MediaCard(QFrame):
         self._glow.setBlurRadius(0)
         self.setGraphicsEffect(self._glow)
 
+        # Default to UNFOCUSED_OPACITY, matching `self._focused = False`.
+        # Sibling cards in a freshly populated grid never receive an
+        # explicit set_focused() call (FocusGrid/BrowseScreen only ever
+        # call it on the previously- and newly-focused cards), so the
+        # construction-time default must already reflect the unfocused
+        # look rather than waiting for a call that may never come.
         self._dim = QGraphicsOpacityEffect(self._body)
-        self._dim.setOpacity(1.0)
+        self._dim.setOpacity(theme.UNFOCUSED_OPACITY)
         self._body.setGraphicsEffect(self._dim)
 
     def _build_ui(self) -> None:
