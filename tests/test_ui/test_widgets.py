@@ -338,30 +338,46 @@ def test_media_card_focus_installs_glow(qtbot):
     assert isinstance(eff, QGraphicsDropShadowEffect)
 
 
-def test_media_card_unfocus_installs_dim(qtbot):
-    from PyQt6.QtWidgets import QGraphicsOpacityEffect
+def _expected_scrim_alpha():
     from sixpack.ui import theme
+    return int(round(255 * (1.0 - theme.UNFOCUSED_OPACITY)))
+
+
+def test_media_card_no_graphics_effect_used_for_dim(qtbot):
+    """The dim must never be a QGraphicsEffect of any kind. Qt 6.11's
+    QGraphicsEffect compositor (QGraphicsEffectSource::pixmap ->
+    QWidget::render) segfaults at volume when an opacity effect is at
+    fractional opacity — see task-4-report.md rounds 1-4. Only the outer
+    glow (a QGraphicsDropShadowEffect on `self`, proven crash-free) may
+    remain."""
+    from PyQt6.QtWidgets import QGraphicsEffect
+    card = MediaCard(title="Test")
+    qtbot.addWidget(card)
+    for state in (False, True, False):
+        card.set_focused(state)
+        assert card._body.graphicsEffect() is None
+        assert card._scrim.graphicsEffect() is None
+        assert not isinstance(card._scrim, QGraphicsEffect)
+
+
+def test_media_card_unfocus_installs_dim(qtbot):
     card = MediaCard(title="Test")
     qtbot.addWidget(card)
     card.set_focused(True)
     card.set_focused(False)
-    eff = card._body.graphicsEffect()
-    assert isinstance(eff, QGraphicsOpacityEffect)
-    assert abs(eff.opacity() - theme.UNFOCUSED_OPACITY) < 1e-6
+    assert card._scrim.isVisibleTo(card._body)
+    assert card._scrim.color().alpha() == _expected_scrim_alpha()
 
 
 def test_media_card_never_focused_still_dims(qtbot):
     """Regression: set_focused(False) must dim unconditionally, even when
     the card was never previously focused (the common case for sibling
     cards in a grid). See task-4-report.md sibling-dimming spec gap."""
-    from PyQt6.QtWidgets import QGraphicsOpacityEffect
-    from sixpack.ui import theme
     card = MediaCard(title="Test")
     qtbot.addWidget(card)
     card.set_focused(False)  # never previously focused
-    eff = card._body.graphicsEffect()
-    assert isinstance(eff, QGraphicsOpacityEffect)
-    assert abs(eff.opacity() - theme.UNFOCUSED_OPACITY) < 1e-6
+    assert card._scrim.isVisibleTo(card._body)
+    assert card._scrim.color().alpha() == _expected_scrim_alpha()
 
 
 def test_media_card_default_construction_dims(qtbot):
@@ -371,27 +387,38 @@ def test_media_card_default_construction_dims(qtbot):
     previously- and newly-focused cards ever get a set_focused() call —
     every other sibling in a grid sits at its __init__-time default for
     its entire lifetime. See task-4-report.md round-3 finding."""
-    from PyQt6.QtWidgets import QGraphicsOpacityEffect
-    from sixpack.ui import theme
     card = MediaCard(title="Test")
     qtbot.addWidget(card)
     # No set_focused() call at all.
-    eff = card._body.graphicsEffect()
-    assert isinstance(eff, QGraphicsOpacityEffect)
-    assert abs(eff.opacity() - theme.UNFOCUSED_OPACITY) < 1e-6
+    assert card._scrim.isVisibleTo(card._body)
+    assert card._scrim.color().alpha() == _expected_scrim_alpha()
 
 
 def test_media_card_default_construction_then_focus_true(qtbot):
     """A freshly constructed (now dim-by-default) card must still focus
-    correctly: set_focused(True) brings opacity back to 1.0 and starts
-    the glow blur radius animating toward FOCUS_GLOW_RADIUS."""
+    correctly: set_focused(True) removes the dim scrim and starts the glow
+    blur radius animating toward FOCUS_GLOW_RADIUS."""
     from sixpack.ui import theme
     card = MediaCard(title="Test")
     qtbot.addWidget(card)
     card.set_focused(True)
-    assert abs(card._dim.opacity() - 1.0) < 1e-6
+    assert not card._scrim.isVisibleTo(card._body)
+    assert card._scrim.color().alpha() == 0
     assert card._glow_anim is not None
     assert card._glow_anim.endValue() == theme.FOCUS_GLOW_RADIUS
+
+
+def test_media_card_scrim_is_non_interactive_and_covers_body(qtbot):
+    from PyQt6.QtCore import Qt
+    card = MediaCard(title="Test")
+    qtbot.addWidget(card)
+    card.show()
+    qtbot.waitExposed(card)
+    assert card._scrim.testAttribute(
+        Qt.WidgetAttribute.WA_TransparentForMouseEvents
+    )
+    assert card._scrim.parent() is card._body
+    assert card._scrim.size() == card._body.size()
 
 
 @pytest.mark.parametrize("iteration", range(180))
@@ -401,10 +428,13 @@ def test_media_card_high_churn_no_crash(qtbot, iteration):
     in Qt's compositor (QGraphicsEffectSource::pixmap -> QWidget::render)
     once churn crossed ~100-150 instances within one process — see
     task-4-report.md ("Investigation of the sibling-dimming spec gap").
-    The current design never swaps effect *type* on any widget (`self`
-    permanently owns a QGraphicsDropShadowEffect, `self._body` permanently
-    owns a QGraphicsOpacityEffect — only property values change), which
-    this test exercises at the volume that used to trigger the crash.
+    The current design uses exactly one QGraphicsEffect per card (`self`
+    permanently owns a QGraphicsDropShadowEffect whose blurRadius is the
+    only thing that changes) and dims via a plain painted scrim widget
+    rather than a QGraphicsOpacityEffect, keeping Qt's fragile
+    QGraphicsEffectSource::pixmap()/QWidget::render() compositing path out
+    of the picture entirely. This test exercises that at the volume that
+    used to trigger the crash.
     """
     grid = FocusGrid(columns=4)
     qtbot.addWidget(grid)

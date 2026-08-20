@@ -1,11 +1,11 @@
 """Focusable media card widget for grid browsing."""
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal, QSize, QPropertyAnimation
+from PyQt6.QtCore import Qt, pyqtSignal, QSize, QPropertyAnimation, QEvent
 from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont
 from PyQt6.QtWidgets import (
     QFrame, QLabel, QVBoxLayout, QWidget,
-    QGraphicsDropShadowEffect, QGraphicsOpacityEffect,
+    QGraphicsDropShadowEffect,
 )
 
 
@@ -29,6 +29,54 @@ class _ElideLabel(QLabel):
             pass
 
 from sixpack.ui import theme
+
+
+class _Scrim(QWidget):
+    """A non-interactive translucent black overlay used to dim a card.
+
+    This is deliberately a *paint-level* mechanism, not a
+    ``QGraphicsOpacityEffect``. Qt 6.11's ``QGraphicsEffect`` compositor
+    reaches the fragile ``QGraphicsEffectSource::pixmap()`` ->
+    ``QWidget::render()`` re-entrant path whenever an opacity effect's
+    opacity is fractional, and segfaults there at volume (see
+    task-4-report.md rounds 1-3). Filling a translucent rectangle in a
+    plain ``paintEvent`` never enters that machinery at all.
+
+    The spec explicitly allows this: "Unfocused cards render at
+    UNFOCUSED_DIM_OPACITY (via a QGraphicsOpacityEffect *or paint tweak*)".
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        # Never steal clicks/hover from the card underneath, never take focus.
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setColor(_Scrim.color_for_opacity(theme.UNFOCUSED_OPACITY))
+
+    @staticmethod
+    def color_for_opacity(opacity: float) -> QColor:
+        """Black with the alpha that visually matches rendering at `opacity`."""
+        alpha = int(round(255 * (1.0 - max(0.0, min(1.0, opacity)))))
+        return QColor(0, 0, 0, alpha)
+
+    def setColor(self, color: QColor) -> None:
+        self._color = color
+        self.update()
+
+    def color(self) -> QColor:
+        return self._color
+
+    def paintEvent(self, event) -> None:
+        try:
+            if self._color.alpha() == 0:
+                return
+            painter = QPainter(self)
+            painter.fillRect(self.rect(), self._color)
+            painter.end()
+        except RuntimeError:
+            # Widget was deleted on the C++ side during teardown; skip painting.
+            pass
 
 
 class MediaCard(QFrame):
@@ -66,26 +114,42 @@ class MediaCard(QFrame):
 
         self._build_ui()
 
-        # Permanent, never-swapped graphics effects (see task-4-report.md:
-        # cross-type effect swaps on the same widget instance crash Qt's
-        # compositor at scale). `self` always owns a drop shadow (glow);
-        # `self._body` always owns an opacity effect (dim). Only the
-        # effects' properties change, never their type.
+        # The glow is the ONLY QGraphicsEffect on this widget tree, and it is
+        # installed exactly once and never replaced — only its blurRadius
+        # animates. Drop-shadow-only churn has been proven crash-free at
+        # volume across several investigations (see task-4-report.md).
         self._glow = QGraphicsDropShadowEffect(self)
         self._glow.setColor(QColor(theme.ACCENT_GLOW))
         self._glow.setOffset(0, 0)
         self._glow.setBlurRadius(0)
         self.setGraphicsEffect(self._glow)
 
-        # Default to UNFOCUSED_OPACITY, matching `self._focused = False`.
-        # Sibling cards in a freshly populated grid never receive an
-        # explicit set_focused() call (FocusGrid/BrowseScreen only ever
-        # call it on the previously- and newly-focused cards), so the
-        # construction-time default must already reflect the unfocused
-        # look rather than waiting for a call that may never come.
-        self._dim = QGraphicsOpacityEffect(self._body)
-        self._dim.setOpacity(theme.UNFOCUSED_OPACITY)
-        self._body.setGraphicsEffect(self._dim)
+        # Dim is a paint-level scrim, NOT a QGraphicsOpacityEffect — a
+        # fractional-opacity QGraphicsOpacityEffect drags Qt into the
+        # crash-prone QGraphicsEffectSource::pixmap()/QWidget::render()
+        # compositing path (task-4-report.md rounds 1-3). No QGraphicsEffect
+        # subclass is used for dimming anywhere.
+        #
+        # It starts visible, matching `self._focused = False`. Sibling cards
+        # in a freshly populated grid never receive an explicit set_focused()
+        # call (FocusGrid/BrowseScreen only ever call it on the previously-
+        # and newly-focused cards), so the construction-time default must
+        # already reflect the unfocused look.
+        self._scrim = _Scrim(self._body)
+        self._scrim.setGeometry(self._body.rect())
+        self._scrim.raise_()
+        self._scrim.show()
+        # Keep the scrim exactly covering the body as layout resizes it.
+        self._body.installEventFilter(self)
+
+    def eventFilter(self, obj, event) -> bool:
+        if obj is self._body and event.type() in (
+            QEvent.Type.Resize,
+            QEvent.Type.ChildAdded,
+        ):
+            self._scrim.setGeometry(self._body.rect())
+            self._scrim.raise_()
+        return super().eventFilter(obj, event)
 
     def _build_ui(self) -> None:
         outer = QVBoxLayout(self)
@@ -207,10 +271,14 @@ class MediaCard(QFrame):
         anim.start()
         self._glow_anim = anim  # keep a ref so it isn't GC'd mid-animation
 
-        # Dim lives permanently on `self._body`; only its opacity changes.
-        # Unconditional every time, regardless of prior focus state — this
-        # is what fixes the sibling-dimming spec gap.
-        self._dim.setOpacity(1.0 if focused else theme.UNFOCUSED_OPACITY)
+        # Dim is the paint-level scrim overlaying `self._body`. Applied
+        # unconditionally on every call, regardless of prior focus state —
+        # this is what fixes the sibling-dimming spec gap. No QGraphicsEffect
+        # is involved, so this never enters Qt's fragile compositor path.
+        self._scrim.setColor(
+            _Scrim.color_for_opacity(1.0 if focused else theme.UNFOCUSED_OPACITY)
+        )
+        self._scrim.setVisible(not focused)
 
     def keyPressEvent(self, event) -> None:
         from sixpack.input.keyboard import key_to_action
