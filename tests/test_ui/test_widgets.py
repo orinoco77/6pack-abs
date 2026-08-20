@@ -364,6 +364,36 @@ def test_media_card_never_focused_still_dims(qtbot):
     assert abs(eff.opacity() - theme.UNFOCUSED_OPACITY) < 1e-6
 
 
+def test_media_card_default_construction_dims(qtbot):
+    """Regression: a freshly constructed MediaCard on which set_focused()
+    is NEVER called must already be dimmed to UNFOCUSED_OPACITY. In real
+    usage (FocusGrid.focus_item / BrowseScreen._set_grid_focus), only the
+    previously- and newly-focused cards ever get a set_focused() call —
+    every other sibling in a grid sits at its __init__-time default for
+    its entire lifetime. See task-4-report.md round-3 finding."""
+    from PyQt6.QtWidgets import QGraphicsOpacityEffect
+    from sixpack.ui import theme
+    card = MediaCard(title="Test")
+    qtbot.addWidget(card)
+    # No set_focused() call at all.
+    eff = card._body.graphicsEffect()
+    assert isinstance(eff, QGraphicsOpacityEffect)
+    assert abs(eff.opacity() - theme.UNFOCUSED_OPACITY) < 1e-6
+
+
+def test_media_card_default_construction_then_focus_true(qtbot):
+    """A freshly constructed (now dim-by-default) card must still focus
+    correctly: set_focused(True) brings opacity back to 1.0 and starts
+    the glow blur radius animating toward FOCUS_GLOW_RADIUS."""
+    from sixpack.ui import theme
+    card = MediaCard(title="Test")
+    qtbot.addWidget(card)
+    card.set_focused(True)
+    assert abs(card._dim.opacity() - 1.0) < 1e-6
+    assert card._glow_anim is not None
+    assert card._glow_anim.endValue() == theme.FOCUS_GLOW_RADIUS
+
+
 @pytest.mark.parametrize("iteration", range(180))
 def test_media_card_high_churn_no_crash(qtbot, iteration):
     """Regression test: many distinct MediaCards, each doing a cross-type
