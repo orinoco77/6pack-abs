@@ -340,13 +340,64 @@ def test_media_card_focus_installs_glow(qtbot):
 
 def test_media_card_unfocus_installs_dim(qtbot):
     from PyQt6.QtWidgets import QGraphicsOpacityEffect
+    from sixpack.ui import theme
     card = MediaCard(title="Test")
     qtbot.addWidget(card)
     card.set_focused(True)
     card.set_focused(False)
-    eff = card.graphicsEffect()
+    eff = card._body.graphicsEffect()
     assert isinstance(eff, QGraphicsOpacityEffect)
-    assert abs(eff.opacity() - __import__("sixpack.ui.theme", fromlist=["x"]).UNFOCUSED_OPACITY) < 1e-6
+    assert abs(eff.opacity() - theme.UNFOCUSED_OPACITY) < 1e-6
+
+
+def test_media_card_never_focused_still_dims(qtbot):
+    """Regression: set_focused(False) must dim unconditionally, even when
+    the card was never previously focused (the common case for sibling
+    cards in a grid). See task-4-report.md sibling-dimming spec gap."""
+    from PyQt6.QtWidgets import QGraphicsOpacityEffect
+    from sixpack.ui import theme
+    card = MediaCard(title="Test")
+    qtbot.addWidget(card)
+    card.set_focused(False)  # never previously focused
+    eff = card._body.graphicsEffect()
+    assert isinstance(eff, QGraphicsOpacityEffect)
+    assert abs(eff.opacity() - theme.UNFOCUSED_OPACITY) < 1e-6
+
+
+@pytest.mark.parametrize("iteration", range(180))
+def test_media_card_high_churn_no_crash(qtbot, iteration):
+    """Regression test: many distinct MediaCards, each doing a cross-type
+    QGraphicsEffect swap on the same widget instance, used to segfault deep
+    in Qt's compositor (QGraphicsEffectSource::pixmap -> QWidget::render)
+    once churn crossed ~100-150 instances within one process — see
+    task-4-report.md ("Investigation of the sibling-dimming spec gap").
+    The current design never swaps effect *type* on any widget (`self`
+    permanently owns a QGraphicsDropShadowEffect, `self._body` permanently
+    owns a QGraphicsOpacityEffect — only property values change), which
+    this test exercises at the volume that used to trigger the crash.
+    """
+    grid = FocusGrid(columns=4)
+    qtbot.addWidget(grid)
+    cards = [MediaCard(title=f"Card {i}") for i in range(4)]
+    for c in cards:
+        grid.add_item(c)
+    grid.show()
+
+    for idx in range(4):
+        grid.focus_item(idx)
+    for idx in reversed(range(4)):
+        grid.focus_item(idx)
+    for c in cards:
+        c.set_focused(False)
+    for c in cards:
+        c.set_focused(True)
+        c.set_focused(False)
+
+    from PyQt6.QtWidgets import QApplication
+    QApplication.processEvents()
+    grid.close()
+    grid.deleteLater()
+    QApplication.processEvents()
 
 
 # ===========================================================================

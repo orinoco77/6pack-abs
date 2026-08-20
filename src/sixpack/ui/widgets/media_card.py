@@ -4,7 +4,8 @@ from __future__ import annotations
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QPropertyAnimation
 from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont
 from PyQt6.QtWidgets import (
-    QFrame, QLabel, QVBoxLayout, QGraphicsDropShadowEffect, QGraphicsOpacityEffect,
+    QFrame, QLabel, QVBoxLayout, QWidget,
+    QGraphicsDropShadowEffect, QGraphicsOpacityEffect,
 )
 
 
@@ -65,8 +66,30 @@ class MediaCard(QFrame):
 
         self._build_ui()
 
+        # Permanent, never-swapped graphics effects (see task-4-report.md:
+        # cross-type effect swaps on the same widget instance crash Qt's
+        # compositor at scale). `self` always owns a drop shadow (glow);
+        # `self._body` always owns an opacity effect (dim). Only the
+        # effects' properties change, never their type.
+        self._glow = QGraphicsDropShadowEffect(self)
+        self._glow.setColor(QColor(theme.ACCENT_GLOW))
+        self._glow.setOffset(0, 0)
+        self._glow.setBlurRadius(0)
+        self.setGraphicsEffect(self._glow)
+
+        self._dim = QGraphicsOpacityEffect(self._body)
+        self._dim.setOpacity(1.0)
+        self._body.setGraphicsEffect(self._dim)
+
     def _build_ui(self) -> None:
-        layout = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        self._body = QWidget(self)
+        outer.addWidget(self._body)
+
+        layout = QVBoxLayout(self._body)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
@@ -159,35 +182,29 @@ class MediaCard(QFrame):
     # ------------------------------------------------------------------
 
     def set_focused(self, focused: bool) -> None:
-        was_focused = self._focused
         self._focused = focused
         border = theme.ACCENT if focused else "transparent"
         self.setStyleSheet(
             f"#media_card {{ border-radius: {theme.CARD_RADIUS}px; "
             f"border: {theme.FOCUS_BORDER}px solid {border}; }}"
         )
-        if focused:
-            glow = QGraphicsDropShadowEffect(self)
-            glow.setColor(QColor(theme.ACCENT_GLOW))
-            glow.setOffset(0, 0)
-            glow.setBlurRadius(0)
-            self.setGraphicsEffect(glow)
-            anim = QPropertyAnimation(glow, b"blurRadius", self)
-            anim.setDuration(theme.FOCUS_ANIM_MS)
-            anim.setStartValue(0)
-            anim.setEndValue(theme.FOCUS_GLOW_RADIUS)
-            anim.start()
-            self._glow_anim = anim  # keep a ref so it isn't GC'd mid-animation
-        elif was_focused:
-            # Only dim when transitioning away from focused state.
+
+        # Glow lives permanently on `self`; only its blurRadius animates.
+        # Never swap the effect object or its type (see comment in __init__).
+        if self._glow_anim is not None:
+            self._glow_anim.stop()
             self._glow_anim = None
-            dim = QGraphicsOpacityEffect(self)
-            dim.setOpacity(theme.UNFOCUSED_OPACITY)
-            self.setGraphicsEffect(dim)
-        else:
-            # Card was never focused; clear any leftover effect.
-            self._glow_anim = None
-            self.setGraphicsEffect(None)
+        anim = QPropertyAnimation(self._glow, b"blurRadius", self)
+        anim.setDuration(theme.FOCUS_ANIM_MS)
+        anim.setStartValue(self._glow.blurRadius())
+        anim.setEndValue(theme.FOCUS_GLOW_RADIUS if focused else 0)
+        anim.start()
+        self._glow_anim = anim  # keep a ref so it isn't GC'd mid-animation
+
+        # Dim lives permanently on `self._body`; only its opacity changes.
+        # Unconditional every time, regardless of prior focus state — this
+        # is what fixes the sibling-dimming spec gap.
+        self._dim.setOpacity(1.0 if focused else theme.UNFOCUSED_OPACITY)
 
     def keyPressEvent(self, event) -> None:
         from sixpack.input.keyboard import key_to_action
