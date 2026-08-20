@@ -5,9 +5,10 @@ import hashlib
 import os
 
 import pytest
+from PyQt6.QtCore import QSize
 from PyQt6.QtGui import QColor, QPixmap
 
-from sixpack.ui.cover_cache import CoverCache
+from sixpack.ui.cover_cache import CoverCache, dominant_color, make_backdrop
 
 
 def _write_pixmap(path, color="blue"):
@@ -139,11 +140,6 @@ def test_clear_empty_cache_no_error(tmp_path, qtbot):
 
 
 # ---- dominant_color + make_backdrop ----
-
-from PyQt6.QtCore import QSize  # noqa: E402
-from PyQt6.QtGui import QColor, QPixmap  # noqa: E402
-
-from sixpack.ui.cover_cache import CoverCache, dominant_color, make_backdrop  # noqa: E402
 
 
 def _solid(w, h, color) -> QPixmap:
