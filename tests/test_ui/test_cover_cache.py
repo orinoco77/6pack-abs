@@ -136,3 +136,51 @@ def test_clear_removes_all_files(tmp_path, qtbot):
 def test_clear_empty_cache_no_error(tmp_path, qtbot):
     cache = CoverCache(cache_dir=tmp_path)
     cache.clear()  # should not raise
+
+
+# ---- dominant_color + make_backdrop ----
+
+from PyQt6.QtCore import QSize  # noqa: E402
+from PyQt6.QtGui import QColor, QPixmap  # noqa: E402
+
+from sixpack.ui.cover_cache import CoverCache, dominant_color, make_backdrop  # noqa: E402
+
+
+def _solid(w, h, color) -> QPixmap:
+    pix = QPixmap(w, h)
+    pix.fill(color)
+    return pix
+
+
+def test_dominant_color_of_solid_red():
+    c = dominant_color(_solid(64, 64, QColor(200, 30, 30)))
+    assert c.red() > 150 and c.green() < 80 and c.blue() < 80
+
+
+def test_dominant_color_null_pixmap_is_safe():
+    c = dominant_color(QPixmap())
+    assert isinstance(c, QColor) and c.isValid()
+
+
+def test_make_backdrop_returns_sized_non_null():
+    out = make_backdrop(_solid(300, 300, QColor(120, 60, 200)), QSize(640, 360))
+    assert not out.isNull()
+    assert out.width() == 640 and out.height() == 360
+
+
+def test_backdrop_path_distinct_from_cover_path(tmp_path):
+    cache = CoverCache(cache_dir=tmp_path)
+    url = "http://abs.test/api/items/x/cover?token=t"
+    assert cache._backdrop_path(url) != cache._cache_path(url)
+
+
+def test_fetch_backdrop_uses_disk_cache(tmp_path, qtbot):
+    cache = CoverCache(cache_dir=tmp_path)
+    url = "http://abs.test/api/items/x/cover?token=t"
+    # Pre-seed the backdrop cache file so no network is needed.
+    make_backdrop(_solid(300, 300, QColor(10, 120, 90)), QSize(64, 36)).save(
+        str(cache._backdrop_path(url)), "PNG"
+    )
+    got = {}
+    cache.fetch_backdrop(url, "t", lambda pm: got.setdefault("pm", pm))
+    assert "pm" in got and not got["pm"].isNull()
