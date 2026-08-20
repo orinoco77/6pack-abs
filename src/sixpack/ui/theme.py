@@ -5,13 +5,33 @@ from __future__ import annotations
 BG = "#0f0f0f"
 SURFACE = "#1c1c1c"
 SURFACE_HIGH = "#2a2a2a"
+SURFACE_LOW = "#151515"
 ACCENT = "#4a9eff"
 ACCENT_DIM = "#2a6fcc"
+ACCENT_GLOW = "#4a9eff"
 TEXT_PRIMARY = "#ffffff"
 TEXT_SECONDARY = "#a0a0a0"
 TEXT_MUTED = "#606060"
 DANGER = "#e85555"
 SUCCESS = "#4caf50"
+
+# Cinematic backdrop
+BACKDROP_W = 1920
+BACKDROP_H = 1080
+BACKDROP_DARKEN = 0.45           # fraction of black overlaid on blurred cover
+BACKDROP_SCRIM_TOP = "#00000000"     # transparent
+BACKDROP_SCRIM_BOTTOM = "#e6000000"  # near-opaque black at the bottom
+
+# Focus feedback
+FOCUS_GLOW_RADIUS = 28
+FOCUS_ANIM_MS = 130
+UNFOCUSED_OPACITY = 0.55
+
+# Subtle top→bottom window gradient (used as the base background)
+GRADIENT_BG = (
+    f"qlineargradient(x1:0, y1:0, x2:0, y2:1, "
+    f"stop:0 {SURFACE_LOW}, stop:1 {BG})"
+)
 
 # Font sizes (pt) — sized for TV viewing distance
 FONT_HUGE = 32
@@ -34,6 +54,10 @@ QWidget {{
     color: {TEXT_PRIMARY};
     font-family: "Noto Sans", "DejaVu Sans", sans-serif;
     font-size: {FONT_BODY}pt;
+}}
+
+QMainWindow, #screen_root {{
+    background: {GRADIENT_BG};
 }}
 
 QLabel {{
