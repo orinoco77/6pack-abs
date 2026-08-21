@@ -131,6 +131,43 @@ class _Glow(QWidget):
             pass
 
 
+class _FinishedBadge(QWidget):
+    """A small checkmark badge shown in the top-right corner of a card's
+    art when the item is finished.
+
+    Deliberately paint-level, not a ``QGraphicsEffect`` — see
+    ``docs/qt-graphics-effect-crash.md``.
+    """
+
+    _SIZE = 28
+    _MARGIN = 6
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setFixedSize(self._SIZE, self._SIZE)
+
+    def paintEvent(self, event) -> None:  # noqa: ARG002
+        try:
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setBrush(QColor(theme.SUCCESS))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(0, 0, self._SIZE, self._SIZE)
+            painter.setPen(QColor(theme.TEXT_PRIMARY))
+            font = painter.font()
+            font.setPointSize(14)
+            font.setBold(True)
+            painter.setFont(font)
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "✓")
+            painter.end()
+        except RuntimeError:
+            # Widget was deleted on the C++ side during teardown; skip painting.
+            pass
+
+
 class MediaCard(QFrame):
     """
     A focusable card showing cover art, title, and an optional subtitle.
@@ -205,7 +242,16 @@ class MediaCard(QFrame):
         self._glow.raise_()
         self._glow.show()
 
-        # Keep the scrim/glow exactly covering the body as layout resizes it.
+        # Finished-state badge — a small checkmark overlay in the top-right
+        # corner of the art, shown only when set_finished(True) is called.
+        # Paint-level, not a QGraphicsEffect (see docs/qt-graphics-effect-crash.md).
+        self._finished = False
+        self._finished_badge = _FinishedBadge(self._body)
+        self._position_finished_badge()
+        self._finished_badge.raise_()
+        self._finished_badge.hide()
+
+        # Keep the scrim/glow/badge exactly positioned as layout resizes the body.
         self._body.installEventFilter(self)
 
     def eventFilter(self, obj, event) -> bool:
@@ -217,7 +263,15 @@ class MediaCard(QFrame):
             self._scrim.raise_()
             self._glow.setGeometry(self._body.rect())
             self._glow.raise_()
+            self._position_finished_badge()
+            self._finished_badge.raise_()
         return super().eventFilter(obj, event)
+
+    def _position_finished_badge(self) -> None:
+        self._finished_badge.move(
+            self._body.width() - self._finished_badge.width() - _FinishedBadge._MARGIN,
+            _FinishedBadge._MARGIN,
+        )
 
     def _build_ui(self) -> None:
         outer = QVBoxLayout(self)
@@ -314,6 +368,11 @@ class MediaCard(QFrame):
         painter.fillRect(0, y, bar_w, bar_h, QColor(theme.ACCENT))
         painter.end()
         self._art_label.setPixmap(base)
+
+    def set_finished(self, finished: bool) -> None:
+        """Show/hide the paint-level checkmark badge (see `_FinishedBadge`)."""
+        self._finished = finished
+        self._finished_badge.setVisible(finished)
 
     # ------------------------------------------------------------------
     # Focus state (driven by FocusGrid, not Qt keyboard focus)
