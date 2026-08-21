@@ -14,6 +14,7 @@ class FocusGrid(QWidget):
     """
 
     item_activated = pyqtSignal(int)
+    focus_changed = pyqtSignal(int)
 
     def __init__(self, columns: int = 4, h_spacing: int = 16, v_spacing: int = 16, parent=None) -> None:
         super().__init__(parent)
@@ -83,6 +84,7 @@ class FocusGrid(QWidget):
         # the QScrollArea which would scroll the view instead of navigating.
         self.setFocus()
         self._scroll.ensureWidgetVisible(widget)
+        self.focus_changed.emit(index)
 
     def set_focus_first(self) -> None:
         self.focus_item(0)
