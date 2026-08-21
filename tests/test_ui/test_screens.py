@@ -402,6 +402,51 @@ def test_chapter_screen_load_from_library_item_resume(qtbot):
     assert screen._list.currentRow() == 1  # chapter at 1500–3000
 
 
+class _FakeCoverCache:
+    """Captures fetch/fetch_backdrop calls instead of invoking them, so the
+    test can assert exactly how many times each was invoked without a real
+    network-backed CoverCache. Same pattern as
+    tests/test_ui/test_browse_screen.py's _FakeCoverCache (~line 893).
+    """
+
+    def __init__(self):
+        self.fetch_calls = []
+        self.fetch_backdrop_calls = []
+
+    def fetch(self, url, token, callback):
+        self.fetch_calls.append((url, token, callback))
+
+    def fetch_backdrop(self, url, token, callback):
+        self.fetch_backdrop_calls.append((url, token, callback))
+
+
+def test_chapter_screen_backdrop_fetched_once_not_per_focus_change(qtbot):
+    """ChapterSelectScreen fetches the book's backdrop cover exactly ONCE
+    per load() call and does NOT re-fetch it as focus moves between chapter
+    rows — all chapters share the same book cover, so per-row re-fetching
+    would be pure waste (see chapter_select.py's module docstring and
+    _load_backdrop). This exercises the real production codepath: app.py
+    always constructs ChapterSelectScreen with a real CoverCache, and this
+    behavior was previously only checked via throwaway scripts outside the
+    test suite.
+    """
+    from sixpack.ui.screens.chapter_select import ChapterSelectScreen
+
+    fake_cache = _FakeCoverCache()
+    screen = ChapterSelectScreen(cover_cache=fake_cache)
+    qtbot.addWidget(screen)
+    book = _make_box_set_book()
+    screen.load(book, _make_chapters(), None, "http://localhost", "tok")
+
+    assert len(fake_cache.fetch_backdrop_calls) == 1
+
+    # Simulate focus moving across every chapter row.
+    for row in range(screen._list.count()):
+        screen._list.setCurrentRow(row)
+
+    assert len(fake_cache.fetch_backdrop_calls) == 1
+
+
 # ---- Config ----
 
 def test_config_save_load(tmp_path, monkeypatch):
