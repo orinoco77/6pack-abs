@@ -253,7 +253,11 @@ class ChapterSelectScreen(QWidget):
         self._list.itemActivated.connect(self._on_item_activated)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        # Top margin pushes the list below the hero band (matches browse.py's
+        # rows_layout treatment and detail_grid.py's identical fix) so the
+        # first chapter row doesn't start already overlapping the hero's
+        # title/subtitle text.
+        layout.setContentsMargins(0, _HERO_H, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(self._list)
 

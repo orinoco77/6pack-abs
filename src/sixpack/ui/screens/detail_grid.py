@@ -54,7 +54,10 @@ class DetailGridScreen(QWidget):
         self._grid.focus_changed.connect(self._on_grid_focus_changed)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        # Top margin pushes the grid below the hero band (matches browse.py's
+        # rows_layout treatment) so the first row of cards doesn't start
+        # already overlapping the hero's title/subtitle text.
+        layout.setContentsMargins(0, _HERO_H, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(self._grid)
 
