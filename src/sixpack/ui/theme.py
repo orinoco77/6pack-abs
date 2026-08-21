@@ -27,7 +27,6 @@ BACKDROP_SCRIM_TOP = "#00000000"     # transparent
 BACKDROP_SCRIM_BOTTOM = "#e6000000"  # near-opaque black at the bottom
 
 # Focus feedback
-FOCUS_GLOW_RADIUS = 28
 FOCUS_ANIM_MS = 130
 UNFOCUSED_OPACITY = 0.55
 

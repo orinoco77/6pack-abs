@@ -531,26 +531,46 @@ class BrowseScreen(QWidget):
         for w in self._sidebar_items:
             w.deleteLater()
         self._sidebar_items.clear()
+        # Drop any leftover layout items (e.g. the addStretch() below, or
+        # entries left behind by the widgets deleteLater()'d above) so a
+        # second load_libraries() call doesn't accumulate stray stretches.
+        while self._sidebar_items_layout.count():
+            self._sidebar_items_layout.takeAt(0)
         for lib in self._libraries:
             item = _SidebarItem(lib.name, media_type=getattr(lib, "media_type", "book"))
             self._sidebar_items.append(item)
             self._sidebar_items_layout.addWidget(item)
+        # Without this, items expand to fill the column's remaining vertical
+        # space — which, combined with the `border-left: 3px solid {bar}`
+        # accent styling in _SidebarItem.set_state(), makes the accent bar
+        # stretch across the whole column instead of staying item-sized.
+        self._sidebar_items_layout.addStretch()
+
+    def _make_card(self, item: Any) -> MediaCard:
+        """Build a MediaCard for `item`, wiring cover art + media-type glyph.
+
+        Shared by every MediaCard call site (row strips, "see all" grid,
+        expanded row grid) so cover-fetch wiring and media_type only need to
+        be written once.
+        """
+        cover = item.cover_url(self._server_url, self._token) if callable(
+            getattr(item, "cover_url", None)
+        ) else None
+        card = MediaCard(
+            title=getattr(item, "title", ""),
+            subtitle=getattr(item, "subtitle", ""),
+            media_type=getattr(item, "media_type", "book"),
+        )
+        if cover and self._cover_cache is not None:
+            self._fetch_cover(card, cover, getattr(item, "id", "") or cover)
+        return card
 
     def _populate_row(self, row_idx: int) -> None:
         rw = self._row_widgets[row_idx]
         items = self._row_items[row_idx]
         rw.clear()
         for item in items:
-            cover = item.cover_url(self._server_url, self._token) if callable(
-                getattr(item, "cover_url", None)
-            ) else None
-            card = MediaCard(
-                title=getattr(item, "title", ""),
-                subtitle=getattr(item, "subtitle", ""),
-            )
-            if cover and self._cover_cache is not None:
-                self._fetch_cover(card, cover, getattr(item, "id", "") or cover)
-            rw.add_card(card)
+            rw.add_card(self._make_card(item))
 
         if self._zone == "rows" and row_idx == self._focused_row and items:
             rw.focus_card(self._row_item_idxs[row_idx])
@@ -843,16 +863,8 @@ class BrowseScreen(QWidget):
             card.deleteLater()
         self._grid_cards.clear()
         for i, item in enumerate(items):
-            cover = item.cover_url(self._server_url, self._token) if callable(
-                getattr(item, "cover_url", None)
-            ) else None
-            card = MediaCard(
-                title=getattr(item, "title", ""),
-                subtitle=getattr(item, "subtitle", ""),
-            )
+            card = self._make_card(item)
             card.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            if cover and self._cover_cache is not None:
-                self._fetch_cover(card, cover, getattr(item, "id", "") or cover)
             row, col = divmod(i, _GRID_COLS)
             self._grid_layout.addWidget(card, row, col)
             self._grid_cards.append(card)
@@ -884,16 +896,8 @@ class BrowseScreen(QWidget):
         self._grid_cards.clear()
 
         for i, item in enumerate(items):
-            cover = item.cover_url(self._server_url, self._token) if callable(
-                getattr(item, "cover_url", None)
-            ) else None
-            card = MediaCard(
-                title=getattr(item, "title", ""),
-                subtitle=getattr(item, "subtitle", ""),
-            )
+            card = self._make_card(item)
             card.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            if cover and self._cover_cache is not None:
-                self._fetch_cover(card, cover, getattr(item, "id", "") or cover)
             row, col = divmod(i, _GRID_COLS)
             self._grid_layout.addWidget(card, row, col)
             self._grid_cards.append(card)
