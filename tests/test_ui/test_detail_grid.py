@@ -41,7 +41,7 @@ def test_detail_grid_populate_sets_hero_title_and_cards(qtbot):
     screen = _TestScreen()
     qtbot.addWidget(screen)
     screen._populate("My Series", _items(), {}, "http://s", "t")
-    assert screen._hero_title.text() == "My Series"
+    assert screen._hero_backdrop._hero_title.text() == "My Series"
     assert screen._grid.item_count == 3
 
 
@@ -58,7 +58,7 @@ def test_detail_grid_populate_reflects_focused_item_in_hero_subtitle(qtbot):
     screen = _TestScreen()
     qtbot.addWidget(screen)
     screen._populate("My Series", _items(), {}, "http://s", "t")
-    assert screen._hero_sub.text() == "Item A"
+    assert screen._hero_backdrop._hero_sub.text() == "Item A"
 
 
 def test_detail_grid_item_activated_emits_raw_item(qtbot):

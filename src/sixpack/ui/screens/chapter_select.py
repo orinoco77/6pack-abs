@@ -12,7 +12,7 @@ finished, instead of the old small colored status dot.
 from __future__ import annotations
 
 from PyQt6 import sip
-from PyQt6.QtCore import QRect, Qt, pyqtSignal, QSize
+from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QColor, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QHBoxLayout,
@@ -26,9 +26,7 @@ from PyQt6.QtWidgets import (
 from sixpack.api.models import Chapter, LibraryItem, MediaProgress, SeriesBook, PlaylistItem
 from sixpack.ui import theme
 from sixpack.ui.cover_cache import CoverCache, dominant_color
-from sixpack.ui.widgets.backdrop import Backdrop
-
-_HERO_H = 150
+from sixpack.ui.widgets.hero_backdrop import HeroBackdrop
 
 
 def _fmt_duration(seconds: float) -> str:
@@ -216,8 +214,7 @@ class ChapterSelectScreen(QWidget):
         self._build_ui()
 
     def _build_ui(self) -> None:
-        self._backdrop = Backdrop(self)
-        self._backdrop.lower()
+        self._hero_backdrop = HeroBackdrop(self)
 
         # All focus/selection rendering is done by ChapterItem.set_focused().
         self._list = QListWidget()
@@ -257,41 +254,13 @@ class ChapterSelectScreen(QWidget):
         # rows_layout treatment and detail_grid.py's identical fix) so the
         # first chapter row doesn't start already overlapping the hero's
         # title/subtitle text.
-        layout.setContentsMargins(0, _HERO_H, 0, 0)
+        layout.setContentsMargins(0, HeroBackdrop.HERO_H, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(self._list)
 
-        self._build_hero()
-
     def resizeEvent(self, event) -> None:
-        self._backdrop.setGeometry(self.rect())
-        if hasattr(self, "_hero"):
-            self._hero.setGeometry(self._hero_geometry())
+        self._hero_backdrop.setGeometry(self.rect())
         super().resizeEvent(event)
-
-    def _build_hero(self) -> None:
-        self._hero = QWidget(self)
-        self._hero.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        self._hero.setStyleSheet(f"background: {theme.GRADIENT_HERO_SCRIM};")
-        lay = QVBoxLayout(self._hero)
-        lay.setContentsMargins(36, 24, 36, 8)
-        lay.setSpacing(4)
-        self._hero_title = QLabel("")
-        self._hero_title.setStyleSheet(
-            f"font-size: {theme.FONT_HUGE}pt; font-weight: bold; "
-            f"color: {theme.TEXT_PRIMARY}; background: transparent;"
-        )
-        self._hero_sub = QLabel("")
-        self._hero_sub.setStyleSheet(
-            f"font-size: {theme.FONT_HEADING}pt; color: {theme.TEXT_SECONDARY}; "
-            f"background: transparent;"
-        )
-        lay.addWidget(self._hero_title)
-        lay.addWidget(self._hero_sub)
-        self._hero.raise_()
-
-    def _hero_geometry(self) -> QRect:
-        return QRect(0, 0, self.width(), _HERO_H)
 
     def _on_row_changed(self, row: int) -> None:
         for i in range(self._list.count()):
@@ -363,8 +332,8 @@ class ChapterSelectScreen(QWidget):
         token: str,
     ) -> None:
         self._chapters = chapters
-        self._hero_title.setText(title)
-        self._hero_sub.setText(f"{len(self._chapters)} chapters")
+        self._hero_backdrop.set_title(title)
+        self._hero_backdrop.set_subtitle(f"{len(self._chapters)} chapters")
 
         is_finished = progress.is_finished if progress else False
         current_time = progress.current_time if (progress and not is_finished) else 0.0
@@ -393,19 +362,19 @@ class ChapterSelectScreen(QWidget):
         self._load_backdrop(cover_url, token, key)
 
     def _load_backdrop(self, cover_url: str | None, token: str, key: str) -> None:
-        self._backdrop.set_expected_key(key)
+        self._hero_backdrop.backdrop.set_expected_key(key)
         if not cover_url or self._cover_cache is None:
             return
 
         def _color_cb(pm: QPixmap) -> None:
             if sip.isdeleted(self):
                 return
-            self._backdrop.show_color(dominant_color(pm))
+            self._hero_backdrop.backdrop.show_color(dominant_color(pm))
 
         def _backdrop_cb(pm: QPixmap, k: str = key) -> None:
             if sip.isdeleted(self):
                 return
-            self._backdrop.show_image(pm, key=k)
+            self._hero_backdrop.backdrop.show_image(pm, key=k)
 
         self._cover_cache.fetch(cover_url, token, _color_cb)
         self._cover_cache.fetch_backdrop(cover_url, token, _backdrop_cb)

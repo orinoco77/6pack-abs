@@ -51,7 +51,7 @@ def test_playlist_detail_screen_load(qtbot):
         server_url="http://abs.test:13378",
         token="test-token",
     )
-    assert screen._hero_title.text() == "My Playlist"
+    assert screen._hero_backdrop._hero_title.text() == "My Playlist"
     assert screen._grid.item_count == 2
 
 

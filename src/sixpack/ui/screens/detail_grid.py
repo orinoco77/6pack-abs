@@ -11,17 +11,14 @@ from __future__ import annotations
 from typing import Any
 
 from PyQt6 import sip
-from PyQt6.QtCore import QRect, Qt, pyqtSignal
+from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QVBoxLayout, QWidget
 
-from sixpack.ui import theme
 from sixpack.ui.cover_cache import CoverCache, dominant_color
-from sixpack.ui.widgets.backdrop import Backdrop
 from sixpack.ui.widgets.focus_grid import FocusGrid
+from sixpack.ui.widgets.hero_backdrop import HeroBackdrop
 from sixpack.ui.widgets.media_card import MediaCard
-
-_HERO_H = 150
 
 
 class DetailGridScreen(QWidget):
@@ -46,8 +43,7 @@ class DetailGridScreen(QWidget):
         self._build_ui()
 
     def _build_ui(self) -> None:
-        self._backdrop = Backdrop(self)
-        self._backdrop.lower()
+        self._hero_backdrop = HeroBackdrop(self)
 
         self._grid = FocusGrid(columns=5)
         self._grid.item_activated.connect(self._on_item_activated)
@@ -57,41 +53,13 @@ class DetailGridScreen(QWidget):
         # Top margin pushes the grid below the hero band (matches browse.py's
         # rows_layout treatment) so the first row of cards doesn't start
         # already overlapping the hero's title/subtitle text.
-        layout.setContentsMargins(0, _HERO_H, 0, 0)
+        layout.setContentsMargins(0, HeroBackdrop.HERO_H, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(self._grid)
 
-        self._build_hero()
-
     def resizeEvent(self, event) -> None:
-        self._backdrop.setGeometry(self.rect())
-        if hasattr(self, "_hero"):
-            self._hero.setGeometry(self._hero_geometry())
+        self._hero_backdrop.setGeometry(self.rect())
         super().resizeEvent(event)
-
-    def _build_hero(self) -> None:
-        self._hero = QWidget(self)
-        self._hero.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        self._hero.setStyleSheet(f"background: {theme.GRADIENT_HERO_SCRIM};")
-        lay = QVBoxLayout(self._hero)
-        lay.setContentsMargins(36, 24, 36, 8)
-        lay.setSpacing(4)
-        self._hero_title = QLabel("")
-        self._hero_title.setStyleSheet(
-            f"font-size: {theme.FONT_HUGE}pt; font-weight: bold; "
-            f"color: {theme.TEXT_PRIMARY}; background: transparent;"
-        )
-        self._hero_sub = QLabel("")
-        self._hero_sub.setStyleSheet(
-            f"font-size: {theme.FONT_HEADING}pt; color: {theme.TEXT_SECONDARY}; "
-            f"background: transparent;"
-        )
-        lay.addWidget(self._hero_title)
-        lay.addWidget(self._hero_sub)
-        self._hero.raise_()
-
-    def _hero_geometry(self) -> QRect:
-        return QRect(0, 0, self.width(), _HERO_H)
 
     # ------------------------------------------------------------------
     # Subclass contract
@@ -132,7 +100,7 @@ class DetailGridScreen(QWidget):
         self._progress = progress
         self._server_url = server_url
         self._token = token
-        self._hero_title.setText(title)
+        self._hero_backdrop.set_title(title)
 
         self._grid.clear()
         for item in items:
@@ -201,7 +169,7 @@ class DetailGridScreen(QWidget):
             self._reflect_focus(self._items[index])
 
     def _reflect_focus(self, item: Any) -> None:
-        self._hero_sub.setText(self._item_subtitle(item) or self._item_title(item))
+        self._hero_backdrop.set_subtitle(self._item_subtitle(item) or self._item_title(item))
         if self._cover_cache is None:
             return
         cover = self._item_cover_url(item, self._server_url, self._token)
@@ -209,12 +177,12 @@ class DetailGridScreen(QWidget):
             return
         key = self._item_key(item)
         color = self._dom_colors.get(key)
-        self._backdrop.set_expected_key(key)
+        self._hero_backdrop.backdrop.set_expected_key(key)
         if color is not None:
-            self._backdrop.show_color(color)
+            self._hero_backdrop.backdrop.show_color(color)
         self._cover_cache.fetch_backdrop(
             cover, self._token,
-            lambda pm, k=key: self._backdrop.show_image(pm, key=k),
+            lambda pm, k=key: self._hero_backdrop.backdrop.show_image(pm, key=k),
         )
 
     def focus_item_by_key(self, key: str) -> None:
