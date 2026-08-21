@@ -16,13 +16,9 @@ class Backdrop(QWidget):
 
     Cross-fading is implemented as manual pixmap compositing in
     ``paintEvent`` (two ``drawPixmap`` calls, the second under
-    ``QPainter.setOpacity``) rather than via ``QGraphicsOpacityEffect``.
-    That effect mechanism routes through ``QGraphicsEffectSource.pixmap()``
-    / ``QWidget.render()`` to composite, which has been root-caused (via
-    lldb) as the source of a Qt6.11/PyQt6 compositor segfault elsewhere in
-    this codebase (see ``MediaCard``'s ``_Scrim`` for the sibling fix).
-    Plain ``QPainter.setOpacity`` compositing within a single paint call
-    never touches that machinery, so it sidesteps the crash class entirely.
+    ``QPainter.setOpacity``) rather than via ``QGraphicsOpacityEffect`` —
+    see ``docs/qt-graphics-effect-crash.md`` for why no widget in this
+    package ever uses ``QGraphicsEffect``.
     """
 
     def __init__(self, parent: QWidget | None = None) -> None:

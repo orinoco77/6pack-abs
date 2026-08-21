@@ -33,16 +33,9 @@ from sixpack.ui import theme
 class _Scrim(QWidget):
     """A non-interactive translucent black overlay used to dim a card.
 
-    This is deliberately a *paint-level* mechanism, not a
-    ``QGraphicsOpacityEffect``. Qt 6.11's ``QGraphicsEffect`` compositor
-    reaches the fragile ``QGraphicsEffectSource::pixmap()`` ->
-    ``QWidget::render()`` re-entrant path whenever an opacity effect's
-    opacity is fractional, and segfaults there at volume (see
-    task-4-report.md rounds 1-3). Filling a translucent rectangle in a
-    plain ``paintEvent`` never enters that machinery at all.
-
-    The spec explicitly allows this: "Unfocused cards render at
-    UNFOCUSED_DIM_OPACITY (via a QGraphicsOpacityEffect *or paint tweak*)".
+    Deliberately paint-level, not a ``QGraphicsOpacityEffect`` — see
+    ``docs/qt-graphics-effect-crash.md`` for why no widget in this package
+    ever uses ``QGraphicsEffect``.
     """
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -92,10 +85,8 @@ class _Glow(QWidget):
     is driven by ``MediaCard._glow_strength`` (0.0 unfocused .. 1.0 fully
     focused).
 
-    Deliberately paint-level, not a ``QGraphicsEffect`` — see ``_Scrim``
-    above for why: any ``QGraphicsEffect`` on this widget tree has been
-    root-caused (via lldb) as the source of a Qt6.11/PyQt6 compositor
-    segfault elsewhere in this codebase.
+    Deliberately paint-level, not a ``QGraphicsEffect`` — see
+    ``docs/qt-graphics-effect-crash.md``.
     """
 
     _MAX_ALPHA = 150  # alpha (0..255) at the body's edge when strength == 1.0
@@ -175,16 +166,9 @@ class MediaCard(QFrame):
         # via QVariantAnimation and rendered by `self._glow` (a `_Glow`
         # overlay sitting on top of `self._body`, see its docstring for why
         # it has to be an overlay rather than a halo bled outward past the
-        # card's own bounds). This is a deliberate replacement for a
-        # `QGraphicsDropShadowEffect` that used to live here: any
-        # `QGraphicsEffect` on this widget tree routes through
-        # `QGraphicsEffectSource.pixmap()` / `QWidget.render()` to composite,
-        # which has been root-caused (via lldb) as the source of a
-        # Qt6.11/PyQt6 compositor segfault elsewhere in this codebase (see
-        # `_Scrim` above and `Backdrop.paintEvent`). Plain `QPainter`
-        # drawing within a single paint call never touches that machinery,
-        # so it sidesteps the crash class entirely. `self.graphicsEffect()`
-        # must be `None` at all times.
+        # card's own bounds). No QGraphicsEffect involved — see
+        # docs/qt-graphics-effect-crash.md. `self.graphicsEffect()` must be
+        # `None` at all times.
         self._glow_strength: float = 0.0
         # One long-lived QVariantAnimation, reused (stopped/reconfigured/
         # restarted) on every focus change rather than recreated per call.
@@ -198,11 +182,8 @@ class MediaCard(QFrame):
 
         self._build_ui()
 
-        # Dim is a paint-level scrim, NOT a QGraphicsOpacityEffect — a
-        # fractional-opacity QGraphicsOpacityEffect drags Qt into the
-        # crash-prone QGraphicsEffectSource::pixmap()/QWidget::render()
-        # compositing path (task-4-report.md rounds 1-3). No QGraphicsEffect
-        # subclass is used for dimming anywhere.
+        # Dim is a paint-level scrim, NOT a QGraphicsOpacityEffect — see
+        # docs/qt-graphics-effect-crash.md.
         #
         # It starts visible, matching `self._focused = False`. Sibling cards
         # in a freshly populated grid never receive an explicit set_focused()
