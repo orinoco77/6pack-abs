@@ -303,6 +303,30 @@ def test_media_card_progress_clamps_low(qtbot):
     card.set_progress(-0.5)  # < 0 should clamp
 
 
+def test_media_card_set_finished_shows_badge(qtbot):
+    card = MediaCard(title="Test")
+    qtbot.addWidget(card)
+    assert card._finished is False
+    card.set_finished(True)
+    assert card._finished is True
+    card.set_finished(False)
+    assert card._finished is False
+
+
+def test_media_card_finished_badge_paints_without_crash(qtbot):
+    """Real paint, not just state — matches this codebase's pattern of
+    verifying paint-level effects actually render (see task-glow-fix-report
+    history in git log for why state-only assertions weren't enough once
+    before)."""
+    card = MediaCard(title="Test")
+    qtbot.addWidget(card)
+    card.set_finished(True)
+    card.show()
+    qtbot.waitExposed(card)
+    pix = card.grab()
+    assert not pix.isNull()
+
+
 def test_media_card_set_focused_style(qtbot):
     from sixpack.ui import theme
     card = MediaCard(title="Test")
