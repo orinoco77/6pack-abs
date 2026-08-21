@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import time
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -51,6 +52,23 @@ async def _load(token: str):
     }
 
 
+def _pump(app: QApplication, seconds: float) -> None:
+    """Process Qt events for `seconds` of wall-clock time.
+
+    A single asyncio.sleep() blocks this thread without ever handing
+    control back to Qt's own event loop, so anything Qt-timer-driven
+    (QVariantAnimation, e.g. the focus glow) or Qt-native-I/O-driven
+    (QNetworkAccessManager cover downloads) never progresses during the
+    sleep — only whatever was already queued gets processed by the single
+    processEvents() call before/after. Repeatedly pumping instead lets
+    both actually advance, matching how a real running app behaves.
+    """
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(0.01)
+
+
 def _grab(widget, path: Path) -> None:
     pix = QPixmap(SIZE)
     pix.fill(Qt.GlobalColor.black)
@@ -84,9 +102,7 @@ def main() -> int:
     screen.show()
 
     # Let cover downloads + focus effects settle, then grab.
-    app.processEvents()
-    loop.run_until_complete(asyncio.sleep(2.0))
-    app.processEvents()
+    _pump(app, 2.0)
     _grab(screen, out / "browse.png")
     print(f"wrote {out / 'browse.png'}")
 
@@ -94,9 +110,7 @@ def main() -> int:
     # first card, exercising the glow/dim/hero reflection the sidebar-only
     # default screenshot above never touches.
     screen._enter_rows()
-    app.processEvents()
-    loop.run_until_complete(asyncio.sleep(0.5))
-    app.processEvents()
+    _pump(app, 1.0)
     _grab(screen, out / "browse_focused.png")
     print(f"wrote {out / 'browse_focused.png'}")
     return 0
