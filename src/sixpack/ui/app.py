@@ -317,10 +317,6 @@ class MainWindow(QMainWindow):
     # Library / series / detail flow
     # ------------------------------------------------------------------
 
-    async def _async_get_series(self, library_id: str):
-        async with ABSClient(self._server_url, token=self._token) as client:
-            return await client.get_series(library_id)
-
     def _on_series_selected(self, series: Series) -> None:
         self._current_series = series
         logger.debug("Series selected: %s (%d books)", series.name, series.book_count)
@@ -348,10 +344,6 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Playlists
     # ------------------------------------------------------------------
-
-    async def _async_get_playlists(self, library_id: str | None):
-        async with ABSClient(self._server_url, token=self._token) as client:
-            return await client.get_playlists(library_id)
 
     def _on_playlist_selected(self, playlist: Playlist) -> None:
         self._current_playlist = playlist
