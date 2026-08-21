@@ -1,20 +1,34 @@
-"""Chapter selection screen — pick a story within a box-set book."""
+"""Chapter selection screen — pick a chapter within an audiobook.
+
+Reuses the same cinematic Backdrop+hero shell as the grid detail screens
+(``DetailGridScreen``), but does NOT subclass it: chapters within one book
+all share the SAME cover art (the book's own cover), so a card grid of
+duplicate images would be visually useless here. Instead this screen keeps
+its existing ``QListWidget``-based list — the right structural choice for
+a single-column list — with each row (``ChapterItem``) upgraded to the same
+progress language ``MediaCard`` uses: a thin progress bar + checkmark-when-
+finished, instead of the old small colored status dot.
+"""
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal, QSize
+from PyQt6 import sip
+from PyQt6.QtCore import QRect, Qt, pyqtSignal, QSize
+from PyQt6.QtGui import QColor, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
-    QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
 from sixpack.api.models import Chapter, LibraryItem, MediaProgress, SeriesBook, PlaylistItem
 from sixpack.ui import theme
-from sixpack.ui.cover_cache import CoverCache
+from sixpack.ui.cover_cache import CoverCache, dominant_color
+from sixpack.ui.widgets.backdrop import Backdrop
+
+_HERO_H = 150
 
 
 def _fmt_duration(seconds: float) -> str:
@@ -40,48 +54,142 @@ def _chapter_status(chapter: Chapter, current_time: float, is_finished: bool) ->
     return "unstarted"
 
 
-class ChapterItem(QWidget):
-    def __init__(self, index: int, chapter: Chapter, status: str, parent=None) -> None:
-        super().__init__(parent)
-        self._build_ui(index, chapter, status)
+def _chapter_fraction(chapter: Chapter, current_time: float, status: str) -> float:
+    """Fraction (0.0..1.0) through *this* chapter — mirrors the semantics
+    MediaCard's callers use (``DetailGridScreen._item_progress``): a
+    finished item reports fraction 0.0 (its bar stays empty; the
+    checkmark alone communicates "finished"), only an in-progress item
+    reports a real fraction.
+    """
+    if status != "in_progress":
+        return 0.0
+    span = chapter.end - chapter.start
+    if span <= 0:
+        return 0.0
+    return max(0.0, min(1.0, (current_time - chapter.start) / span))
 
-    def _build_ui(self, index: int, chapter: Chapter, status: str) -> None:
+
+class _ProgressStrip(QWidget):
+    """Thin paint-level progress bar spanning a chapter row's full width —
+    same visual weight/drawing approach as ``MediaCard.set_progress``'s
+    bar, adapted to a list-row footer instead of a card-bottom overlay.
+
+    Deliberately paint-level, not a ``QGraphicsEffect`` — see
+    ``docs/qt-graphics-effect-crash.md``.
+    """
+
+    _HEIGHT = 4
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setFixedHeight(self._HEIGHT)
+        self._fraction = 0.0
+
+    def set_fraction(self, fraction: float) -> None:
+        self._fraction = max(0.0, min(1.0, fraction))
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: ARG002
+        try:
+            painter = QPainter(self)
+            painter.fillRect(self.rect(), QColor(theme.SURFACE_HIGH))
+            width = int(self.width() * self._fraction)
+            if width > 0:
+                painter.fillRect(0, 0, width, self.height(), QColor(theme.ACCENT))
+            painter.end()
+        except RuntimeError:
+            # Widget was deleted on the C++ side during teardown; skip painting.
+            pass
+
+
+class _FinishedCheck(QWidget):
+    """Small paint-level checkmark badge for a finished chapter row — the
+    same ``theme.SUCCESS`` checkmark-on-a-circle visual language as
+    ``MediaCard``'s ``_FinishedBadge``, just sized down for a list row
+    rather than a card-corner overlay.
+
+    Deliberately paint-level, not a ``QGraphicsEffect`` — see
+    ``docs/qt-graphics-effect-crash.md``.
+    """
+
+    _SIZE = 22
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setFixedSize(self._SIZE, self._SIZE)
+
+    def paintEvent(self, event) -> None:  # noqa: ARG002
+        try:
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setBrush(QColor(theme.SUCCESS))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(0, 0, self._SIZE, self._SIZE)
+            painter.setPen(QColor(theme.TEXT_PRIMARY))
+            font = painter.font()
+            font.setPointSize(11)
+            font.setBold(True)
+            painter.setFont(font)
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "✓")
+            painter.end()
+        except RuntimeError:
+            # Widget was deleted on the C++ side during teardown; skip painting.
+            pass
+
+
+class ChapterItem(QWidget):
+    def __init__(
+        self,
+        index: int,
+        chapter: Chapter,
+        status: str,
+        fraction: float = 0.0,
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self._build_ui(index, chapter, status, fraction)
+
+    def _build_ui(self, index: int, chapter: Chapter, status: str, fraction: float) -> None:
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.set_focused(False)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(16)
 
-        dot = QLabel()
-        dot.setFixedSize(14, 14)
-        if status == "finished":
-            dot.setStyleSheet(f"background: {theme.SUCCESS}; border-radius: 7px; border: none;")
-        elif status == "in_progress":
-            dot.setStyleSheet(f"background: {theme.ACCENT}; border-radius: 7px; border: none;")
-        else:
-            dot.setStyleSheet(f"background: {theme.TEXT_MUTED}; border-radius: 7px; border: none;")
-        layout.addWidget(dot)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(16, 10, 16, 8)
+        outer.setSpacing(8)
+
+        row = QHBoxLayout()
+        row.setSpacing(16)
 
         num_label = QLabel(str(index + 1))
         num_label.setFixedWidth(36)
         num_label.setStyleSheet(
             f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_META}pt; background: transparent; border: none;"
         )
-        layout.addWidget(num_label)
+        row.addWidget(num_label)
 
         title_text = chapter.title if chapter.title else f"Chapter {index + 1}"
         title = QLabel(title_text)
         title.setStyleSheet(
             f"color: {theme.TEXT_PRIMARY}; font-size: {theme.FONT_BODY}pt; font-weight: bold; background: transparent; border: none;"
         )
-        layout.addWidget(title, stretch=1)
+        row.addWidget(title, stretch=1)
 
         duration = _fmt_duration(chapter.end - chapter.start)
         dur_label = QLabel(duration)
         dur_label.setStyleSheet(
             f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_META}pt; background: transparent; border: none;"
         )
-        layout.addWidget(dur_label)
+        row.addWidget(dur_label)
+
+        self._check = _FinishedCheck()
+        self._check.setVisible(status == "finished")
+        row.addWidget(self._check)
+
+        outer.addLayout(row)
+
+        self._progress = _ProgressStrip()
+        self._progress.set_fraction(fraction)
+        outer.addWidget(self._progress)
 
     def set_focused(self, focused: bool) -> None:
         border = theme.ACCENT if focused else "transparent"
@@ -108,43 +216,22 @@ class ChapterSelectScreen(QWidget):
         self._build_ui()
 
     def _build_ui(self) -> None:
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
-
-        bar = QWidget()
-        bar.setFixedHeight(72)
-        bar.setStyleSheet(f"background-color: {theme.SURFACE};")
-        bar_layout = QHBoxLayout(bar)
-        bar_layout.setContentsMargins(24, 0, 24, 0)
-
-        self._back_btn = QPushButton("← Episodes")
-        self._back_btn.setFixedWidth(160)
-        self._back_btn.setStyleSheet(f"font-size: {theme.FONT_BAR_BTN}pt;")
-        self._back_btn.clicked.connect(self.back_requested)
-        bar_layout.addWidget(self._back_btn)
-
-        self._title_label = QLabel()
-        self._title_label.setStyleSheet(
-            f"font-size: {theme.FONT_HEADING}pt; font-weight: bold; color: {theme.TEXT_PRIMARY};"
-        )
-        bar_layout.addWidget(self._title_label)
-        bar_layout.addStretch()
-
-        self._count_label = QLabel()
-        self._count_label.setStyleSheet(
-            f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_META}pt;"
-        )
-        bar_layout.addWidget(self._count_label)
-
-        root.addWidget(bar)
+        self._backdrop = Backdrop(self)
+        self._backdrop.lower()
 
         # All focus/selection rendering is done by ChapterItem.set_focused().
         self._list = QListWidget()
         self._list.setSpacing(2)
+        # QListWidget inherits from QAbstractScrollArea, so — like every
+        # other scroll container sitting in front of a Backdrop in this
+        # codebase (browse.py's _rows_scroll/_grid_scroll, FocusGrid) — it
+        # needs BOTH the widget's own stylesheet AND its viewport's
+        # stylesheet set to a transparent background, or its opaque
+        # QAbstractScrollArea viewport paints over the Backdrop and hides
+        # it completely.
         self._list.setStyleSheet(f"""
             QListWidget {{
-                background-color: {theme.BG};
+                background: transparent;
                 outline: none;
             }}
             QListWidget::item {{
@@ -161,15 +248,56 @@ class ChapterSelectScreen(QWidget):
                 outline: none;
             }}
         """)
+        self._list.viewport().setStyleSheet("background: transparent;")
         self._list.currentRowChanged.connect(self._on_row_changed)
         self._list.itemActivated.connect(self._on_item_activated)
-        root.addWidget(self._list)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(self._list)
+
+        self._build_hero()
+
+    def resizeEvent(self, event) -> None:
+        self._backdrop.setGeometry(self.rect())
+        if hasattr(self, "_hero"):
+            self._hero.setGeometry(self._hero_geometry())
+        super().resizeEvent(event)
+
+    def _build_hero(self) -> None:
+        self._hero = QWidget(self)
+        self._hero.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._hero.setStyleSheet(f"background: {theme.GRADIENT_HERO_SCRIM};")
+        lay = QVBoxLayout(self._hero)
+        lay.setContentsMargins(36, 24, 36, 8)
+        lay.setSpacing(4)
+        self._hero_title = QLabel("")
+        self._hero_title.setStyleSheet(
+            f"font-size: {theme.FONT_HUGE}pt; font-weight: bold; "
+            f"color: {theme.TEXT_PRIMARY}; background: transparent;"
+        )
+        self._hero_sub = QLabel("")
+        self._hero_sub.setStyleSheet(
+            f"font-size: {theme.FONT_HEADING}pt; color: {theme.TEXT_SECONDARY}; "
+            f"background: transparent;"
+        )
+        lay.addWidget(self._hero_title)
+        lay.addWidget(self._hero_sub)
+        self._hero.raise_()
+
+    def _hero_geometry(self) -> QRect:
+        return QRect(0, 0, self.width(), _HERO_H)
 
     def _on_row_changed(self, row: int) -> None:
         for i in range(self._list.count()):
             widget = self._list.itemWidget(self._list.item(i))
             if isinstance(widget, ChapterItem):
                 widget.set_focused(i == row)
+
+    # ------------------------------------------------------------------
+    # Loading
+    # ------------------------------------------------------------------
 
     def load_from_library_item(
         self,
@@ -183,28 +311,10 @@ class ChapterSelectScreen(QWidget):
         self._library_item = item
         self._book = None
         self._playlist_item = None
-        self._chapters = chapters
-        self._title_label.setText(item.title)
-        self._count_label.setText(f"{len(self._chapters)} chapters")
-
-        is_finished = progress.is_finished if progress else False
-        current_time = progress.current_time if (progress and not is_finished) else 0.0
-
-        self._list.clear()
-        for i, chapter in enumerate(self._chapters):
-            status = _chapter_status(chapter, current_time, is_finished)
-            ch_widget = ChapterItem(i, chapter, status)
-            list_item = QListWidgetItem()
-            list_item.setSizeHint(QSize(0, 68))
-            list_item.setData(Qt.ItemDataRole.UserRole, chapter)
-            self._list.addItem(list_item)
-            self._list.setItemWidget(list_item, ch_widget)
-
-        if self._list.count():
-            idx = self._find_resume_index(current_time, is_finished)
-            self._list.setCurrentRow(idx)
-            self._on_row_changed(idx)
-            self._list.setFocus()
+        self._populate_chapters(
+            item.title, chapters, progress,
+            item.cover_url(server_url, token), item.id, token,
+        )
 
     def load(
         self,
@@ -217,28 +327,10 @@ class ChapterSelectScreen(QWidget):
         self._book = book
         self._playlist_item = None
         self._library_item = None
-        self._chapters = chapters
-        self._title_label.setText(book.title)
-        self._count_label.setText(f"{len(self._chapters)} chapters")
-
-        is_finished = progress.is_finished if progress else False
-        current_time = progress.current_time if (progress and not is_finished) else 0.0
-
-        self._list.clear()
-        for i, chapter in enumerate(self._chapters):
-            status = _chapter_status(chapter, current_time, is_finished)
-            ch_widget = ChapterItem(i, chapter, status)
-            item = QListWidgetItem()
-            item.setSizeHint(QSize(0, 68))
-            item.setData(Qt.ItemDataRole.UserRole, chapter)
-            self._list.addItem(item)
-            self._list.setItemWidget(item, ch_widget)
-
-        if self._list.count():
-            idx = self._find_resume_index(current_time, is_finished)
-            self._list.setCurrentRow(idx)
-            self._on_row_changed(idx)
-            self._list.setFocus()
+        self._populate_chapters(
+            book.title, chapters, progress,
+            book.cover_url(server_url, token), book.id, token,
+        )
 
     def load_from_playlist_item(
         self,
@@ -252,9 +344,23 @@ class ChapterSelectScreen(QWidget):
         self._playlist_item = item
         self._book = None
         self._library_item = None
+        self._populate_chapters(
+            item.title, chapters, progress,
+            item.cover_url(server_url, token), item.id, token,
+        )
+
+    def _populate_chapters(
+        self,
+        title: str,
+        chapters: list[Chapter],
+        progress: MediaProgress | None,
+        cover_url: str | None,
+        key: str,
+        token: str,
+    ) -> None:
         self._chapters = chapters
-        self._title_label.setText(item.title)
-        self._count_label.setText(f"{len(self._chapters)} chapters")
+        self._hero_title.setText(title)
+        self._hero_sub.setText(f"{len(self._chapters)} chapters")
 
         is_finished = progress.is_finished if progress else False
         current_time = progress.current_time if (progress and not is_finished) else 0.0
@@ -262,7 +368,8 @@ class ChapterSelectScreen(QWidget):
         self._list.clear()
         for i, chapter in enumerate(self._chapters):
             status = _chapter_status(chapter, current_time, is_finished)
-            ch_widget = ChapterItem(i, chapter, status)
+            fraction = _chapter_fraction(chapter, current_time, status)
+            ch_widget = ChapterItem(i, chapter, status, fraction)
             list_item = QListWidgetItem()
             list_item.setSizeHint(QSize(0, 68))
             list_item.setData(Qt.ItemDataRole.UserRole, chapter)
@@ -274,6 +381,30 @@ class ChapterSelectScreen(QWidget):
             self._list.setCurrentRow(idx)
             self._on_row_changed(idx)
             self._list.setFocus()
+
+        # ONE cover for the whole screen (the book's own) — fetched and
+        # shown once here, NOT re-fetched as focus moves between chapter
+        # rows (see module docstring / _on_row_changed above, which never
+        # touches the backdrop).
+        self._load_backdrop(cover_url, token, key)
+
+    def _load_backdrop(self, cover_url: str | None, token: str, key: str) -> None:
+        self._backdrop.set_expected_key(key)
+        if not cover_url or self._cover_cache is None:
+            return
+
+        def _color_cb(pm: QPixmap) -> None:
+            if sip.isdeleted(self):
+                return
+            self._backdrop.show_color(dominant_color(pm))
+
+        def _backdrop_cb(pm: QPixmap, k: str = key) -> None:
+            if sip.isdeleted(self):
+                return
+            self._backdrop.show_image(pm, key=k)
+
+        self._cover_cache.fetch(cover_url, token, _color_cb)
+        self._cover_cache.fetch_backdrop(cover_url, token, _backdrop_cb)
 
     def _find_resume_index(self, current_time: float, is_finished: bool) -> int:
         if is_finished or current_time <= 0:
