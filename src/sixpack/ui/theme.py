@@ -33,6 +33,19 @@ GRADIENT_BG = (
     f"stop:0 {SURFACE_LOW}, stop:1 {BG})"
 )
 
+# Hero band scrim: opaque BG at the top (keeps the hero title/subtitle
+# legible) fading to fully transparent at the bottom. The hero band sits at
+# a fixed position over the backdrop/rows, so a flat opaque background would
+# both hide the backdrop entirely and create a hard edge where rows scroll
+# up underneath it (via ensureWidgetVisible). Same #AARRGGBB-stop pattern as
+# BACKDROP_SCRIM_TOP/BOTTOM above, just anchored to BG instead of black.
+HERO_SCRIM_TOP = f"#ff{BG[1:]}"     # opaque BG
+HERO_SCRIM_BOTTOM = f"#00{BG[1:]}"  # transparent BG
+GRADIENT_HERO_SCRIM = (
+    f"qlineargradient(x1:0, y1:0, x2:0, y2:1, "
+    f"stop:0 {HERO_SCRIM_TOP}, stop:0.65 {HERO_SCRIM_TOP}, stop:1 {HERO_SCRIM_BOTTOM})"
+)
+
 # Font sizes (pt) — sized for TV viewing distance
 FONT_HUGE = 32
 FONT_TITLE = 24

@@ -107,6 +107,13 @@ class _RowWidget(QWidget):
         self._row_is_focused = False
         self._see_all_is_focused = False
 
+        # Like every plain QWidget in this app, `self` and its child
+        # container widgets get an opaque background painted by the
+        # app-wide stylesheet's `QWidget { background-color: ... }` rule
+        # unless overridden — which would occlude `BrowseScreen._backdrop`
+        # just as badly as the un-fixed page-level scroll areas did.
+        self.setStyleSheet("background: transparent;")
+
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 4, 0, 4)
         outer.setSpacing(6)
@@ -114,6 +121,7 @@ class _RowWidget(QWidget):
         # Title bar
         title_bar = QWidget()
         title_bar.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        title_bar.setStyleSheet("background: transparent;")
         tb_layout = QHBoxLayout(title_bar)
         tb_layout.setContentsMargins(0, 0, 0, 0)
 
@@ -133,6 +141,7 @@ class _RowWidget(QWidget):
 
         self._strip = QWidget()
         self._strip.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._strip.setStyleSheet("background: transparent;")
         self._strip_layout = QHBoxLayout(self._strip)
         self._strip_layout.setContentsMargins(0, 0, 0, 0)
         self._strip_layout.setSpacing(16)
@@ -146,6 +155,7 @@ class _RowWidget(QWidget):
         self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._scroll.setStyleSheet("border: none; background: transparent;")
+        self._scroll.viewport().setStyleSheet("background: transparent;")
         outer.addWidget(self._scroll)
 
     # ------------------------------------------------------------------
@@ -298,6 +308,12 @@ class BrowseScreen(QWidget):
     def _build_hero(self) -> None:
         self._hero = QWidget(self)
         self._hero.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        # A flat opaque background here would fully hide the backdrop behind
+        # the hero band and create a hard edge where rows scroll up underneath
+        # it (ensureWidgetVisible). A top-opaque/bottom-transparent scrim
+        # keeps the title/subtitle legible while letting the backdrop (and
+        # any content scrolling up underneath) show through at the bottom.
+        self._hero.setStyleSheet(f"background: {theme.GRADIENT_HERO_SCRIM};")
         lay = QVBoxLayout(self._hero)
         lay.setContentsMargins(36, 24, 36, 8)
         lay.setSpacing(4)
@@ -358,6 +374,13 @@ class BrowseScreen(QWidget):
     def _build_content(self) -> QWidget:
         self._content_stack = QStackedWidget()
         self._content_stack.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        # The app-wide stylesheet's `QWidget { background-color: ... }` rule
+        # paints every plain QWidget opaque (that's how Qt style sheets
+        # work once an app-level sheet targets the base QWidget class) —
+        # which fully occludes `self._backdrop` (lowered behind this whole
+        # content pane). Make the stack itself transparent; the rows/grid
+        # scroll areas below get the same treatment for the same reason.
+        self._content_stack.setStyleSheet("background: transparent;")
 
         # --- Page 0: rows view ---
         rows_inner = QWidget()
@@ -379,11 +402,24 @@ class BrowseScreen(QWidget):
         self._rows_scroll.setWidgetResizable(True)
         self._rows_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._rows_scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        # QScrollArea (and its viewport, and the plain QWidget it wraps) all
+        # get an opaque background-color painted onto them by the app-wide
+        # stylesheet unless explicitly overridden — same occlusion issue as
+        # `self._content_stack` above. Without this, `self._backdrop` never
+        # shows through the rows page at all.
+        self._rows_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        self._rows_scroll.viewport().setStyleSheet("background: transparent;")
+        rows_inner.setStyleSheet("background: transparent;")
         self._content_stack.addWidget(self._rows_scroll)
 
         # --- Page 1: expanded grid view ---
         grid_page = QWidget()
         grid_page.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        # Same occlusion issue as the rows page: this plain QWidget (and the
+        # QStackedWidget it wraps below) get an opaque app-wide background
+        # unless overridden, which would hide the backdrop behind any empty
+        # space in the grid.
+        grid_page.setStyleSheet("background: transparent;")
         grid_page_layout = QVBoxLayout(grid_page)
         grid_page_layout.setContentsMargins(32, 24, 32, 24)
         grid_page_layout.setSpacing(16)
@@ -396,6 +432,7 @@ class BrowseScreen(QWidget):
 
         self._grid_body_stack = QStackedWidget()
         self._grid_body_stack.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._grid_body_stack.setStyleSheet("background: transparent;")
 
         # Page 0: loading label shown while full dataset is fetched
         grid_loading = QWidget()
@@ -424,6 +461,11 @@ class BrowseScreen(QWidget):
         self._grid_scroll.setWidgetResizable(True)
         self._grid_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._grid_scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        # Same transparent treatment as `self._rows_scroll` above — otherwise
+        # the grid page occludes the backdrop just as badly as the rows page did.
+        self._grid_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        self._grid_scroll.viewport().setStyleSheet("background: transparent;")
+        self._grid_container.setStyleSheet("background: transparent;")
         self._grid_body_stack.addWidget(self._grid_scroll)
 
         grid_page_layout.addWidget(self._grid_body_stack)
