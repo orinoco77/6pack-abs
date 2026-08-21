@@ -5,14 +5,12 @@ import pytest
 from PyQt6.QtCore import Qt
 
 from sixpack.api.models import (
-    Library,
     LibraryItem,
     LibraryItemMedia,
     MediaProgress,
     Playlist,
     PlaylistItem,
 )
-from sixpack.ui.screens.playlists import PlaylistsScreen
 from sixpack.ui.screens.playlist_detail import PlaylistDetailScreen
 
 
@@ -27,126 +25,6 @@ def _make_item(library_item_id, title, duration):
         media=LibraryItemMedia(metadata={"title": title}, duration=duration),
     )
     return PlaylistItem(libraryItemId=library_item_id, libraryItem=library_item)
-
-
-def _make_playlists():
-    item1 = _make_item("li1", "Book 1", 1800.0)
-    item2 = _make_item("li2", "Book 2", 3600.0)
-    return [
-        Playlist(id="p1", name="Favorites", items=[item1]),
-        Playlist(id="p2", name="To Read", items=[item1, item2]),
-    ]
-
-
-def _make_libraries():
-    return [
-        Library(id="lib1", name="Audiobooks", mediaType="book"),
-        Library(id="lib2", name="Drama", mediaType="podcast"),
-    ]
-
-
-# ---- PlaylistsScreen ----
-
-def test_playlists_screen_creates(qtbot):
-    screen = PlaylistsScreen()
-    qtbot.addWidget(screen)
-    assert screen._grid is not None
-
-
-def test_playlists_screen_load(qtbot):
-    screen = PlaylistsScreen()
-    qtbot.addWidget(screen)
-    playlists = _make_playlists()
-    screen.load(
-        library=None,
-        playlists=playlists,
-        server_url="http://abs.test:13378",
-        token="test-token",
-        all_libraries=_make_libraries(),
-    )
-    assert screen._count_label.text() == "2 playlists"
-
-
-def test_playlists_screen_load_with_library(qtbot):
-    screen = PlaylistsScreen()
-    qtbot.addWidget(screen)
-    lib = Library(id="lib1", name="Audiobooks")
-    screen.load(
-        library=lib,
-        playlists=_make_playlists(),
-        server_url="http://abs.test:13378",
-        token="test-token",
-    )
-    assert "Audiobooks" in screen._library_btn.text()
-
-
-def test_playlists_screen_emits_playlist_selected(qtbot):
-    screen = PlaylistsScreen()
-    qtbot.addWidget(screen)
-    playlists = _make_playlists()
-    screen.load(
-        library=None,
-        playlists=playlists,
-        server_url="http://abs.test:13378",
-        token="test-token",
-    )
-
-    with qtbot.waitSignal(screen.playlist_selected, timeout=1000) as blocker:
-        screen._grid.item_activated.emit(0)
-
-    assert blocker.args[0].id == "p1"
-
-
-def test_playlists_screen_back_signal(qtbot):
-    screen = PlaylistsScreen()
-    qtbot.addWidget(screen)
-    screen.load(
-        library=None,
-        playlists=_make_playlists(),
-        server_url="http://abs.test:13378",
-        token="test-token",
-    )
-
-    with qtbot.waitSignal(screen.back_requested, timeout=1000):
-        qtbot.keyClick(screen, Qt.Key.Key_Escape)
-
-
-def test_playlists_screen_empty(qtbot):
-    screen = PlaylistsScreen()
-    qtbot.addWidget(screen)
-    screen.load(
-        library=None,
-        playlists=[],
-        server_url="http://abs.test:13378",
-        token="test-token",
-    )
-    assert screen._count_label.text() == "0 playlists"
-
-
-def test_playlists_screen_single_item_plural(qtbot):
-    """Count label should use singular 'playlist' when there's exactly one."""
-    screen = PlaylistsScreen()
-    qtbot.addWidget(screen)
-    screen.load(
-        library=None,
-        playlists=[Playlist(id="p1", name="Only One")],
-        server_url="http://abs.test:13378",
-        token="test-token",
-    )
-    assert "1 playlist" in screen._count_label.text()
-    assert "playlists" not in screen._count_label.text()
-
-
-def test_playlists_screen_view_switch_emits(qtbot):
-    """Clicking view switcher should emit view_switch_requested."""
-    screen = PlaylistsScreen()
-    qtbot.addWidget(screen)
-
-    # Can't easily test the menu, but we can test the signal connection
-    with qtbot.waitSignal(screen.view_switch_requested, timeout=1000) as blocker:
-        screen.view_switch_requested.emit("series")
-
-    assert blocker.args[0] == "series"
 
 
 # ---- PlaylistDetailScreen ----

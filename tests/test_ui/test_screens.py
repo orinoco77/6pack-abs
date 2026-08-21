@@ -7,15 +7,12 @@ from PyQt6.QtWidgets import QApplication
 
 from sixpack.api.models import (
     Chapter,
-    Library,
     LibraryItemMedia,
     MediaProgress,
     Series,
     SeriesBook,
 )
 from sixpack.ui.screens.login import LoginScreen
-from sixpack.ui.screens.library import LibraryScreen
-from sixpack.ui.screens.series import SeriesScreen
 from sixpack.ui.screens.series_detail import SeriesDetailScreen
 
 
@@ -130,59 +127,6 @@ def test_login_button_disabled_during_connect(qtbot):
     # Reset state
     screen.show_error("failed")
     assert screen._login_btn.isEnabled()
-
-
-# ---- LibraryScreen ----
-
-def _make_libraries():
-    return [
-        Library(id="lib1", name="Audiobooks", mediaType="book"),
-        Library(id="lib2", name="Drama", mediaType="podcast"),
-    ]
-
-
-def test_library_screen_creates(qtbot):
-    screen = LibraryScreen()
-    qtbot.addWidget(screen)
-    assert screen._list is not None
-
-
-def test_library_screen_set_libraries(qtbot):
-    screen = LibraryScreen()
-    qtbot.addWidget(screen)
-    screen.set_libraries(_make_libraries())
-    assert screen._list.count() == 2
-
-
-def test_library_screen_emits_on_activate(qtbot):
-    screen = LibraryScreen()
-    qtbot.addWidget(screen)
-    libs = _make_libraries()
-    screen.set_libraries(libs)
-
-    with qtbot.waitSignal(screen.library_selected, timeout=1000) as blocker:
-        screen._list.itemActivated.emit(screen._list.item(0))
-
-    assert blocker.args[0].id == "lib1"
-
-
-def test_library_screen_empty(qtbot):
-    screen = LibraryScreen()
-    qtbot.addWidget(screen)
-    screen.set_libraries([])
-    assert screen._list.count() == 0
-
-
-def test_library_screen_enter_key(qtbot):
-    screen = LibraryScreen()
-    qtbot.addWidget(screen)
-    screen.set_libraries(_make_libraries())
-    screen._list.setCurrentRow(1)
-
-    with qtbot.waitSignal(screen.library_selected, timeout=1000) as blocker:
-        qtbot.keyClick(screen._list, Qt.Key.Key_Return)
-
-    assert blocker.args[0].id == "lib2"
 
 
 # ---- SeriesDetailScreen ----
@@ -673,73 +617,3 @@ def test_config_last_library_id_defaults_empty(tmp_path, monkeypatch):
     from sixpack.config import AppConfig
     cfg = AppConfig.load()
     assert cfg.servers[0].last_library_id == ""
-
-
-# ---- SeriesScreen library combo ----
-
-def _make_three_libraries():
-    return [
-        Library(id="lib1", name="Audio Dramas", mediaType="book", icon="database"),
-        Library(id="lib2", name="Audiobooks", mediaType="book", icon="database"),
-        Library(id="lib3", name="Podcasts", mediaType="podcast", icon="microphone"),
-    ]
-
-
-def test_series_screen_combo_populates(qtbot):
-    screen = SeriesScreen()
-    qtbot.addWidget(screen)
-    libs = _make_three_libraries()
-    screen.load(libs[0], [], "http://localhost", "tok", all_libraries=libs)
-
-    menu = screen._make_library_menu()
-    assert menu.actions()[0].text() == "Audio Dramas"
-    assert menu.actions()[1].text() == "Audiobooks"
-    assert len(menu.actions()) == 3
-
-
-def test_series_screen_combo_selects_current_library(qtbot):
-    screen = SeriesScreen()
-    qtbot.addWidget(screen)
-    libs = _make_three_libraries()
-    screen.load(libs[1], [], "http://localhost", "tok", all_libraries=libs)
-
-    menu = screen._make_library_menu()
-    assert menu.actions()[1].isChecked()
-    assert not menu.actions()[0].isChecked()
-
-
-def test_series_screen_combo_switch_emits_signal(qtbot):
-    screen = SeriesScreen()
-    qtbot.addWidget(screen)
-    libs = _make_three_libraries()
-    screen.load(libs[0], [], "http://localhost", "tok", all_libraries=libs)
-
-    with qtbot.waitSignal(screen.library_switch_requested, timeout=1000) as blocker:
-        menu = screen._make_library_menu()
-        menu.actions()[2].trigger()
-
-    assert blocker.args[0].id == "lib3"
-
-
-def test_series_screen_combo_no_signal_same_library(qtbot):
-    screen = SeriesScreen()
-    qtbot.addWidget(screen)
-    libs = _make_three_libraries()
-    screen.load(libs[0], [], "http://localhost", "tok", all_libraries=libs)
-
-    signals = []
-    screen.library_switch_requested.connect(lambda lib: signals.append(lib))
-    # Reload same library — no switch signal
-    screen.load(libs[0], [], "http://localhost", "tok", all_libraries=libs)
-    assert signals == []
-
-
-def test_series_screen_load_without_all_libraries(qtbot):
-    """Calling load() without all_libraries keeps existing menu state."""
-    screen = SeriesScreen()
-    qtbot.addWidget(screen)
-    libs = _make_three_libraries()
-    screen.load(libs[0], [], "http://localhost", "tok", all_libraries=libs)
-    # Second load without passing all_libraries — menu count unchanged
-    screen.load(libs[1], [], "http://localhost", "tok")
-    assert len(screen._make_library_menu().actions()) == 3

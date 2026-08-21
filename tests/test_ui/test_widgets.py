@@ -1,4 +1,4 @@
-"""Tests for FocusGrid, MediaCard, SeriesScreen, and PlayerScreen."""
+"""Tests for FocusGrid, MediaCard, and PlayerScreen."""
 from __future__ import annotations
 
 import sys
@@ -8,7 +8,7 @@ from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import QPushButton, QWidget
 
-from sixpack.api.models import Library, LibraryItemMedia, MediaProgress, Series, SeriesBook
+from sixpack.api.models import LibraryItemMedia, MediaProgress, Series, SeriesBook
 from sixpack.ui.widgets.focus_grid import FocusGrid
 from sixpack.ui.widgets.media_card import MediaCard
 
@@ -484,103 +484,6 @@ def test_media_card_high_churn_no_crash(qtbot, iteration):
     grid.close()
     grid.deleteLater()
     QApplication.processEvents()
-
-
-# ===========================================================================
-# SeriesScreen tests
-# ===========================================================================
-
-def _make_series_list() -> list[Series]:
-    media1 = LibraryItemMedia(metadata={"title": "Ep 1"}, duration=1800.0)
-    media2 = LibraryItemMedia(metadata={"title": "Ep 2"}, duration=3600.0)
-    b1 = SeriesBook(id="b1", libraryId="lib1", media=media1, sequence="1")
-    b2 = SeriesBook(id="b2", libraryId="lib1", media=media2, sequence="2")
-    s1 = Series(id="s1", name="The Archers", books=[b1, b2])
-    s2 = Series(id="s2", name="Doctor Who", books=[b1])
-    return [s1, s2]
-
-
-def test_series_screen_creates(qtbot):
-    from sixpack.ui.screens.series import SeriesScreen
-    screen = SeriesScreen()
-    qtbot.addWidget(screen)
-
-
-def test_series_screen_load(qtbot):
-    from sixpack.ui.screens.series import SeriesScreen
-    screen = SeriesScreen()
-    qtbot.addWidget(screen)
-    library = Library(id="lib1", name="Drama")
-    series_list = _make_series_list()
-    screen.load(library, series_list, "http://abs.test", "token")
-    assert screen._grid.item_count == 2
-
-
-def test_series_screen_back_signal(qtbot):
-    from sixpack.ui.screens.series import SeriesScreen
-    screen = SeriesScreen()
-    qtbot.addWidget(screen)
-    library = Library(id="lib1", name="Drama")
-    screen.load(library, _make_series_list(), "http://abs.test", "token")
-
-    with qtbot.waitSignal(screen.back_requested, timeout=1000):
-        qtbot.keyClick(screen, Qt.Key.Key_Escape)
-
-
-def test_series_screen_back_button(qtbot):
-    from sixpack.ui.screens.series import SeriesScreen
-    screen = SeriesScreen()
-    qtbot.addWidget(screen)
-    library = Library(id="lib1", name="Drama")
-    screen.load(library, _make_series_list(), "http://abs.test", "token")
-
-    with qtbot.waitSignal(screen.back_requested, timeout=1000):
-        screen._back_btn.click()
-
-
-def test_series_screen_item_activated(qtbot):
-    from sixpack.ui.screens.series import SeriesScreen
-    screen = SeriesScreen()
-    qtbot.addWidget(screen)
-    library = Library(id="lib1", name="Drama")
-    series_list = _make_series_list()
-    screen.load(library, series_list, "http://abs.test", "token")
-
-    with qtbot.waitSignal(screen.series_selected, timeout=1000) as blocker:
-        screen._grid.item_activated.emit(0)
-
-    assert blocker.args[0].id == "s1"
-
-
-def test_series_screen_out_of_bounds_item(qtbot):
-    from sixpack.ui.screens.series import SeriesScreen
-    screen = SeriesScreen()
-    qtbot.addWidget(screen)
-    library = Library(id="lib1", name="Drama")
-    screen.load(library, _make_series_list(), "http://abs.test", "token")
-
-    # Out-of-bounds index should not crash
-    with qtbot.assertNotEmitted(screen.series_selected):
-        screen._grid.item_activated.emit(999)
-
-
-def test_series_screen_title_shown(qtbot):
-    from sixpack.ui.screens.series import SeriesScreen
-    screen = SeriesScreen()
-    qtbot.addWidget(screen)
-    library = Library(id="lib1", name="My Drama Library")
-    screen.load(library, _make_series_list(), "http://abs.test", "token",
-                all_libraries=[library])
-    assert "My Drama Library" in screen._library_btn.text()
-
-
-def test_series_screen_count_label(qtbot):
-    from sixpack.ui.screens.series import SeriesScreen
-    screen = SeriesScreen()
-    qtbot.addWidget(screen)
-    library = Library(id="lib1", name="Drama")
-    screen.load(library, _make_series_list(), "http://abs.test", "token")
-    assert "2" in screen._count_label.text()
 
 
 # ===========================================================================
