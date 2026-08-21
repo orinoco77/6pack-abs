@@ -146,10 +146,8 @@ class MainWindow(QMainWindow):
         self._browse_screen.book_selected.connect(self._on_browse_book_selected)
         self._browse_screen.library_changed.connect(self._on_browse_library_changed)
         self._browse_screen.see_all_requested.connect(self._on_see_all_requested)
-        self._detail_screen.play_requested.connect(self._on_detail_play_requested)
         self._detail_screen.episode_activated.connect(self._on_episode_activated)
         self._detail_screen.back_requested.connect(self._show_browse)
-        self._playlist_detail_screen.play_requested.connect(self._on_playlist_item_play_requested)
         self._playlist_detail_screen.item_activated.connect(self._on_playlist_item_activated)
         self._playlist_detail_screen.back_requested.connect(self._show_browse)
         self._chapter_screen.play_requested.connect(self._on_play_requested)
@@ -411,11 +409,6 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Playback
     # ------------------------------------------------------------------
-
-    def _on_detail_play_requested(self, book: SeriesBook, start_time: float) -> None:
-        """Direct play from SeriesDetailScreen (no chapter select involved)."""
-        self._player_back_target = "detail"
-        self._on_play_requested(book, start_time)
 
     def _on_play_requested(self, book: SeriesBook, start_time: float) -> None:
         if not self._player or not self._player_screen:
