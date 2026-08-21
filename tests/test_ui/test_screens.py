@@ -142,101 +142,53 @@ def _make_series() -> Series:
 def test_detail_screen_creates(qtbot):
     screen = SeriesDetailScreen()
     qtbot.addWidget(screen)
+    assert screen._grid is not None
 
 
 def test_detail_screen_load(qtbot):
     screen = SeriesDetailScreen()
     qtbot.addWidget(screen)
     series = _make_series()
-    screen.load(series, {})
-    assert screen._list.count() == 2
-    assert screen._title_label.text() == "My Drama Series"
+    screen.load(series, {}, "http://localhost", "tok")
+    assert screen._hero_title.text() == "My Drama Series"
+    assert screen._grid.item_count == 2
 
 
 def test_detail_screen_back_signal(qtbot):
+    from sixpack.input.keyboard import key_to_action  # noqa: F401 — confirm import path used by screen
     screen = SeriesDetailScreen()
     qtbot.addWidget(screen)
-    series = _make_series()
-    screen.load(series, {})
-
+    screen.load(_make_series(), {}, "http://localhost", "tok")
+    screen.show()
     with qtbot.waitSignal(screen.back_requested, timeout=1000):
-        qtbot.keyClick(screen, Qt.Key.Key_Escape)
+        qtbot.keyClick(screen, Qt.Key.Key_Backspace)
 
 
 def test_detail_screen_item_emits_episode_activated(qtbot):
-    """Clicking any item always emits episode_activated (chapter check happens in app)."""
     screen = SeriesDetailScreen()
     qtbot.addWidget(screen)
     series = _make_series()
-    screen.load(series, {})
-    screen._list.setCurrentRow(0)
-
+    screen.load(series, {}, "http://localhost", "tok")
     with qtbot.waitSignal(screen.episode_activated, timeout=1000) as blocker:
-        screen._list.itemActivated.emit(screen._list.item(0))
-
+        screen._grid.item_activated.emit(0)
     assert blocker.args[0].id == "b1"
 
 
-def test_detail_screen_item_does_not_emit_play_requested(qtbot):
-    """Item click must not emit play_requested — that is handled by app after chapter fetch."""
+def test_detail_show_loading_renders_episodes(qtbot):
     screen = SeriesDetailScreen()
     qtbot.addWidget(screen)
-    screen.load(_make_series(), {})
-
-    play_signals = []
-    screen.play_requested.connect(lambda b, t: play_signals.append((b, t)))
-    screen._list.itemActivated.emit(screen._list.item(0))
-    assert play_signals == []
+    screen.show_loading(_make_series(), "http://localhost", "tok")
+    assert screen._grid.item_count == 2
 
 
-def test_detail_play_all_resumes_from_progress(qtbot):
-    """Play All still emits play_requested at correct resume position."""
+def test_detail_update_progress_refreshes_in_place(qtbot):
     screen = SeriesDetailScreen()
     qtbot.addWidget(screen)
     series = _make_series()
-    progress = {"b1": MediaProgress(libraryItemId="b1", currentTime=900.0, duration=1800.0)}
-    screen.load(series, progress)
-
-    with qtbot.waitSignal(screen.play_requested, timeout=1000) as blocker:
-        screen._play_all_btn.click()
-
-    book, start_time = blocker.args
-    assert book.id == "b1"
-    assert start_time == 900.0
-
-
-def test_detail_play_all_finished_restarts(qtbot):
-    """Play All starts a fully-finished book from 0.0."""
-    screen = SeriesDetailScreen()
-    qtbot.addWidget(screen)
-    series = _make_series()
-    progress = {
-        "b1": MediaProgress(libraryItemId="b1", currentTime=1800.0, duration=1800.0, isFinished=True),
-        "b2": MediaProgress(libraryItemId="b2", currentTime=3600.0, duration=3600.0, isFinished=True),
-    }
-    screen.load(series, progress)
-
-    with qtbot.waitSignal(screen.play_requested, timeout=1000) as blocker:
-        screen._play_all_btn.click()
-
-    _, start_time = blocker.args
-    assert start_time == 0.0
-
-
-def test_detail_screen_play_all_finds_resume(qtbot):
-    screen = SeriesDetailScreen()
-    qtbot.addWidget(screen)
-    series = _make_series()
-    progress = {
-        "b1": MediaProgress(libraryItemId="b1", currentTime=1800.0, isFinished=True),
-    }
-    screen.load(series, progress)
-
-    with qtbot.waitSignal(screen.play_requested, timeout=1000) as blocker:
-        screen._play_all_btn.click()
-
-    book, _ = blocker.args
-    assert book.id == "b2"  # b1 is finished, so resume from b2
+    screen.load(series, {}, "http://localhost", "tok")
+    card_before = screen._grid._items[0]
+    screen.update_progress({"b1": MediaProgress(currentTime=1800.0, duration=1800.0, isFinished=True)})
+    assert screen._grid._items[0] is card_before
 
 
 def test_detail_resume_index_all_finished(qtbot):
@@ -244,113 +196,19 @@ def test_detail_resume_index_all_finished(qtbot):
     qtbot.addWidget(screen)
     series = _make_series()
     progress = {
-        "b1": MediaProgress(libraryItemId="b1", isFinished=True),
-        "b2": MediaProgress(libraryItemId="b2", isFinished=True),
+        "b1": MediaProgress(currentTime=1800.0, duration=1800.0, isFinished=True),
+        "b2": MediaProgress(currentTime=3600.0, duration=3600.0, isFinished=True),
     }
-    screen.load(series, progress)
-    assert screen._find_resume_index() == 0  # all done → restart from first
+    screen.load(series, progress, "http://localhost", "tok")
+    assert screen._grid._focused_index == 0  # _find_resume_index falls back to 0
 
 
-def test_detail_show_loading_renders_episodes(qtbot):
-    """show_loading() renders episodes immediately with grey dots."""
+def test_detail_screen_focus_item_by_key(qtbot):
     screen = SeriesDetailScreen()
     qtbot.addWidget(screen)
-    screen.show_loading(_make_series())
-    assert screen._list.count() == 2
-    assert not screen._loading_label.isHidden()
-
-
-def test_detail_update_progress_hides_loading(qtbot):
-    screen = SeriesDetailScreen()
-    qtbot.addWidget(screen)
-    screen.show_loading(_make_series())
-    assert not screen._loading_label.isHidden()
-    screen.update_progress({})
-    assert screen._loading_label.isHidden()
-
-
-def test_detail_update_progress_dot_colour(qtbot):
-    """After update_progress, finished episode dot changes to SUCCESS colour."""
-    from sixpack.ui import theme
-    screen = SeriesDetailScreen()
-    qtbot.addWidget(screen)
-    screen.show_loading(_make_series())
-
-    progress = {"b1": MediaProgress(libraryItemId="b1", isFinished=True)}
-    screen.update_progress(progress)
-
-    item = screen._list.item(0)
-    widget = screen._list.itemWidget(item)
-    assert theme.SUCCESS in widget._dot.styleSheet()
-
-
-def test_detail_episode_item_update_progress(qtbot):
-    media = LibraryItemMedia(metadata={"title": "Ep"}, duration=3600.0)
-    book = SeriesBook(id="b1", libraryId="lib1", media=media, sequence="1")
-    from sixpack.ui.screens.series_detail import EpisodeItem
-    from sixpack.ui import theme
-    widget = EpisodeItem(book, None)
-    qtbot.addWidget(widget)
-
-    assert theme.TEXT_MUTED in widget._dot.styleSheet()
-
-    prog = MediaProgress(libraryItemId="b1", currentTime=1800.0, duration=3600.0)
-    widget.update_progress(prog)
-    assert theme.ACCENT in widget._dot.styleSheet()
-    assert "30m" in widget._duration_label.text()
-
-
-def test_detail_episode_item_has_cover_label(qtbot):
-    from sixpack.ui.screens.series_detail import EpisodeItem
-    media = LibraryItemMedia(metadata={"title": "Ep"}, duration=3600.0)
-    book = SeriesBook(id="b1", libraryId="lib1", media=media)
-    widget = EpisodeItem(book, None)
-    qtbot.addWidget(widget)
-    assert widget._cover_label is not None
-    assert widget._cover_label.width() == 44
-
-
-def test_detail_episode_item_chapter_badge(qtbot):
-    """Chapter count label present when book has >1 chapters."""
-    from sixpack.ui.screens.series_detail import EpisodeItem
-    from sixpack.api.models import Chapter
-    chapters = [Chapter(id=i, start=i * 900.0, end=(i + 1) * 900.0, title=f"Ch {i}") for i in range(4)]
-    media = LibraryItemMedia(metadata={"title": "Box Set"}, duration=3600.0, chapters=chapters)
-    book = SeriesBook(id="b1", libraryId="lib1", media=media)
-    widget = EpisodeItem(book, None)
-    qtbot.addWidget(widget)
-    # Find the chapter count label by text
-    from PyQt6.QtWidgets import QLabel
-    labels = widget.findChildren(QLabel)
-    ch_texts = [l.text() for l in labels if "ch" in l.text()]
-    assert any("4 ch" in t for t in ch_texts)
-
-
-def test_detail_episode_activated_any_book(qtbot):
-    """episode_activated is emitted for any book (box-set or single), not play_requested."""
-    chapters = [Chapter(id=i, start=i * 900.0, end=(i + 1) * 900.0, title=f"Ch {i}") for i in range(3)]
-    media_box = LibraryItemMedia(metadata={"title": "Box Set"}, duration=2700.0, chapters=chapters)
-    media_single = LibraryItemMedia(metadata={"title": "Single Book"}, duration=3600.0)
-    book_box = SeriesBook(id="bx", libraryId="lib1", media=media_box, sequence="1")
-    book_single = SeriesBook(id="bs", libraryId="lib1", media=media_single, sequence="2")
-    series = Series(id="s1", name="Drama", books=[book_box, book_single])
-
-    screen = SeriesDetailScreen()
-    qtbot.addWidget(screen)
-    screen.load(series, {})
-
-    ep_signals = []
-    play_signals = []
-    screen.episode_activated.connect(lambda b: ep_signals.append(b))
-    screen.play_requested.connect(lambda b, t: play_signals.append((b, t)))
-
-    screen._list.itemActivated.emit(screen._list.item(0))
-    screen._list.itemActivated.emit(screen._list.item(1))
-
-    assert len(ep_signals) == 2
-    assert ep_signals[0] is book_box
-    assert ep_signals[1] is book_single
-    assert play_signals == []
+    screen.load(_make_series(), {}, "http://localhost", "tok")
+    screen.focus_item_by_key("b2")
+    assert screen._grid._focused_index == 1
 
 
 # ---- ChapterSelectScreen ----
