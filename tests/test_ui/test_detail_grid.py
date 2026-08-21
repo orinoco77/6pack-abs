@@ -5,10 +5,11 @@ from sixpack.ui.screens.detail_grid import DetailGridScreen
 
 
 class _FakeItem:
-    def __init__(self, key, title, subtitle=""):
+    def __init__(self, key, title, subtitle="", cover_url=None):
         self.key = key
         self.title_ = title
         self.subtitle_ = subtitle
+        self.cover_url = cover_url
 
 
 class _TestScreen(DetailGridScreen):
@@ -30,11 +31,29 @@ class _TestScreen(DetailGridScreen):
         return item.subtitle_
 
     def _item_cover_url(self, item, server_url, token):
-        return None  # no cover fetch needed for these tests
+        return item.cover_url  # None unless a test opts in
 
 
 def _items():
     return [_FakeItem("a", "Item A"), _FakeItem("b", "Item B"), _FakeItem("c", "Item C")]
+
+
+class _FakeCoverCache:
+    """Captures fetch/fetch_backdrop calls instead of invoking them, so the
+    test can assert exactly how many times each was invoked without a real
+    network-backed CoverCache. Same pattern as
+    tests/test_ui/test_screens.py's _FakeCoverCache (~line 405).
+    """
+
+    def __init__(self):
+        self.fetch_calls = []
+        self.fetch_backdrop_calls = []
+
+    def fetch(self, url, token, callback):
+        self.fetch_calls.append((url, token, callback))
+
+    def fetch_backdrop(self, url, token, callback):
+        self.fetch_backdrop_calls.append((url, token, callback))
 
 
 def test_detail_grid_populate_sets_hero_title_and_cards(qtbot):
@@ -104,3 +123,24 @@ def test_detail_grid_back_key_emits_back_requested(qtbot):
     screen.show()
     with qtbot.waitSignal(screen.back_requested, timeout=1000):
         qtbot.keyClick(screen, Qt.Key.Key_Backspace)
+
+
+def test_detail_grid_populate_fetches_backdrop_exactly_once(qtbot):
+    """_populate() calls FocusGrid.focus_item(), which itself emits
+    focus_changed -> _on_grid_focus_changed -> _reflect_focus(). A redundant
+    explicit _reflect_focus() call right after focus_item() would fire
+    _reflect_focus() twice back-to-back for the initially-focused item,
+    which calls Backdrop.show_color()/show_image() twice in immediate
+    succession and resets/defeats the cross-fade animation (see
+    backdrop.py's show_image, which stops and restarts `_anim` on every
+    call). Assert fetch_backdrop is invoked exactly once, not twice.
+    """
+    fake_cache = _FakeCoverCache()
+    screen = _TestScreen(cover_cache=fake_cache)
+    qtbot.addWidget(screen)
+    items = [
+        _FakeItem("a", "Item A", cover_url="http://s/cover/a"),
+        _FakeItem("b", "Item B", cover_url="http://s/cover/b"),
+    ]
+    screen._populate("My Series", items, {}, "http://s", "t")
+    assert len(fake_cache.fetch_backdrop_calls) == 1

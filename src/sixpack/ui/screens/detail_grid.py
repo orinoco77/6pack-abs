@@ -109,7 +109,6 @@ class DetailGridScreen(QWidget):
         if self._grid.item_count:
             idx = self._find_resume_index()
             self._grid.focus_item(idx)
-            self._reflect_focus(items[idx])
 
     def _refresh_progress(self, progress: dict) -> None:
         self._progress = progress
@@ -120,7 +119,6 @@ class DetailGridScreen(QWidget):
         if self._grid.item_count:
             idx = self._find_resume_index()
             self._grid.focus_item(idx)
-            self._reflect_focus(self._items[idx])
 
     def _find_resume_index(self) -> int:
         for i, item in enumerate(self._items):
@@ -189,7 +187,6 @@ class DetailGridScreen(QWidget):
         for i, item in enumerate(self._items):
             if self._item_key(item) == key:
                 self._grid.focus_item(i)
-                self._reflect_focus(item)
                 return
 
     # ------------------------------------------------------------------
