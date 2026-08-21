@@ -1,11 +1,10 @@
 """Focusable media card widget for grid browsing."""
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal, QSize, QPropertyAnimation, QEvent
-from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont
+from PyQt6.QtCore import Qt, pyqtSignal, QSize, QVariantAnimation, QEvent
+from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont, QPen
 from PyQt6.QtWidgets import (
     QFrame, QLabel, QVBoxLayout, QWidget,
-    QGraphicsDropShadowEffect,
 )
 
 
@@ -110,19 +109,24 @@ class MediaCard(QFrame):
         self._media_type = media_type
         self._pixmap: QPixmap | None = None
         self._focused = False
-        self._glow_anim: QPropertyAnimation | None = None
+        # Paint-level focus glow: a small strength value (0.0..1.0) animated
+        # via QVariantAnimation and rendered as a handful of concentric
+        # rounded-rect strokes in `paintEvent`, confined to the ~FOCUS_BORDER
+        # px margin around the card (the same margin the hard focus border
+        # occupies — see the geometry note below). This is a deliberate
+        # replacement for a `QGraphicsDropShadowEffect` that used to live
+        # here: any `QGraphicsEffect` on this widget tree routes through
+        # `QGraphicsEffectSource.pixmap()` / `QWidget.render()` to composite,
+        # which has been root-caused (via lldb) as the source of a
+        # Qt6.11/PyQt6 compositor segfault elsewhere in this codebase (see
+        # `_Scrim` above and `Backdrop.paintEvent`). Plain `QPainter`
+        # drawing within a single paint call never touches that machinery,
+        # so it sidesteps the crash class entirely. `self.graphicsEffect()`
+        # must be `None` at all times.
+        self._glow_strength: float = 0.0
+        self._glow_anim: QVariantAnimation | None = None
 
         self._build_ui()
-
-        # The glow is the ONLY QGraphicsEffect on this widget tree, and it is
-        # installed exactly once and never replaced — only its blurRadius
-        # animates. Drop-shadow-only churn has been proven crash-free at
-        # volume across several investigations (see task-4-report.md).
-        self._glow = QGraphicsDropShadowEffect(self)
-        self._glow.setColor(QColor(theme.ACCENT_GLOW))
-        self._glow.setOffset(0, 0)
-        self._glow.setBlurRadius(0)
-        self.setGraphicsEffect(self._glow)
 
         # Dim is a paint-level scrim, NOT a QGraphicsOpacityEffect — a
         # fractional-opacity QGraphicsOpacityEffect drags Qt into the
@@ -259,15 +263,16 @@ class MediaCard(QFrame):
             f"border: {theme.FOCUS_BORDER}px solid {border}; }}"
         )
 
-        # Glow lives permanently on `self`; only its blurRadius animates.
-        # Never swap the effect object or its type (see comment in __init__).
+        # Glow strength animates 0.0..1.0 and is rendered in paintEvent —
+        # never via a QGraphicsEffect (see comment in __init__).
         if self._glow_anim is not None:
             self._glow_anim.stop()
             self._glow_anim = None
-        anim = QPropertyAnimation(self._glow, b"blurRadius", self)
+        anim = QVariantAnimation(self)
         anim.setDuration(theme.FOCUS_ANIM_MS)
-        anim.setStartValue(self._glow.blurRadius())
-        anim.setEndValue(theme.FOCUS_GLOW_RADIUS if focused else 0)
+        anim.setStartValue(self._glow_strength)
+        anim.setEndValue(1.0 if focused else 0.0)
+        anim.valueChanged.connect(self._on_glow_value)
         anim.start()
         self._glow_anim = anim  # keep a ref so it isn't GC'd mid-animation
 
@@ -279,6 +284,40 @@ class MediaCard(QFrame):
             _Scrim.color_for_opacity(1.0 if focused else theme.UNFOCUSED_OPACITY)
         )
         self._scrim.setVisible(not focused)
+
+    def _on_glow_value(self, value) -> None:
+        self._glow_strength = float(value)
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        # Draw the normal QFrame chrome (background + the hard focus
+        # border from the stylesheet) first, then layer the soft glow on
+        # top of it. Child widgets (self._body and everything inside it)
+        # are always composited above whatever `self` paints here, so the
+        # glow only ever shows in the thin margin around the body — it
+        # never bleeds over cover art or text.
+        super().paintEvent(event)
+        if self._glow_strength <= 0.0:
+            return
+        try:
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            base = QColor(theme.ACCENT_GLOW)
+            rings = 3
+            max_alpha = 90
+            for i in range(rings):
+                alpha = int(max_alpha * self._glow_strength * (1 - i / rings))
+                if alpha <= 0:
+                    continue
+                color = QColor(base)
+                color.setAlpha(alpha)
+                painter.setPen(QPen(color, 1))
+                rect = self.rect().adjusted(i, i, -i - 1, -i - 1)
+                painter.drawRoundedRect(rect, theme.CARD_RADIUS, theme.CARD_RADIUS)
+            painter.end()
+        except RuntimeError:
+            # Widget was deleted on the C++ side during teardown; skip painting.
+            pass
 
     def keyPressEvent(self, event) -> None:
         from sixpack.input.keyboard import key_to_action
