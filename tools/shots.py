@@ -75,6 +75,12 @@ def main() -> int:
     for rt, items in rows.items():
         screen.set_row_items(rt, items)
     screen.show_content()
+    # Rows are populated directly above, bypassing the normal
+    # library_changed signal flow app.py would drive — tell the screen
+    # this library is already loaded so _enter_rows() below doesn't think
+    # it needs to (re)trigger a load and show the loading page.
+    if screen._libraries:
+        screen._loaded_library = screen._libraries[screen._sidebar_idx]
     screen.show()
 
     # Let cover downloads + focus effects settle, then grab.
@@ -83,6 +89,16 @@ def main() -> int:
     app.processEvents()
     _grab(screen, out / "browse.png")
     print(f"wrote {out / 'browse.png'}")
+
+    # Also capture a focused state: sidebar -> rows moves focus onto the
+    # first card, exercising the glow/dim/hero reflection the sidebar-only
+    # default screenshot above never touches.
+    screen._enter_rows()
+    app.processEvents()
+    loop.run_until_complete(asyncio.sleep(0.5))
+    app.processEvents()
+    _grab(screen, out / "browse_focused.png")
+    print(f"wrote {out / 'browse_focused.png'}")
     return 0
 
 
