@@ -938,6 +938,54 @@ def test_stale_fetch_backdrop_callback_does_not_override_newer_focus(qtbot):
     assert screen._backdrop._incoming_pixmap is pix_b
 
 
+def test_stale_cover_fetch_callback_does_not_crash_on_deleted_card(qtbot):
+    """Regression guard for a real crash: a row rebuild (e.g. "see all",
+    or any _reset_rows()) calls MediaCard.deleteLater() on the old cards,
+    but CoverCache._pending still holds their cover-fetch callbacks. If
+    the fetch resolves after the card's C++ object is actually deleted,
+    calling card.set_cover() raises RuntimeError inside a Qt slot, which
+    is fatal — nothing else catches it. Reproduces the exact sequence:
+    populate a row (captures a cover-fetch callback for its card), clear
+    the row (deleteLater()s the card, matching _reset_rows()), let Qt
+    actually delete it, then fire the stale callback.
+    """
+    from PyQt6.QtGui import QColor, QPixmap
+
+    class _FakeCoverCache:
+        def __init__(self):
+            self.calls = []
+
+        def fetch(self, url, token, callback):
+            self.calls.append(callback)
+
+        def fetch_backdrop(self, url, token, callback):
+            pass
+
+    fake_cache = _FakeCoverCache()
+    screen = BrowseScreen(cover_cache=fake_cache, row_types=list(DEFAULT_ROW_TYPES))
+    qtbot.addWidget(screen)
+    screen._server_url = "http://s"
+    screen._token = "t"
+
+    row_idx = 0
+    screen.set_row_items(screen._row_types[row_idx], [_li("a1", "Item A")])
+    assert len(fake_cache.calls) == 1
+    stale_callback = fake_cache.calls[0]
+
+    # Matches _reset_rows(): clear() calls deleteLater() on the card.
+    screen._row_widgets[row_idx].clear()
+    # deleteLater() posts a DeferredDelete event that plain processEvents()
+    # does NOT drain (Qt defers it specially to avoid deleting objects
+    # mid-signal-emission) — it must be flushed explicitly to actually
+    # delete the C++ object before the stale callback fires below.
+    from PyQt6.QtCore import QCoreApplication, QEvent
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+    pix = QPixmap(10, 10)
+    pix.fill(QColor(200, 0, 0))
+    stale_callback(pix)  # must not raise
+
+
 def test_sidebar_item_has_icon_and_active_state(qtbot):
     from sixpack.ui import theme
     from sixpack.ui.screens.browse import _SidebarItem

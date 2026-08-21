@@ -4,6 +4,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
+from PyQt6 import sip
 from PyQt6.QtCore import QRect, Qt, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
@@ -581,6 +582,15 @@ class BrowseScreen(QWidget):
 
     def _fetch_cover(self, card: MediaCard, cover_url: str, key: str) -> None:
         def _cb(pm):
+            # The card can be deleted (e.g. a row/grid rebuild via "see
+            # all", or navigating away) before an in-flight cover fetch
+            # resolves — CoverCache holds this callback in _pending
+            # regardless of whether the widget it targets still exists.
+            # Touching a deleted C++ QWidget from a callback raises
+            # RuntimeError, which is fatal here since nothing else catches
+            # exceptions raised inside a Qt slot.
+            if sip.isdeleted(card):
+                return
             card.set_cover(pm)
             if key not in self._dom_colors:
                 self._dom_colors[key] = dominant_color(pm)
