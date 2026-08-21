@@ -956,3 +956,36 @@ def test_player_fmt_time_inf():
     from sixpack.ui.screens.player import _fmt_time
     import math
     assert _fmt_time(math.inf) == "0:00"
+
+
+# ===========================================================================
+# HeroBackdrop tests
+# ===========================================================================
+
+
+def test_hero_backdrop_creates(qtbot):
+    from sixpack.ui.widgets.hero_backdrop import HeroBackdrop
+    hb = HeroBackdrop()
+    qtbot.addWidget(hb)
+    assert hb.backdrop is not None
+
+
+def test_hero_backdrop_set_title_and_subtitle(qtbot):
+    from sixpack.ui.widgets.hero_backdrop import HeroBackdrop
+    hb = HeroBackdrop()
+    qtbot.addWidget(hb)
+    hb.set_title("My Series")
+    hb.set_subtitle("Episode 1")
+    assert hb._hero_title.text() == "My Series"
+    assert hb._hero_sub.text() == "Episode 1"
+
+
+def test_hero_backdrop_resize_positions_children(qtbot):
+    from sixpack.ui.widgets.hero_backdrop import HeroBackdrop
+    hb = HeroBackdrop()
+    qtbot.addWidget(hb)
+    hb.show()
+    hb.resize(800, 600)
+    assert hb.backdrop.geometry() == hb.rect()
+    assert hb._hero.geometry().height() == HeroBackdrop.HERO_H
+    assert hb._hero.geometry().width() == 800
