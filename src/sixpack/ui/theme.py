@@ -8,7 +8,11 @@ SURFACE_HIGH = "#2a2a2a"
 SURFACE_LOW = "#151515"
 ACCENT = "#4a9eff"
 ACCENT_DIM = "#2a6fcc"
-ACCENT_GLOW = "#4a9eff"
+# Deliberately distinct from ACCENT (a lighter, more saturated tint of the
+# same blue hue) — it used to be byte-identical to ACCENT, which made the
+# focus glow (painted translucent over the card's own opaque ACCENT border)
+# indistinguishable from the border itself. See MediaCard's glow overlay.
+ACCENT_GLOW = "#a8d8ff"
 TEXT_PRIMARY = "#ffffff"
 TEXT_SECONDARY = "#a0a0a0"
 TEXT_MUTED = "#606060"
