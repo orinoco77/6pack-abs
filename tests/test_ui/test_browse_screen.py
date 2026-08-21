@@ -220,6 +220,28 @@ def test_browse_screen_load_libraries_resets_state(qtbot):
     assert screen._loaded_library is None
 
 
+def test_sidebar_layout_ends_with_trailing_stretch(qtbot):
+    """Without a trailing addStretch(), items expand to fill the column,
+    stretching each _SidebarItem's `border-left` accent bar across the
+    whole remaining column height instead of staying item-sized."""
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    screen.load_libraries([_lib("l1", "A"), _lib("l2", "B")], "http://s", "tok")
+    layout = screen._sidebar_items_layout
+    assert layout.count() == 3  # 2 sidebar items + 1 trailing stretch
+    last_item = layout.itemAt(layout.count() - 1)
+    assert last_item.widget() is None  # a stretch/spacer, not a sidebar item
+
+
+def test_sidebar_layout_stretch_not_duplicated_on_reload(qtbot):
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    screen.load_libraries([_lib("l1", "A")], "http://s", "tok")
+    screen.load_libraries([_lib("l1", "A"), _lib("l2", "B")], "http://s", "tok")
+    layout = screen._sidebar_items_layout
+    assert layout.count() == 3  # 2 items + exactly one trailing stretch
+
+
 # ---------------------------------------------------------------------------
 # BrowseScreen — set_row_items
 # ---------------------------------------------------------------------------
@@ -714,6 +736,52 @@ def test_populate_row_with_playlists(qtbot):
 
 
 # ---------------------------------------------------------------------------
+# BrowseScreen — media_type wiring (_make_card)
+# ---------------------------------------------------------------------------
+
+def test_populate_row_wires_media_type_from_library_item(qtbot):
+    screen = BrowseScreen(row_types=[RowType.RECENTLY_ADDED])
+    qtbot.addWidget(screen)
+    screen.load_libraries([_lib("l1", "A")], "http://s", "tok")
+    podcast_item = LibraryItem(
+        id="i1",
+        libraryId="lib1",
+        mediaType="podcast",
+        media=LibraryItemMedia(metadata={"title": "Cast", "authorName": "Someone"}),
+    )
+    screen.set_row_items(RowType.RECENTLY_ADDED, [podcast_item])
+    card = screen._row_widgets[0]._cards[0]
+    assert card._media_type == "podcast"
+
+
+def test_populate_row_series_and_playlists_default_media_type_book(qtbot):
+    # Series/Playlist have no natural single media_type of their own —
+    # _make_card's getattr(..., "book") fallback should apply.
+    screen = BrowseScreen(row_types=[RowType.SERIES, RowType.PLAYLISTS])
+    qtbot.addWidget(screen)
+    screen.load_libraries([_lib("l1", "A")], "http://s", "tok")
+    screen.set_row_items(RowType.SERIES, [_series("s1", "S1")])
+    screen.set_row_items(RowType.PLAYLISTS, [_playlist("p1", "P1")])
+    assert screen._row_widgets[0]._cards[0]._media_type == "book"
+    assert screen._row_widgets[1]._cards[0]._media_type == "book"
+
+
+def test_enter_grid_wires_media_type(qtbot):
+    screen = BrowseScreen(row_types=[RowType.RECENTLY_ADDED])
+    qtbot.addWidget(screen)
+    screen.load_libraries([_lib("l1", "A")], "http://s", "tok")
+    podcast_item = LibraryItem(
+        id="i1",
+        libraryId="lib1",
+        mediaType="podcast",
+        media=LibraryItemMedia(metadata={"title": "Cast", "authorName": "Someone"}),
+    )
+    screen.set_row_items(RowType.RECENTLY_ADDED, [podcast_item])
+    screen._enter_grid(0)
+    assert screen._grid_cards[0]._media_type == "podcast"
+
+
+# ---------------------------------------------------------------------------
 # BrowseScreen — unmapped key is passed to super
 # ---------------------------------------------------------------------------
 
@@ -798,12 +866,20 @@ def test_row_focus_updates_hero(qtbot):
     screen = BrowseScreen(row_types=list(DEFAULT_ROW_TYPES))
     qtbot.addWidget(screen)
     screen.load_libraries([_lib("lib1", "Audiobooks")], "http://abs.test", "t")
+    # Mark the library as already-loaded so the _enter_rows() call below
+    # doesn't itself call _reset_rows() (which would wipe the row items set
+    # just below it right back out — see _enter_rows()'s "lib is not
+    # self._loaded_library" check).
+    screen._loaded_library = screen._libraries[0]
     screen.set_row_items(RowType.RECENTLY_ADDED, [_li("i1", "Book One"), _li("i2", "Book Two")])
     screen.show_content()
     screen._enter_rows()
-    # focused row defaults to 0 (Continue Listening, empty) — move down to Recently Added
+    # focused row defaults to 0 (Continue Listening, empty) — move down to
+    # Recently Added, whose item index resets to 0 on set_row_items(), so
+    # the focused card is deterministically "Book One".
     screen._handle_rows(InputAction.DOWN)
-    assert screen._hero_title.text() in ("Book One", "Book Two", "")  # reflects focused card
+    assert screen._focused_row == screen._row_types.index(RowType.RECENTLY_ADDED)
+    assert screen._hero_title.text() == "Book One"
 
 
 def test_stale_fetch_backdrop_callback_does_not_override_newer_focus(qtbot):
@@ -863,8 +939,37 @@ def test_stale_fetch_backdrop_callback_does_not_override_newer_focus(qtbot):
 
 
 def test_sidebar_item_has_icon_and_active_state(qtbot):
+    from sixpack.ui import theme
     from sixpack.ui.screens.browse import _SidebarItem
+
     item = _SidebarItem("Podcasts", media_type="podcast")
     qtbot.addWidget(item)
-    item.set_state(selected=True, zone_active=True)
     assert item._icon.text() != ""  # an icon glyph is shown
+
+    # Exercise all three states set_state() distinguishes and assert each
+    # one actually produces a visually distinct style — not just "doesn't
+    # crash". selected+active is the filled accent pill; selected-but-
+    # inactive shows the accent as a hint without the fill; unselected has
+    # neither.
+    item.set_state(selected=True, zone_active=True)
+    active_style = item.styleSheet()
+    active_label_style = item._label.styleSheet()
+
+    item.set_state(selected=True, zone_active=False)
+    selected_inactive_style = item.styleSheet()
+    selected_inactive_label_style = item._label.styleSheet()
+
+    item.set_state(selected=False, zone_active=False)
+    unselected_style = item.styleSheet()
+    unselected_label_style = item._label.styleSheet()
+
+    assert len({active_style, selected_inactive_style, unselected_style}) == 3
+    assert len(
+        {active_label_style, selected_inactive_label_style, unselected_label_style}
+    ) == 3
+
+    assert theme.ACCENT in active_style  # filled accent background
+    assert theme.SURFACE_HIGH in selected_inactive_style  # muted bg, accent hint only
+    assert theme.ACCENT in selected_inactive_style
+    assert "transparent" in unselected_style
+    assert theme.ACCENT not in unselected_style
