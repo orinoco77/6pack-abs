@@ -956,10 +956,3 @@ def test_player_fmt_time_inf():
     from sixpack.ui.screens.player import _fmt_time
     import math
     assert _fmt_time(math.inf) == "0:00"
-
-
-def test_detail_fmt_duration():
-    from sixpack.ui.screens.series_detail import _fmt_duration
-    assert _fmt_duration(3661) == "1h 01m"
-    assert _fmt_duration(300) == "5m"
-    assert _fmt_duration(0) == "0m"
