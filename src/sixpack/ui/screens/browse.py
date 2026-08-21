@@ -580,10 +580,19 @@ class BrowseScreen(QWidget):
         if not cover:
             return
         key = getattr(item, "id", "") or cover
+        # Record which item the backdrop should now be showing *before*
+        # kicking off the (possibly async) fetch below. On a cold disk
+        # cache, an uncached item's fetch can still be in flight when focus
+        # moves on to a different (already-cached) item that paints first —
+        # tagging the callback with `key` lets Backdrop drop it if it
+        # resolves after we're no longer looking at this item.
+        self._backdrop.set_expected_key(key)
         color = self._dom_colors.get(key)
         if color is not None:
             self._backdrop.show_color(color)
-        self._cover_cache.fetch_backdrop(cover, self._token, self._backdrop.show_image)
+        self._cover_cache.fetch_backdrop(
+            cover, self._token, lambda pm, k=key: self._backdrop.show_image(pm, k)
+        )
 
     def _current_focused_item(self) -> Any | None:
         if self._zone == "grid":
@@ -720,7 +729,13 @@ class BrowseScreen(QWidget):
                 self._row_item_idxs[self._focused_row] = cur - 1
                 self._row_widgets[self._focused_row].focus_card(cur - 1)
             else:
+                # _enter_sidebar() already ends with its own
+                # _reflect_current() call — return here rather than
+                # falling through to the trailing call below, which would
+                # otherwise fire self._reflect_focus() a second time for
+                # the same (now sidebar-zone) focus.
                 self._enter_sidebar()
+                return
         elif action == InputAction.RIGHT:
             cur = self._row_item_idxs[self._focused_row]
             if cur < len(focused_items) - 1:
@@ -731,25 +746,43 @@ class BrowseScreen(QWidget):
         elif action == InputAction.SELECT:
             self._activate_row_item(self._focused_row, self._row_item_idxs[self._focused_row])
         elif action == InputAction.BACK:
+            # Same reasoning as the LEFT-at-boundary branch above:
+            # _enter_sidebar() already reflects, so return instead of
+            # falling through to the trailing call.
             self._enter_sidebar()
+            return
         self._reflect_current()
 
     def _handle_grid(self, action: InputAction) -> None:
         count = len(self._grid_cards)
         idx = self._grid_focus_idx
 
+        # _set_grid_focus() already ends with its own _reflect_current()
+        # call, so the branches that call it return immediately rather
+        # than falling through to the trailing call below (which would
+        # otherwise fire self._reflect_focus() a second time for the same
+        # focus). _exit_grid() does NOT reflect internally, so the
+        # LEFT-at-boundary and BACK branches (which call it instead) must
+        # keep falling through to the trailing call — as must the no-op
+        # boundary cases (RIGHT/DOWN/UP with no room to move) and SELECT,
+        # none of which change focus but still rely on the trailing call
+        # to keep the hero/backdrop consistent.
         if action == InputAction.RIGHT and idx + 1 < count:
             self._set_grid_focus(idx + 1)
+            return
         elif action == InputAction.LEFT:
             if idx > 0:
                 self._set_grid_focus(idx - 1)
+                return
             else:
                 self._exit_grid()
         elif action == InputAction.DOWN and idx + _GRID_COLS < count:
             self._set_grid_focus(idx + _GRID_COLS)
+            return
         elif action == InputAction.UP:
             if idx - _GRID_COLS >= 0:
                 self._set_grid_focus(idx - _GRID_COLS)
+                return
         elif action == InputAction.SELECT:
             self._activate_grid_item(idx)
         elif action == InputAction.BACK:

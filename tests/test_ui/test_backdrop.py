@@ -1,3 +1,4 @@
+from PyQt6.QtCore import QVariantAnimation
 from PyQt6.QtGui import QColor, QPixmap
 from PyQt6.QtWidgets import QGraphicsEffect, QWidget
 from sixpack.ui.widgets.backdrop import Backdrop
@@ -80,3 +81,66 @@ def test_backdrop_paints_across_multiple_cycles(qtbot):
 
     grabbed2 = b.grab()
     assert not grabbed2.isNull()
+
+
+def test_backdrop_anim_reused_not_leaked(qtbot):
+    """Regression guard: Backdrop must reuse a single QVariantAnimation for
+    its cross-fade rather than constructing a new one on every
+    show_image() call. Backdrop is a single long-lived widget for the
+    whole app session (hours, on a TV client), so recreating one per call
+    would leak a live QObject child on every focus change for the entire
+    session (dropping the Python reference doesn't delete the underlying
+    C++ object while `b` still parents it)."""
+    b = Backdrop()
+    qtbot.addWidget(b)
+    b.resize(640, 360)
+    for i in range(50):
+        pix = QPixmap(640, 360)
+        pix.fill(QColor(i, i, i))
+        b.show_image(pix)
+    assert len(b.findChildren(QVariantAnimation)) == 1
+    assert b._anim is not None
+
+
+def test_backdrop_show_image_drops_stale_key(qtbot):
+    """A show_image() callback tagged with a key that no longer matches
+    what Backdrop was told to expect (via set_expected_key) must be
+    dropped rather than clobbering the currently displayed content —
+    guards against the stale-backdrop race where an old item's async
+    fetch resolves after focus already moved on to a new item."""
+    b = Backdrop()
+    qtbot.addWidget(b)
+    b.resize(640, 360)
+
+    b.set_expected_key("item-a")
+    pix_a = QPixmap(640, 360)
+    pix_a.fill(QColor(200, 0, 0))
+    b.show_image(pix_a, key="item-a")
+    assert b._incoming_pixmap is pix_a
+
+    # Focus moves on to a different item before A's callback would have
+    # arrived in the real race.
+    b.set_expected_key("item-b")
+    pix_b = QPixmap(640, 360)
+    pix_b.fill(QColor(0, 200, 0))
+    b.show_image(pix_b, key="item-b")
+    assert b._incoming_pixmap is pix_b
+
+    # A's now-stale callback finally resolves — must be dropped silently.
+    stale_pix = QPixmap(640, 360)
+    stale_pix.fill(QColor(0, 0, 200))
+    b.show_image(stale_pix, key="item-a")
+    assert b._incoming_pixmap is pix_b
+
+
+def test_backdrop_show_image_without_key_always_applies(qtbot):
+    """Callers that don't pass a key (e.g. existing direct/test callers)
+    are unaffected by the staleness guard — key=None always applies."""
+    b = Backdrop()
+    qtbot.addWidget(b)
+    b.resize(640, 360)
+    b.set_expected_key("some-key")
+    pix = QPixmap(640, 360)
+    pix.fill(QColor(1, 2, 3))
+    b.show_image(pix)  # no key passed
+    assert b._incoming_pixmap is pix

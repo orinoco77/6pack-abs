@@ -806,6 +806,62 @@ def test_row_focus_updates_hero(qtbot):
     assert screen._hero_title.text() in ("Book One", "Book Two", "")  # reflects focused card
 
 
+def test_stale_fetch_backdrop_callback_does_not_override_newer_focus(qtbot):
+    """Regression guard for the stale-backdrop race: focusing item A
+    (uncached — its cover_cache.fetch_backdrop() callback doesn't resolve
+    immediately) then item B (whose callback resolves right away) must
+    leave B's backdrop displayed even if A's callback finally fires late.
+    """
+    from PyQt6.QtGui import QColor, QPixmap
+
+    class _FakeCoverCache:
+        """Captures fetch_backdrop callbacks instead of invoking them,
+        so the test can control exactly when (and in what order) each
+        one resolves — simulating a cold cache where an earlier item's
+        network fetch is still in flight when focus moves on."""
+
+        def __init__(self):
+            self.calls = []
+
+        def fetch_backdrop(self, url, token, callback):
+            self.calls.append(callback)
+
+        def fetch(self, url, token, callback):
+            pass
+
+    fake_cache = _FakeCoverCache()
+    screen = BrowseScreen(cover_cache=fake_cache)
+    qtbot.addWidget(screen)
+    screen._server_url = "http://s"
+    screen._token = "t"
+
+    item_a = _li("a1", "Item A")
+    item_b = _li("b1", "Item B")
+
+    # Focus A — its fetch_backdrop callback is captured but not yet fired
+    # (simulating an in-flight network request).
+    screen._reflect_focus(item_a)
+    assert len(fake_cache.calls) == 1
+    stale_callback_for_a = fake_cache.calls[0]
+
+    # Focus moves on to B before A's fetch resolves.
+    screen._reflect_focus(item_b)
+    assert len(fake_cache.calls) == 2
+    callback_for_b = fake_cache.calls[1]
+
+    pix_b = QPixmap(10, 10)
+    pix_b.fill(QColor(0, 200, 0))
+    callback_for_b(pix_b)
+    assert screen._backdrop._incoming_pixmap is pix_b
+
+    # A's callback finally arrives late — must be dropped, not painted.
+    pix_a = QPixmap(10, 10)
+    pix_a.fill(QColor(200, 0, 0))
+    stale_callback_for_a(pix_a)
+
+    assert screen._backdrop._incoming_pixmap is pix_b
+
+
 def test_sidebar_item_has_icon_and_active_state(qtbot):
     from sixpack.ui.screens.browse import _SidebarItem
     item = _SidebarItem("Podcasts", media_type="podcast")

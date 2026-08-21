@@ -31,8 +31,29 @@ class Backdrop(QWidget):
         self._current_pixmap: QPixmap | None = None   # fully-settled content
         self._incoming_pixmap: QPixmap | None = None  # cross-fading in
         self._fade: float = 0.0                        # 0.0..1.0 of incoming
-        self._anim: QVariantAnimation | None = None
+
+        # `_current_key` is the key of the item this Backdrop is currently
+        # expected to be showing content for — set synchronously (via
+        # `set_expected_key`) by the caller right before it kicks off an
+        # async fetch. `show_image` compares its own `key` argument against
+        # this before painting, so a callback that resolves after focus has
+        # already moved on to a different item (a real, reachable race on a
+        # cold disk cache: an uncached item's fetch is still in flight when
+        # a different, already-cached item is focused and paints first) gets
+        # silently dropped instead of clobbering what's currently displayed.
         self._current_key: str = ""
+
+        # One long-lived QVariantAnimation, reused (stopped/reconfigured/
+        # restarted) on every cross-fade rather than recreated per call.
+        # Backdrop is a single long-lived widget for the whole app session
+        # (hours, on a TV client) — recreating a QVariantAnimation(self) on
+        # every show_image() leaks a live QObject child every time, since
+        # dropping the Python reference doesn't delete the underlying C++
+        # object while `self` still parents it.
+        self._anim = QVariantAnimation(self)
+        self._anim.setDuration(_FADE_MS)
+        self._anim.valueChanged.connect(self._on_fade_value)
+        self._anim.finished.connect(self._on_fade_finished)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -52,6 +73,17 @@ class Backdrop(QWidget):
             painter.setOpacity(1.0)
         painter.end()
 
+    def set_expected_key(self, key: str) -> None:
+        """Record which item's content this Backdrop should now show.
+
+        Call this synchronously, before starting any async fetch for `key`.
+        Any later `show_image(pixmap, key=...)` callback whose key no
+        longer matches — because focus already moved on to a different
+        item by the time the fetch resolved — is dropped rather than
+        painted.
+        """
+        self._current_key = key
+
     def show_color(self, color: QColor) -> None:
         pix = QPixmap(max(1, self.width()), max(1, self.height()))
         grad = QLinearGradient(0, 0, 0, pix.height())
@@ -60,33 +92,31 @@ class Backdrop(QWidget):
         painter = QPainter(pix)
         painter.fillRect(pix.rect(), QBrush(grad))
         painter.end()
-        if self._anim is not None:
-            self._anim.stop()
-            self._anim = None
+        self._anim.stop()
         self._current_pixmap = pix
         self._incoming_pixmap = None
         self._fade = 0.0
         self.update()
 
-    def show_image(self, pixmap: QPixmap) -> None:
+    def show_image(self, pixmap: QPixmap, key: str | None = None) -> None:
+        # A stale callback for an item that's no longer focused — drop it
+        # silently instead of clobbering whatever is now displayed. `key`
+        # is optional (defaults to None, which always passes) so direct/
+        # test callers that don't care about staleness are unaffected.
+        if key is not None and key != self._current_key:
+            return
+
         # Promote whatever was mid-fade-in to the settled layer, then fade
         # the new pixmap in on top of it.
         if self._incoming_pixmap is not None and not self._incoming_pixmap.isNull():
             self._current_pixmap = self._incoming_pixmap
-        if self._anim is not None:
-            self._anim.stop()
-            self._anim = None
+        self._anim.stop()
         self._incoming_pixmap = pixmap
         self._fade = 0.0
 
-        anim = QVariantAnimation(self)
-        anim.setDuration(_FADE_MS)
-        anim.setStartValue(0.0)
-        anim.setEndValue(1.0)
-        anim.valueChanged.connect(self._on_fade_value)
-        anim.finished.connect(self._on_fade_finished)
-        anim.start()
-        self._anim = anim  # keep ref
+        self._anim.setStartValue(0.0)
+        self._anim.setEndValue(1.0)
+        self._anim.start()
 
     def _on_fade_value(self, value) -> None:
         self._fade = float(value)
@@ -97,5 +127,4 @@ class Backdrop(QWidget):
             self._current_pixmap = self._incoming_pixmap
         self._incoming_pixmap = None
         self._fade = 0.0
-        self._anim = None
         self.update()
