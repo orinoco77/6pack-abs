@@ -245,8 +245,17 @@ def test_chapter_screen_load(qtbot):
     book = _make_box_set_book()
     screen.load(book, _make_chapters(), None)
     assert screen._list.count() == 3
-    assert screen._title_label.text() == "Invasion of Earth"
-    assert "3 chapters" in screen._count_label.text()
+    assert screen._hero_title.text() == "Invasion of Earth"
+    assert "3 chapters" in screen._hero_sub.text()
+
+
+def test_chapter_screen_hero_shows_book_title(qtbot):
+    from sixpack.ui.screens.chapter_select import ChapterSelectScreen
+    screen = ChapterSelectScreen()
+    qtbot.addWidget(screen)
+    book = _make_box_set_book()
+    screen.load(book, _make_chapters(), None, "http://localhost", "tok")
+    assert screen._hero_title.text() == book.title
 
 
 def test_chapter_screen_play_signal(qtbot):
@@ -331,8 +340,8 @@ def test_chapter_screen_load_from_library_item(qtbot):
     )
     screen.load_from_library_item(li, _make_chapters(), None)
     assert screen._list.count() == 3
-    assert screen._title_label.text() == "Doctor Who: Invasion"
-    assert "3 chapters" in screen._count_label.text()
+    assert screen._hero_title.text() == "Doctor Who: Invasion"
+    assert "3 chapters" in screen._hero_sub.text()
     assert screen._library_item is li
     assert screen._book is None
     assert screen._playlist_item is None
