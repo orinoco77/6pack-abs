@@ -147,7 +147,16 @@ class CoverCache(QObject):
 
         def _process(raw: QPixmap) -> None:
             out = make_backdrop(raw, size)
-            out.save(str(bpath), "PNG")
+            # Backdrops are blurred, intentionally lossy ambient art — JPEG
+            # at quality 85 is visually indistinguishable from the PNG this
+            # used to save as, but roughly an order of magnitude smaller
+            # (a ~500KB PNG becomes tens of KB), which matters a lot given
+            # these entries share the same _MAX_ENTRIES disk-cache cap as
+            # much smaller raw cover thumbnails. Like raw covers (see
+            # `_cache_path`), the cache filename has no extension — both
+            # `QPixmap.save`/`.load` and Qt's image-format sniffing work
+            # from content, not the path, so no filename change is needed.
+            out.save(str(bpath), "JPG", 85)
             callback(out)
 
         # Reuse the raw-cover fetch (caches raw on disk, coalesces in-flight).
