@@ -342,6 +342,23 @@ def test_media_card_focus_installs_glow(qtbot):
     assert card._glow_anim.endValue() == 1.0
 
 
+def test_media_card_glow_anim_reused_not_leaked(qtbot):
+    """Regression guard: MediaCard must reuse a single QVariantAnimation for
+    its focus glow rather than constructing a new one on every
+    set_focused() call. Recreating one per call leaks a live QObject child
+    each time (dropping the Python reference doesn't delete the underlying
+    C++ object while `card` still parents it) — measured at 200 live
+    QVariantAnimation children after 200 focus changes before this fix."""
+    from PyQt6.QtCore import QVariantAnimation
+
+    card = MediaCard(title="Test")
+    qtbot.addWidget(card)
+    for i in range(200):
+        card.set_focused(i % 2 == 0)
+    assert len(card.findChildren(QVariantAnimation)) == 1
+    assert card._glow_anim is not None
+
+
 def test_media_card_no_graphics_effect_ever_installed(qtbot):
     """Regression guard for the QGraphicsDropShadowEffect glow that used to
     live on `self` and was implicated (via lldb) in a Qt6.11/PyQt6
