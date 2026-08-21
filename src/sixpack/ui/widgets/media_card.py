@@ -186,7 +186,15 @@ class MediaCard(QFrame):
         # so it sidesteps the crash class entirely. `self.graphicsEffect()`
         # must be `None` at all times.
         self._glow_strength: float = 0.0
-        self._glow_anim: QVariantAnimation | None = None
+        # One long-lived QVariantAnimation, reused (stopped/reconfigured/
+        # restarted) on every focus change rather than recreated per call.
+        # Recreating one on every set_focused() call leaks a live QObject
+        # child each time (200 focus changes -> 200 live QVariantAnimation
+        # children) since dropping the Python reference doesn't delete the
+        # underlying C++ object while `self` still parents it.
+        self._glow_anim = QVariantAnimation(self)
+        self._glow_anim.setDuration(theme.FOCUS_ANIM_MS)
+        self._glow_anim.valueChanged.connect(self._on_glow_value)
 
         self._build_ui()
 
@@ -339,17 +347,13 @@ class MediaCard(QFrame):
         )
 
         # Glow strength animates 0.0..1.0 and is rendered in paintEvent —
-        # never via a QGraphicsEffect (see comment in __init__).
-        if self._glow_anim is not None:
-            self._glow_anim.stop()
-            self._glow_anim = None
-        anim = QVariantAnimation(self)
-        anim.setDuration(theme.FOCUS_ANIM_MS)
-        anim.setStartValue(self._glow_strength)
-        anim.setEndValue(1.0 if focused else 0.0)
-        anim.valueChanged.connect(self._on_glow_value)
-        anim.start()
-        self._glow_anim = anim  # keep a ref so it isn't GC'd mid-animation
+        # never via a QGraphicsEffect (see comment in __init__). Reuses the
+        # single persistent `self._glow_anim` created in __init__ rather
+        # than constructing a new QVariantAnimation per call.
+        self._glow_anim.stop()
+        self._glow_anim.setStartValue(self._glow_strength)
+        self._glow_anim.setEndValue(1.0 if focused else 0.0)
+        self._glow_anim.start()
 
         # Dim is the paint-level scrim overlaying `self._body`. Applied
         # unconditionally on every call, regardless of prior focus state —
