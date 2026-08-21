@@ -215,6 +215,19 @@ def test_focus_grid_right_wraps(qtbot):
     assert grid._focused_index == 0  # wraps to start
 
 
+def test_focus_grid_scroll_area_is_transparent(qtbot):
+    """Regression guard: FocusGrid's internal QScrollArea/container must be
+    explicitly transparent, or a Backdrop placed behind it (DetailGridScreen)
+    gets fully occluded — the exact bug that shipped once already in the
+    Home/Browse redesign (theme.py's global QWidget/QScrollArea rules are
+    opaque by default)."""
+    grid = FocusGrid(columns=2)
+    qtbot.addWidget(grid)
+    assert "transparent" in grid._scroll.styleSheet()
+    assert "transparent" in grid._scroll.viewport().styleSheet()
+    assert "transparent" in grid._container.styleSheet()
+
+
 # ===========================================================================
 # MediaCard tests
 # ===========================================================================

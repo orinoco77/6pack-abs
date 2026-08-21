@@ -27,8 +27,11 @@ class FocusGrid(QWidget):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        scroll.viewport().setStyleSheet("background: transparent;")
 
         self._container = QWidget()
+        self._container.setStyleSheet("background: transparent;")
         self._grid = QGridLayout(self._container)
         self._grid.setHorizontalSpacing(h_spacing)
         self._grid.setVerticalSpacing(v_spacing)
