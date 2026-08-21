@@ -331,9 +331,9 @@ def test_media_card_media_type_param(qtbot):
 
 def test_media_card_focus_installs_glow(qtbot):
     """Focusing a card must visibly signal it via an accent-colored glow,
-    but never via a QGraphicsEffect (see task-glow-fix-report.md): the glow
-    is a paint-level strength value animated toward 1.0 and rendered
-    directly in MediaCard.paintEvent."""
+    but never via a QGraphicsEffect (see docs/qt-graphics-effect-crash.md):
+    the glow is a paint-level strength value animated toward 1.0 and
+    rendered directly in MediaCard.paintEvent."""
     card = MediaCard(title="Test")
     qtbot.addWidget(card)
     card.set_focused(True)
@@ -378,12 +378,10 @@ def _expected_scrim_alpha():
 
 
 def test_media_card_no_graphics_effect_used_for_dim(qtbot):
-    """The dim must never be a QGraphicsEffect of any kind. Qt 6.11's
-    QGraphicsEffect compositor (QGraphicsEffectSource::pixmap ->
-    QWidget::render) segfaults at volume when an opacity effect is at
-    fractional opacity — see task-4-report.md rounds 1-4. No QGraphicsEffect
-    of any kind remains anywhere on the card, including the outer focus
-    glow, which is now paint-level too (see task-glow-fix-report.md)."""
+    """The dim must never be a QGraphicsEffect of any kind — see
+    docs/qt-graphics-effect-crash.md. No QGraphicsEffect of any kind remains
+    anywhere on the card, including the outer focus glow, which is
+    paint-level too."""
     from PyQt6.QtWidgets import QGraphicsEffect
     card = MediaCard(title="Test")
     qtbot.addWidget(card)
@@ -407,7 +405,7 @@ def test_media_card_unfocus_installs_dim(qtbot):
 def test_media_card_never_focused_still_dims(qtbot):
     """Regression: set_focused(False) must dim unconditionally, even when
     the card was never previously focused (the common case for sibling
-    cards in a grid). See task-4-report.md sibling-dimming spec gap."""
+    cards in a grid)."""
     card = MediaCard(title="Test")
     qtbot.addWidget(card)
     card.set_focused(False)  # never previously focused
@@ -421,7 +419,7 @@ def test_media_card_default_construction_dims(qtbot):
     usage (FocusGrid.focus_item / BrowseScreen._set_grid_focus), only the
     previously- and newly-focused cards ever get a set_focused() call —
     every other sibling in a grid sits at its __init__-time default for
-    its entire lifetime. See task-4-report.md round-3 finding."""
+    its entire lifetime."""
     card = MediaCard(title="Test")
     qtbot.addWidget(card)
     # No set_focused() call at all.
@@ -457,17 +455,12 @@ def test_media_card_scrim_is_non_interactive_and_covers_body(qtbot):
 
 @pytest.mark.parametrize("iteration", range(180))
 def test_media_card_high_churn_no_crash(qtbot, iteration):
-    """Regression test: many distinct MediaCards, each doing a cross-type
-    QGraphicsEffect swap on the same widget instance, used to segfault deep
-    in Qt's compositor (QGraphicsEffectSource::pixmap -> QWidget::render)
-    once churn crossed ~100-150 instances within one process — see
-    task-4-report.md ("Investigation of the sibling-dimming spec gap").
-    The current design uses zero QGraphicsEffects per card: both the focus
-    glow and the dim are plain painted widgets/paintEvent overrides (see
-    task-glow-fix-report.md), keeping Qt's fragile
-    QGraphicsEffectSource::pixmap()/QWidget::render() compositing path out
-    of the picture entirely. This test exercises that at the volume that
-    used to trigger the crash.
+    """Regression test: many distinct MediaCards doing focus churn used to
+    segfault deep in Qt's compositor once churn crossed ~100-150 instances
+    within one process — see docs/qt-graphics-effect-crash.md. The current
+    design uses zero QGraphicsEffects per card: both the focus glow and the
+    dim are plain painted widgets/paintEvent overrides. This test exercises
+    that at the volume that used to trigger the crash.
     """
     grid = FocusGrid(columns=4)
     qtbot.addWidget(grid)
