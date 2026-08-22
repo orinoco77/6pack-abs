@@ -1154,6 +1154,49 @@ def test_chapter_screen_load_from_library_item_resume(qtbot):
     assert screen._list.currentRow() == 1  # chapter at 1500–3000
 
 
+def test_chapter_screen_load_from_podcast_episode(qtbot):
+    from sixpack.api.models import LibraryItem, LibraryItemMedia, PodcastEpisode
+    from sixpack.ui.screens.chapter_select import ChapterSelectScreen
+
+    screen = ChapterSelectScreen()
+    qtbot.addWidget(screen)
+    show = LibraryItem(
+        id="show1", libraryId="lib1", mediaType="podcast",
+        media=LibraryItemMedia(metadata={"title": "My Show"}),
+    )
+    episode = PodcastEpisode(id="ep1", libraryItemId="show1", title="Episode One")
+    chapters = _make_chapters()
+
+    screen.load_from_podcast_episode(show, episode, chapters, None, "http://localhost", "tok")
+
+    assert screen._hero_backdrop._hero_title.text() == "Episode One"
+    assert screen._list.count() == len(chapters)
+
+
+def test_chapter_screen_podcast_episode_activation_emits_signal(qtbot):
+    from sixpack.api.models import LibraryItem, LibraryItemMedia, PodcastEpisode
+    from sixpack.ui.screens.chapter_select import ChapterSelectScreen
+
+    screen = ChapterSelectScreen()
+    qtbot.addWidget(screen)
+    show = LibraryItem(
+        id="show1", libraryId="lib1", mediaType="podcast",
+        media=LibraryItemMedia(metadata={"title": "My Show"}),
+    )
+    episode = PodcastEpisode(id="ep1", libraryItemId="show1", title="Episode One")
+    chapters = _make_chapters()
+    screen.load_from_podcast_episode(show, episode, chapters, None, "http://localhost", "tok")
+
+    received = []
+    screen.podcast_episode_play_requested.connect(lambda s, e, t: received.append((s, e, t)))
+    item = screen._list.item(0)
+    screen._on_item_activated(item)
+
+    assert len(received) == 1
+    assert received[0][0] is show
+    assert received[0][1] is episode
+
+
 class _FakeCoverCache:
     """Captures fetch/fetch_backdrop calls instead of invoking them, so the
     test can assert exactly how many times each was invoked without a real

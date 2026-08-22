@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from sixpack.api.models import Chapter, LibraryItem, MediaProgress, SeriesBook, PlaylistItem
+from sixpack.api.models import Chapter, LibraryItem, MediaProgress, PodcastEpisode, SeriesBook, PlaylistItem
 from sixpack.ui import theme
 from sixpack.ui.cover_cache import CoverCache, dominant_color
 from sixpack.ui.widgets.hero_backdrop import HeroBackdrop
@@ -202,6 +202,7 @@ class ChapterSelectScreen(QWidget):
     play_requested = pyqtSignal(object, float)                  # SeriesBook, start_time
     playlist_item_play_requested = pyqtSignal(object, float)    # PlaylistItem, start_time
     library_item_play_requested = pyqtSignal(object, float)     # LibraryItem, start_time
+    podcast_episode_play_requested = pyqtSignal(object, object, float)  # LibraryItem show, PodcastEpisode, start_time
     back_requested = pyqtSignal()
 
     def __init__(self, cover_cache: CoverCache | None = None, parent=None) -> None:
@@ -209,6 +210,8 @@ class ChapterSelectScreen(QWidget):
         self._book: SeriesBook | None = None
         self._playlist_item: PlaylistItem | None = None
         self._library_item: LibraryItem | None = None
+        self._podcast_show: LibraryItem | None = None
+        self._podcast_episode: PodcastEpisode | None = None
         self._chapters: list[Chapter] = []
         self._cover_cache = cover_cache
         self._backdrop_key: str = ""
@@ -302,6 +305,8 @@ class ChapterSelectScreen(QWidget):
         self._library_item = item
         self._book = None
         self._playlist_item = None
+        self._podcast_show = None
+        self._podcast_episode = None
         self._populate_chapters(
             item.title, chapters, progress,
             item.cover_url(server_url, token), item.id, token,
@@ -318,6 +323,8 @@ class ChapterSelectScreen(QWidget):
         self._book = book
         self._playlist_item = None
         self._library_item = None
+        self._podcast_show = None
+        self._podcast_episode = None
         self._populate_chapters(
             book.title, chapters, progress,
             book.cover_url(server_url, token), book.id, token,
@@ -335,9 +342,32 @@ class ChapterSelectScreen(QWidget):
         self._playlist_item = item
         self._book = None
         self._library_item = None
+        self._podcast_show = None
+        self._podcast_episode = None
         self._populate_chapters(
             item.title, chapters, progress,
             item.cover_url(server_url, token), item.id, token,
+        )
+
+    def load_from_podcast_episode(
+        self,
+        show: LibraryItem,
+        episode: PodcastEpisode,
+        chapters: list[Chapter],
+        progress: MediaProgress | None,
+        server_url: str = "",
+        token: str = "",
+    ) -> None:
+        """Load chapters for a podcast episode. Cover art is the show's own
+        (episodes have none of their own)."""
+        self._podcast_show = show
+        self._podcast_episode = episode
+        self._book = None
+        self._playlist_item = None
+        self._library_item = None
+        self._populate_chapters(
+            episode.title, chapters, progress,
+            show.cover_url(server_url, token), show.id, token,
         )
 
     def _populate_chapters(
@@ -441,6 +471,8 @@ class ChapterSelectScreen(QWidget):
             self.play_requested.emit(self._book, chapter.start)
         elif self._playlist_item:
             self.playlist_item_play_requested.emit(self._playlist_item, chapter.start)
+        elif self._podcast_episode:
+            self.podcast_episode_play_requested.emit(self._podcast_show, self._podcast_episode, chapter.start)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
