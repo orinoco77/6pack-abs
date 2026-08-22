@@ -170,6 +170,9 @@ class AudioPlayer:
     def seek_back_long(self) -> None:
         self.seek_relative(-SEEK_LONG)
 
+    def set_speed(self, speed: float) -> None:
+        self._mpv.speed = speed
+
     # ------------------------------------------------------------------
     # Chapter navigation
     # ------------------------------------------------------------------
@@ -193,6 +196,10 @@ class AudioPlayer:
         chapter = self.current_chapter
         if chapter > 0:
             self._mpv.chapter = chapter - 1
+
+    def seek_to_chapter(self, index: int) -> None:
+        if 0 <= index < self.chapter_count:
+            self._mpv.chapter = index
 
     # ------------------------------------------------------------------
     # State queries
