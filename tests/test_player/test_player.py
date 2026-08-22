@@ -54,7 +54,7 @@ class MockMPV:
         else:
             self.time_pos = amount
 
-    def wait_until_playing(self):
+    def wait_until_playing(self, timeout=None):
         pass
 
     def terminate(self):
@@ -154,6 +154,38 @@ def test_play_with_start_time(player):
 def test_play_no_start_time_no_seek(player):
     player.play("http://abs.test/file.mp3", start_time=0.0)
     assert _mock_mpv_instance.time_pos == 0.0
+
+
+def test_play_unpauses_before_waiting_to_avoid_hang(player):
+    """Regression: mpv's loadfile() (called by play()) doesn't reset the
+    pause property. If a previous track was left paused, wait_until_playing()
+    blocks until core-idle clears, which never happens while paused — so
+    pause must be cleared BEFORE that wait, not after."""
+    _mock_mpv_instance.pause = True  # simulate: previous track was paused
+
+    pause_state_when_waited = []
+    original_wait = _mock_mpv_instance.wait_until_playing
+
+    def spy_wait(*args, **kwargs):
+        pause_state_when_waited.append(_mock_mpv_instance.pause)
+        return original_wait(*args, **kwargs)
+
+    _mock_mpv_instance.wait_until_playing = spy_wait
+
+    player.play("http://abs.test/file2.mp3", start_time=100.0)
+
+    assert pause_state_when_waited == [False]
+
+
+def test_play_wait_until_playing_timeout_does_not_raise(player):
+    """A stall in mpv starting playback must not crash/hang the caller."""
+    def raise_timeout(*args, **kwargs):
+        raise TimeoutError("mpv never left core-idle")
+
+    _mock_mpv_instance.wait_until_playing = raise_timeout
+
+    player.play("http://abs.test/file.mp3", start_time=100.0)  # must not raise
+    assert _mock_mpv_instance.time_pos == 100.0  # seek still attempted
 
 
 def test_pause(player):
