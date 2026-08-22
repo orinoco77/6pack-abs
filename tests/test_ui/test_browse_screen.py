@@ -404,6 +404,65 @@ def test_show_content_switches_to_rows_page(qtbot):
     assert screen._content_stack.currentIndex() == 0
 
 
+def test_reset_rows_clears_hero(qtbot):
+    """_reset_rows() must clear the hero along with the row data it
+    discards — otherwise switching libraries in the sidebar leaves the
+    previous library's title/author showing over the new (empty, still
+    loading) content until the user happens to enter rows again."""
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    item = _li("i1", "Lib1 Book")
+    screen._reflect_focus(item)
+    assert screen._hero_title.text() == "Lib1 Book"
+
+    screen._reset_rows()
+
+    assert screen._hero_title.text() == ""
+    assert screen._hero_sub.text() == ""
+
+
+def test_sidebar_down_to_unloaded_library_clears_stale_hero(qtbot):
+    """Regression test: switching the sidebar selection to a library whose
+    content hasn't loaded yet must not leave the previously-focused
+    library's item still showing in the hero."""
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    screen.load_libraries([_lib("l1", "A"), _lib("l2", "B")], "http://s", "tok")
+    screen.show()
+
+    screen._loaded_library = screen._libraries[0]
+    screen.set_row_items(RowType.RECENTLY_ADDED, [_li("i1", "Lib1 Book")])
+    screen.show_content()
+    screen._enter_rows()
+    screen._handle_rows(InputAction.DOWN)  # focus the Recently Added row
+    assert screen._hero_title.text() == "Lib1 Book"
+
+    _press(qtbot, screen, Qt.Key.Key_Backspace)  # back to sidebar
+    _press(qtbot, screen, Qt.Key.Key_Down)  # highlight lib2 (not yet loaded)
+
+    assert screen._hero_title.text() == ""
+    assert screen._hero_sub.text() == ""
+
+
+def test_show_content_previews_new_library_while_still_in_sidebar(qtbot):
+    """Once a newly-selected library's content finishes loading, the hero
+    should preview it (matching _current_focused_item()'s documented
+    sidebar-zone behavior) even if the user never left the sidebar to
+    trigger navigation-driven reflection."""
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    screen.load_libraries([_lib("l1", "A"), _lib("l2", "B")], "http://s", "tok")
+    screen.show()
+
+    _press(qtbot, screen, Qt.Key.Key_Down)  # highlight lib2, still in sidebar
+    assert screen._zone == "sidebar"
+
+    screen.set_row_items(RowType.RECENTLY_ADDED, [_li("i2", "Lib2 Book")])
+    screen.show_content()
+
+    assert screen._hero_title.text() == "Lib2 Book"
+
+
 # ---------------------------------------------------------------------------
 # BrowseScreen — rows zone keyboard navigation
 # ---------------------------------------------------------------------------
@@ -606,6 +665,20 @@ def test_enter_grid_switches_content_page(qtbot):
     screen = _make_screen_in_grid(qtbot, 2)
     assert screen._zone == "grid"
     assert screen._content_stack.currentIndex() == 1
+
+
+def test_grid_page_top_margin_clears_the_hero(qtbot):
+    """The hero overlay is a fixed-height widget stacked on top of whichever
+    content-stack page is showing (see _build_hero/_hero_geometry) — it isn't
+    tied to a particular page. The rows page (page 0) accounts for this via
+    `rows_layout.setContentsMargins(32, self._HERO_H, 32, 24)`; the grid page
+    (page 1) must reserve the same top clearance or its title/first row sit
+    underneath the hero band."""
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    grid_page = screen._content_stack.widget(1)
+    margins = grid_page.layout().contentsMargins()
+    assert margins.top() == screen._HERO_H
 
 
 def test_grid_right_moves_focus(qtbot):
