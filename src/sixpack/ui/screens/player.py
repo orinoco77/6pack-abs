@@ -37,14 +37,16 @@ class PlayerScreen(QWidget):
 
     Signals:
       back_requested  — user pressed Back (returns to series detail)
-      next_item       — auto-advance or manual next episode
-      prev_item       — previous episode
+      next_item       — manual skip to next episode (button/remote)
+      prev_item       — manual skip to previous episode (button/remote)
+      track_ended     — current track finished playing on its own
       progress_update — (item_id, current_time, duration, is_finished)
     """
 
     back_requested = pyqtSignal()
     next_item = pyqtSignal()
     prev_item = pyqtSignal()
+    track_ended = pyqtSignal()
     progress_update = pyqtSignal(str, float, float, bool)
 
     def __init__(self, player: AudioPlayer, cover_cache: CoverCache | None = None, parent=None) -> None:
@@ -187,6 +189,16 @@ class PlayerScreen(QWidget):
             controls.addWidget(btn)
 
         root.addLayout(controls)
+
+        self._up_next_label = QLabel("")
+        self._up_next_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._up_next_label.setStyleSheet(
+            f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_BODY}pt; "
+            f"background: transparent;"
+        )
+        self._up_next_label.setVisible(False)
+        root.addWidget(self._up_next_label)
+
         root.addStretch(1)
 
     def _connect_player(self) -> None:
@@ -290,6 +302,13 @@ class PlayerScreen(QWidget):
         self._player.play(content_url, start_time=start_time, auth_token=token)
         self._play_btn.setText("⏸")
 
+    def show_up_next(self, message: str) -> None:
+        self._up_next_label.setText(message)
+        self._up_next_label.setVisible(True)
+
+    def hide_up_next(self) -> None:
+        self._up_next_label.setVisible(False)
+
     def _set_cover_pixmap(self, pix: QPixmap) -> None:
         scaled = pix.scaled(
             280, 280,
@@ -365,7 +384,7 @@ class PlayerScreen(QWidget):
     @pyqtSlot()
     def _handle_end_of_track(self) -> None:
         self._sync_progress()
-        self.next_item.emit()
+        self.track_ended.emit()
 
     def _sync_progress(self) -> None:
         if self._item_id and self._duration > 0:
