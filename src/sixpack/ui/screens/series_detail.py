@@ -37,9 +37,7 @@ class SeriesDetailScreen(DetailGridScreen):
         return item.title
 
     def _item_subtitle(self, item: SeriesBook) -> str:
-        if item.sequence:
-            return f"Episode {item.sequence} · {item.title}"
-        return item.title
+        return f"Episode {item.sequence}" if item.sequence else ""
 
     def _item_cover_url(self, item: SeriesBook, server_url: str, token: str) -> str | None:
         return item.cover_url(server_url, token)

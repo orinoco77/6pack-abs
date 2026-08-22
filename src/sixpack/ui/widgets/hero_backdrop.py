@@ -21,7 +21,14 @@ from sixpack.ui.widgets.backdrop import Backdrop
 
 
 class HeroBackdrop(QWidget):
-    """A Backdrop plus a title/subtitle hero overlay in the top HERO_H px."""
+    """A Backdrop plus a title/subtitle hero overlay in the top HERO_H px.
+
+    HeroBackdrop only manages z-order among its OWN children (the backdrop
+    vs. its hero overlay) — it does not lower itself relative to a caller's
+    other sibling widgets. Callers should call ``.lower()`` on their
+    HeroBackdrop instance (after adding their own content widget) so the
+    backdrop stays visually behind that content.
+    """
 
     HERO_H = 150
 
