@@ -124,11 +124,20 @@ class AudioPlayer:
             if auth_token:
                 self._mpv["http-header-fields"] = [f"Authorization: Bearer {auth_token}"]
             self._mpv.play(url)
-            if start_time > 0:
-                # Wait briefly for mpv to start before seeking
-                self._mpv.wait_until_playing()
-                self._mpv.seek(start_time, reference="absolute")
+            # Unpause BEFORE waiting for playback to start. mpv's loadfile
+            # doesn't reset the pause property, so if a previous track was
+            # paused, the new file loads but stays paused — and
+            # wait_until_playing() below waits for core-idle to clear,
+            # which never happens while paused, hanging forever.
             self._mpv.pause = False
+            if start_time > 0:
+                # Wait briefly for mpv to start before seeking. Bounded so a
+                # stall here can't freeze the whole GUI thread.
+                try:
+                    self._mpv.wait_until_playing(timeout=10)
+                except TimeoutError:
+                    pass
+                self._mpv.seek(start_time, reference="absolute")
 
     def pause(self) -> None:
         self._mpv.pause = True
