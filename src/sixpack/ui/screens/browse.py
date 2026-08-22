@@ -648,14 +648,23 @@ class BrowseScreen(QWidget):
             if items and 0 <= idx < len(items):
                 return items[idx]
             return None
-        # sidebar zone: preview the first item of the first non-empty row
-        for items in self._row_items:
-            if items:
-                return items[0]
         return None
 
     def _reflect_current(self) -> None:
+        if self._zone == "sidebar":
+            self._reflect_library()
+            return
         self._reflect_focus(self._current_focused_item())
+
+    def _reflect_library(self) -> None:
+        """Sidebar zone: nothing in the content area is selected yet, so
+        the hero shows the current library's name instead of previewing
+        an arbitrary item from its rows."""
+        lib = self._libraries[self._sidebar_idx] if self._libraries else None
+        self._hero_title.setText(lib.name if lib else "")
+        self._hero_sub.setText("")
+        self._backdrop.set_expected_key("")
+        self._backdrop.show_color(QColor(theme.SURFACE))
 
     # ------------------------------------------------------------------
     # Style helpers
