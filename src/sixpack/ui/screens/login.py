@@ -197,6 +197,7 @@ class LoginScreen(QWidget):
         self._keyboard.key_pressed.connect(self._on_keyboard_key)
         self._keyboard.backspace_pressed.connect(self._on_keyboard_backspace)
         self._keyboard.done_pressed.connect(self._on_connect)
+        self._keyboard.back_requested.connect(self._use_pairing_view)
         outer.addWidget(self._keyboard, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         root.addWidget(self._keyboard_form)
@@ -259,6 +260,22 @@ class LoginScreen(QWidget):
         self._keyboard_form.setVisible(True)
         self._active_field = self._url_input
         self._url_input.setFocus()
+
+    def _use_pairing_view(self) -> None:
+        """Switch back to the pairing view (mirror of _use_keyboard_fallback).
+
+        Connected to the on-screen keyboard's back_requested signal — the
+        remote's Back action while on the keyboard-fallback view. Only
+        meaningful when a pairing server is actually running: if pairing
+        was never started, or start_pairing() fell back here after a bind
+        failure, self._pairing_server is None and there's no pairing view
+        to return to, so this is a deliberate no-op rather than showing a
+        broken/empty pairing view.
+        """
+        if self._pairing_server is None:
+            return
+        self._keyboard_form.setVisible(False)
+        self._pairing_view.setVisible(True)
 
     # ------------------------------------------------------------------
     # On-screen keyboard wiring

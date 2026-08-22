@@ -248,6 +248,54 @@ def test_login_keyboard_key_presses_type_into_active_field(qtbot):
         screen.stop_pairing()
 
 
+def test_login_keyboard_back_requested_returns_to_pairing_view(qtbot):
+    """The on-screen keyboard's Back action (back_requested) must switch
+    back to the pairing view when a pairing server is still running —
+    the mirror of _use_keyboard_fallback(), reachable from a real remote
+    D-pad Back press while on the keyboard-fallback view."""
+    screen = LoginScreen()
+    qtbot.addWidget(screen)
+    screen.start_pairing()
+    try:
+        screen._use_keyboard_fallback()
+        assert not screen._keyboard_form.isHidden()
+        assert screen._pairing_view.isHidden()
+
+        screen._keyboard.back_requested.emit()
+
+        assert screen._pairing_view.isHidden() is False
+        assert screen._keyboard_form.isHidden()
+    finally:
+        screen.stop_pairing()
+
+
+def test_login_keyboard_back_requested_noop_when_pairing_unavailable(qtbot, monkeypatch):
+    """When pairing was never started, or start_pairing() fell back to the
+    keyboard view after a bind failure, self._pairing_server is None —
+    there's no pairing view to return to, so back_requested must not
+    crash and must not reveal a broken/empty pairing view."""
+    from sixpack.pairing.server import PairingServer
+
+    def _raise_oserror(self):
+        raise OSError("bind failed")
+
+    monkeypatch.setattr(PairingServer, "start", _raise_oserror)
+
+    screen = LoginScreen()
+    qtbot.addWidget(screen)
+    screen.start_pairing()
+    try:
+        assert screen._pairing_server is None
+        assert not screen._keyboard_form.isHidden()
+
+        screen._keyboard.back_requested.emit()  # must not raise
+
+        assert screen._pairing_view.isHidden()
+        assert not screen._keyboard_form.isHidden()
+    finally:
+        screen.stop_pairing()
+
+
 def test_login_pairing_bind_failure_falls_back_to_keyboard(qtbot, monkeypatch):
     """If PairingServer.start() can't bind a port, start_pairing() must not
     show the (now broken) pairing view — it should fall back to the
