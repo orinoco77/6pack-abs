@@ -268,7 +268,19 @@ class PlayerScreen(QWidget):
         cover_url = book.cover_url(server_url, token)
         if self._cover_cache is not None:
             self._cover_cache.fetch(cover_url, token, self._set_cover_pixmap)
-            self._cover_cache.fetch_backdrop(cover_url, token, self._set_backdrop_pixmap)
+            # Set the expected key synchronously, before the async
+            # fetch_backdrop() call below kicks off — see
+            # `_set_backdrop_pixmap`/`Backdrop.set_expected_key` for why:
+            # this screen is constructed once and reused across
+            # play_book()/play_library_item()/play_playlist_item() calls
+            # (app.py's _on_next_item/_on_prev_item call back into this same
+            # instance), so a fetch still in flight for a previous item must
+            # not clobber a later item's backdrop when it resolves.
+            self._backdrop.set_expected_key(self._item_id)
+            self._cover_cache.fetch_backdrop(
+                cover_url, token,
+                lambda pix, key=self._item_id: self._set_backdrop_pixmap(pix, key),
+            )
 
         self._server_url = server_url
         self._token = token
@@ -298,7 +310,14 @@ class PlayerScreen(QWidget):
         cover_url = item.cover_url(server_url, token)
         if self._cover_cache is not None:
             self._cover_cache.fetch(cover_url, token, self._set_cover_pixmap)
-            self._cover_cache.fetch_backdrop(cover_url, token, self._set_backdrop_pixmap)
+            # See the matching comment in play_book() — this screen instance
+            # is reused across play_* calls, so guard the async backdrop
+            # fetch against a stale callback overwriting a later item.
+            self._backdrop.set_expected_key(self._item_id)
+            self._cover_cache.fetch_backdrop(
+                cover_url, token,
+                lambda pix, key=self._item_id: self._set_backdrop_pixmap(pix, key),
+            )
 
         self._server_url = server_url
         self._token = token
@@ -328,7 +347,14 @@ class PlayerScreen(QWidget):
         cover_url = item.cover_url(server_url, token)
         if self._cover_cache is not None:
             self._cover_cache.fetch(cover_url, token, self._set_cover_pixmap)
-            self._cover_cache.fetch_backdrop(cover_url, token, self._set_backdrop_pixmap)
+            # See the matching comment in play_book() — this screen instance
+            # is reused across play_* calls, so guard the async backdrop
+            # fetch against a stale callback overwriting a later item.
+            self._backdrop.set_expected_key(self._item_id)
+            self._cover_cache.fetch_backdrop(
+                cover_url, token,
+                lambda pix, key=self._item_id: self._set_backdrop_pixmap(pix, key),
+            )
 
         self._server_url = server_url
         self._token = token
@@ -353,8 +379,8 @@ class PlayerScreen(QWidget):
         )
         self._cover_label.setPixmap(scaled)
 
-    def _set_backdrop_pixmap(self, pix: QPixmap) -> None:
-        self._backdrop.show_image(pix)
+    def _set_backdrop_pixmap(self, pix: QPixmap, key: str | None = None) -> None:
+        self._backdrop.show_image(pix, key=key)
 
     # ------------------------------------------------------------------
     # Player callbacks  (called from mpv thread — no Qt widget access here)

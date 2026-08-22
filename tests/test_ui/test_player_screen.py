@@ -153,7 +153,15 @@ def test_play_book_fetches_cover_and_backdrop(qtbot):
     assert len(fake_cache.fetch_calls) == 1
     assert len(fake_cache.fetch_backdrop_calls) == 1
     assert fake_cache.fetch_calls[0][2] == s._set_cover_pixmap
-    assert fake_cache.fetch_backdrop_calls[0][2] == s._set_backdrop_pixmap
+    # The backdrop callback is a closure (not the bare _set_backdrop_pixmap
+    # method) so it can carry the item's key through to Backdrop's staleness
+    # guard — see test_stale_backdrop_callback_does_not_clobber_newer_item
+    # below. Invoking it end-to-end should still land the pixmap on the
+    # Backdrop, exactly as the bare method used to.
+    pix = QPixmap(10, 10)
+    pix.fill(Qt.GlobalColor.red)
+    fake_cache.fetch_backdrop_calls[0][2](pix)
+    assert s._backdrop._incoming_pixmap is not None
 
 
 def test_play_library_item_fetches_cover_and_backdrop(qtbot):
@@ -178,6 +186,51 @@ def test_play_playlist_item_fetches_cover_and_backdrop(qtbot):
 
     assert len(fake_cache.fetch_calls) == 1
     assert len(fake_cache.fetch_backdrop_calls) == 1
+
+
+def test_stale_backdrop_callback_does_not_clobber_newer_item(qtbot):
+    """Regression for the reused-instance race: PlayerScreen is constructed
+    once by app.py and reused for every subsequent play_* call (e.g.
+    app.py's _on_next_item/_on_prev_item skip handlers call play_book again
+    on the SAME instance). CoverCache.fetch_backdrop resolves synchronously
+    on a disk-cache hit but asynchronously (QNetworkReply) on a miss, so
+    playing book A (cold cover, fetch in flight) then skipping to book B
+    (warm cover, resolves immediately) then having A's fetch resolve late
+    must NOT overwrite B's already-displayed backdrop with A's pixmap.
+    """
+    fake_cache = _FakeCoverCache()
+    s = PlayerScreen(player=_FakePlayer(), cover_cache=fake_cache)
+    qtbot.addWidget(s)
+
+    book_a = _book(book_id="a", title="Book A")
+    book_b = _book(book_id="b", title="Book B")
+    series = _series([book_a, book_b])
+
+    # Play book A — its backdrop fetch is "in flight" (callback captured,
+    # not yet invoked), simulating a cold-cache async miss.
+    s.play_book(book_a, 0.0, series, [book_a, book_b], "http://server", "tok")
+    assert len(fake_cache.fetch_backdrop_calls) == 1
+    stale_callback_for_a = fake_cache.fetch_backdrop_calls[0][2]
+
+    # Skip to book B — its fetch resolves immediately (warm cache hit),
+    # which is how CoverCache behaves synchronously on a cache hit.
+    s.play_book(book_b, 0.0, series, [book_a, book_b], "http://server", "tok")
+    assert len(fake_cache.fetch_backdrop_calls) == 2
+    callback_for_b = fake_cache.fetch_backdrop_calls[1][2]
+    pix_b = QPixmap(10, 10)
+    pix_b.fill(Qt.GlobalColor.blue)
+    callback_for_b(pix_b)
+    assert s._backdrop._incoming_pixmap is pix_b
+
+    # A's fetch now resolves late, after B is already showing. Without the
+    # key guard this unconditionally overwrites the backdrop with A's cover
+    # for the entire remaining duration of B's playback.
+    pix_a = QPixmap(10, 10)
+    pix_a.fill(Qt.GlobalColor.red)
+    stale_callback_for_a(pix_a)
+
+    assert s._backdrop._incoming_pixmap is pix_b
+    assert s._backdrop._incoming_pixmap is not pix_a
 
 
 def test_set_backdrop_pixmap_shows_image_on_backdrop(screen):
