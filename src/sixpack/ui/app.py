@@ -590,9 +590,9 @@ class MainWindow(QMainWindow):
             else:
                 start_time = progress.current_time if progress and not progress.is_finished else 0.0
                 self._player_back_target = "browse"
+                self._on_browse_item_play_requested(item, start_time)
                 if self._player_screen:
                     self._player_screen.set_chapters(chapters)
-                self._on_browse_item_play_requested(item, start_time)
 
         elif tag == "playlist_detail":
             playlist, progress_map = result
@@ -622,9 +622,9 @@ class MainWindow(QMainWindow):
                 prog = self._detail_screen._progress.get(book.id)
                 start_time = prog.current_time if prog and not prog.is_finished else 0.0
                 self._player_back_target = "detail"
+                self._on_play_requested(book, start_time)
                 if self._player_screen:
                     self._player_screen.set_chapters(chapters)
-                self._on_play_requested(book, start_time)
 
         elif tag == "playlist_item_chapters":
             library_item = result
@@ -639,9 +639,9 @@ class MainWindow(QMainWindow):
             else:
                 prog = self._playlist_detail_screen._progress.get(item.library_item_id)
                 start_time = prog.current_time if prog and not prog.is_finished else 0.0
+                self._on_playlist_item_play_requested(item, start_time)
                 if self._player_screen:
                     self._player_screen.set_chapters(chapters)
-                self._on_playlist_item_play_requested(item, start_time)
 
         elif tag == "start_session":
             # result is a PlaybackSession — build URL and start playback
