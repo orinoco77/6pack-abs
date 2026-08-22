@@ -1,7 +1,9 @@
 """Smoke tests for the top-level application window (headless)."""
 from __future__ import annotations
 
+import httpx
 import pytest
+import respx
 
 
 class _FakeAudioPlayer:
@@ -92,6 +94,66 @@ def test_main_window_constructs_without_error(window):
     """
     assert window is not None
     assert window._player_screen is not None
+
+
+# ---- _async_get_libraries: exclude libraries with no playable audio ----
+
+def _library_payload(lib_id="lib1", name="Audiobooks"):
+    return {"id": lib_id, "name": name, "mediaType": "book", "displayOrder": 1}
+
+
+@pytest.mark.asyncio
+async def test_async_get_libraries_excludes_library_with_no_audio(window):
+    """A library whose stats report zero duration and zero audio tracks
+    (e.g. an all-epub library — Audiobookshelf's library-level `mediaType`
+    is "book" for both audiobook and ebook-only libraries, so it can't be
+    used to tell them apart; per-library /stats is the cheap signal that
+    can) must not appear in the list handed to the browse screen."""
+    window._server_url = "http://abs.test"
+    window._token = "tok"
+    async with respx.mock(base_url="http://abs.test") as mock:
+        mock.get("/api/libraries").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "libraries": [
+                        _library_payload("lib-audio", "Audiobooks"),
+                        _library_payload("lib-ebooks", "eBooks"),
+                    ]
+                },
+            )
+        )
+        mock.get("/api/libraries/lib-audio/stats").mock(
+            return_value=httpx.Response(
+                200, json={"totalDuration": 123456.0, "numAudioTracks": 42}
+            )
+        )
+        mock.get("/api/libraries/lib-ebooks/stats").mock(
+            return_value=httpx.Response(200, json={"totalDuration": 0, "numAudioTracks": 0})
+        )
+        result = await window._async_get_libraries()
+
+    assert [lib.id for lib in result] == ["lib-audio"]
+
+
+@pytest.mark.asyncio
+async def test_async_get_libraries_keeps_library_on_stats_fetch_failure(window):
+    """A transient stats-fetch failure for one library must not hide it —
+    fail open rather than risk hiding a real, playable library."""
+    window._server_url = "http://abs.test"
+    window._token = "tok"
+    async with respx.mock(base_url="http://abs.test") as mock:
+        mock.get("/api/libraries").mock(
+            return_value=httpx.Response(
+                200, json={"libraries": [_library_payload("lib-flaky", "Flaky")]}
+            )
+        )
+        mock.get("/api/libraries/lib-flaky/stats").mock(
+            return_value=httpx.Response(500, text="Internal Error")
+        )
+        result = await window._async_get_libraries()
+
+    assert [lib.id for lib in result] == ["lib-flaky"]
 
 
 def test_on_track_ended_navigates_to_series_detail_with_next_focused(window, qtbot):

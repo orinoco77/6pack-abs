@@ -283,8 +283,24 @@ class MainWindow(QMainWindow):
         self._worker.run("autologin", self._async_get_libraries())
 
     async def _async_get_libraries(self):
+        sem = asyncio.Semaphore(10)
+
+        async def _fetch_stats(client: ABSClient, library_id: str):
+            async with sem:
+                try:
+                    return await client.get_library_stats(library_id)
+                except Exception as exc:
+                    logger.warning("Library stats fetch failed for %s: %s", library_id, exc)
+                    return None
+
         async with ABSClient(self._server_url, token=self._token) as client:
-            return await client.get_libraries()
+            libraries = await client.get_libraries()
+            stats = await asyncio.gather(*(_fetch_stats(client, lib.id) for lib in libraries))
+        return [
+            lib
+            for lib, s in zip(libraries, stats)
+            if s is None or s.total_duration > 0 or s.num_audio_tracks > 0
+        ]
 
     # ------------------------------------------------------------------
     # Browse screen

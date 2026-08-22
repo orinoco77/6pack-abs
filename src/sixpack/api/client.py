@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 from .models import (
     Library,
     LibraryItem,
+    LibraryStats,
     LoginResponse,
     MediaProgress,
     PersonalizedShelf,
@@ -103,6 +104,11 @@ class ABSClient:
         self._raise_for_status(response)
         data = response.json()
         return [Library.model_validate(lib) for lib in data.get("libraries", [])]
+
+    async def get_library_stats(self, library_id: str) -> LibraryStats:
+        response = await self._http.get(f"/api/libraries/{library_id}/stats")
+        self._raise_for_status(response)
+        return LibraryStats.model_validate(response.json())
 
     # ------------------------------------------------------------------
     # Series
