@@ -5,12 +5,11 @@ from __future__ import annotations
 
 import json
 import threading
-import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
-from sixpack.discovery.scanner import ABS_PORT, scan_for_servers
+from sixpack.discovery.scanner import scan_for_servers
 
 
 class _FakeABSHandler(BaseHTTPRequestHandler):
@@ -104,9 +103,6 @@ def test_does_not_flag_non_abs_server(fake_non_abs_server, monkeypatch):
 def test_unreachable_host_is_silently_skipped():
     # Port 1 is reserved/unlikely to be listening; the scan must not
     # raise, just omit it from results.
-    import sixpack.discovery.scanner as scanner_module
-    scanner_module_port = scanner_module.ABS_PORT  # unchanged — nothing listens on 127.0.0.1:ABS_PORT in test env
-
     results, done, on_result = _wait_for_result()
     scan_for_servers(on_result, hosts=["127.0.0.1"])
     assert done.wait(timeout=5.0)
