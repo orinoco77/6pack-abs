@@ -303,3 +303,90 @@ def test_speed_cycle_wraps_around(qtbot, screen):
         qtbot.keyClick(screen, Qt.Key.Key_Up)
     assert screen._speed_label.text() == "1.0x"
     assert screen._player.speed_calls[-1] == 1.0
+
+
+# ----------------------------------------------------------------------
+# In-player chapter access overlay (Task 6)
+# ----------------------------------------------------------------------
+
+
+def test_menu_key_opens_chapter_overlay(qtbot, screen):
+    from sixpack.api.models import Chapter
+    chapters = [Chapter(id=0, start=0.0, end=100.0, title="Ch1"),
+                Chapter(id=1, start=100.0, end=200.0, title="Ch2")]
+    screen.set_chapters(chapters)
+    screen.show()
+    qtbot.waitExposed(screen)
+
+    assert not screen._chapter_overlay.isVisible()
+    qtbot.keyClick(screen, Qt.Key.Key_Return)  # MENU in player mode
+    assert screen._chapter_overlay.isVisible()
+
+
+def test_menu_key_closes_open_overlay(qtbot, screen):
+    from sixpack.api.models import Chapter
+    screen.set_chapters([Chapter(id=0, start=0.0, end=100.0, title="Ch1")])
+    screen.show()
+    qtbot.waitExposed(screen)
+    qtbot.keyClick(screen, Qt.Key.Key_Return)
+    assert screen._chapter_overlay.isVisible()
+    qtbot.keyClick(screen, Qt.Key.Key_Return)
+    assert not screen._chapter_overlay.isVisible()
+
+
+def test_select_in_overlay_seeks_and_closes(qtbot, screen):
+    from sixpack.api.models import Chapter
+    screen.set_chapters([Chapter(id=0, start=0.0, end=100.0, title="Ch1"),
+                          Chapter(id=1, start=100.0, end=200.0, title="Ch2")])
+    screen.show()
+    qtbot.waitExposed(screen)
+    qtbot.keyClick(screen, Qt.Key.Key_Return)  # open
+    screen._chapter_overlay.setCurrentRow(1)
+    qtbot.keyClick(screen, Qt.Key.Key_Return)  # select — closes AND seeks
+
+    assert screen._player.seek_to_chapter_calls == [1]
+    assert not screen._chapter_overlay.isVisible()
+
+
+def test_back_closes_overlay_without_seeking(qtbot, screen):
+    from sixpack.api.models import Chapter
+    screen.set_chapters([Chapter(id=0, start=0.0, end=100.0, title="Ch1")])
+    screen.show()
+    qtbot.waitExposed(screen)
+    qtbot.keyClick(screen, Qt.Key.Key_Return)  # open
+    qtbot.keyClick(screen, Qt.Key.Key_Escape)  # BACK
+
+    assert screen._player.seek_to_chapter_calls == []
+    assert not screen._chapter_overlay.isVisible()
+
+
+def test_menu_key_does_nothing_without_chapters(qtbot, screen):
+    """No chapters set (e.g. staleness/fallback path) — MENU must not crash
+    and the overlay must simply not open."""
+    screen.show()
+    qtbot.waitExposed(screen)
+    qtbot.keyClick(screen, Qt.Key.Key_Return)
+    assert not screen._chapter_overlay.isVisible()
+
+
+def test_up_down_navigate_overlay_without_cycling_speed(qtbot, screen):
+    """Regression: while the overlay is open, UP must navigate the overlay,
+    NOT cycle playback speed (Task 5's binding) — the speed label must stay
+    unchanged and the overlay's current row must move."""
+    from sixpack.api.models import Chapter
+    screen.set_chapters([Chapter(id=0, start=0.0, end=100.0, title="Ch1"),
+                          Chapter(id=1, start=100.0, end=200.0, title="Ch2")])
+    screen.show()
+    qtbot.waitExposed(screen)
+    qtbot.keyClick(screen, Qt.Key.Key_Return)  # open — resumes at row 0
+    assert screen._chapter_overlay.currentRow() == 0
+
+    qtbot.keyClick(screen, Qt.Key.Key_Down)
+    assert screen._chapter_overlay.currentRow() == 1
+    assert screen._speed_label.text() == "1.0x"
+    assert screen._player.speed_calls == []
+
+    qtbot.keyClick(screen, Qt.Key.Key_Up)
+    assert screen._chapter_overlay.currentRow() == 0
+    assert screen._speed_label.text() == "1.0x"
+    assert screen._player.speed_calls == []
