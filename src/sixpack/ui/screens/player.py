@@ -292,6 +292,16 @@ class PlayerScreen(QWidget):
         server_url: str,
         token: str,
     ) -> None:
+        # Reset any chapters carried over from a previous item. app.py's
+        # next/prev-item navigation (_on_next_item/_on_prev_item) calls this
+        # method directly without going through either of set_chapters()'s
+        # two delivery paths, so without this the in-player chapter overlay
+        # would otherwise show a stale, wrong-book chapter list after
+        # manual next/prev navigation. _toggle_chapter_overlay() no-ops when
+        # self._chapters is empty, so this yields "no overlay" rather than
+        # "wrong overlay" until/unless a future change re-fetches chapters
+        # for the new item on next/prev navigation too.
+        self._chapters = []
         self._current_book = book
         self._series = series
         self._series_books = books
@@ -333,6 +343,10 @@ class PlayerScreen(QWidget):
         token: str,
     ) -> None:
         """Play a standalone library item (from the browse screen, no series context)."""
+        # See the matching comment in play_book() — reset stale chapters
+        # from a previous item so the in-player chapter overlay doesn't
+        # show the wrong book's chapters after next/prev navigation.
+        self._chapters = []
         self._current_book = None
         self._series = None
         self._series_books = []
@@ -372,6 +386,10 @@ class PlayerScreen(QWidget):
         token: str,
     ) -> None:
         """Play an item from a playlist (similar to play_book but for playlists)."""
+        # See the matching comment in play_book() — reset stale chapters
+        # from a previous item so the in-player chapter overlay doesn't
+        # show the wrong book's chapters after next/prev navigation.
+        self._chapters = []
         self._current_playlist_item = item
         self._playlist = playlist
         self._playlist_items = items
