@@ -15,6 +15,7 @@ system.
 from __future__ import annotations
 
 import asyncio
+import html
 import secrets
 import socket
 import threading
@@ -120,9 +121,17 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             token = asyncio.run(self._login(server_url, username, password))
         except (AuthenticationError, APIError, Exception) as exc:  # noqa: BLE001
-            self._respond(200, _ERROR_PAGE.format(message=str(exc), code=server.code))
+            # exc's message can embed attacker-controlled content (e.g. an
+            # APIError built from a malicious server_url's raw response
+            # body), so it MUST be HTML-escaped before landing in the page.
+            message = html.escape(str(exc))
+            self._respond(200, _ERROR_PAGE.format(message=message, code=server.code))
             return
 
+        # NOTE: on_success runs on this background HTTP-server thread,
+        # before the HTTP response is sent below. An exception raised by
+        # the callback will propagate out of do_POST and the client will
+        # never receive a response for this request.
         server.mark_used()
         server.on_success(server_url, username, token)
         self._respond(200, _SUCCESS_PAGE)
