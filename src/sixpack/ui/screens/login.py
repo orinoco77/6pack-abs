@@ -20,6 +20,7 @@ Switching views only toggles container visibility.
 """
 from __future__ import annotations
 
+from PyQt6 import sip
 from PyQt6.QtCore import QEvent, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
@@ -32,6 +33,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from sixpack.discovery.scanner import scan_for_servers
 from sixpack.pairing.server import PairingServer
 from sixpack.ui import theme
 from sixpack.ui.widgets.backdrop import Backdrop
@@ -45,6 +47,14 @@ class LoginScreen(QWidget):
     login_requested = pyqtSignal(str, str, str)  # url, username, password
     pairing_login_succeeded = pyqtSignal(str, str, str)  # url, username, token
     error_message = pyqtSignal(str)
+    # Internal marshaling signal: scan_for_servers() calls its on_result
+    # callback from a background thread (see sixpack.discovery.scanner's
+    # module docstring), so start_pairing() hands it this signal's .emit
+    # rather than _on_servers_discovered directly — emit() is safe to call
+    # from any thread and Qt automatically queues delivery of the connected
+    # slot onto this (GUI-thread) object's thread, the same pattern
+    # PairingServer.on_success / _on_pairing_success already uses.
+    _scan_completed = pyqtSignal(list)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -54,6 +64,13 @@ class LoginScreen(QWidget):
         # Select on a field), and explicitly reset to the URL field whenever
         # the keyboard-fallback view is (re)shown.
         self._active_field: QLineEdit | None = None
+        self._discovered_servers: list[str] = []
+        # Whether the discovered-servers list currently owns "logical"
+        # focus (real Qt focus stays on self; keyPressEvent handles
+        # SELECT/UP/DOWN directly — mirrors the pairing-view branch's
+        # self.setFocus() pattern below).
+        self._discovered_focus_active: bool = False
+        self._scan_completed.connect(self._on_servers_discovered)
         self._build_ui()
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
@@ -156,6 +173,15 @@ class LoginScreen(QWidget):
         self._pairing_unavailable_label.setVisible(False)
         outer.addWidget(self._pairing_unavailable_label)
 
+        self._discovered_list_container = QWidget()
+        self._discovered_list_layout = QVBoxLayout(self._discovered_list_container)
+        self._discovered_list_layout.setSpacing(6)
+        self._discovered_list_layout.setContentsMargins(0, 0, 0, 12)
+        self._discovered_buttons: list[QPushButton] = []
+        self._discovered_focus_index = 0
+        self._discovered_list_container.setVisible(False)
+        outer.addWidget(self._discovered_list_container)
+
         form = QVBoxLayout()
         form.setSpacing(12)
         form.setContentsMargins(0, 0, 0, 0)
@@ -246,6 +272,32 @@ class LoginScreen(QWidget):
         # design from Task 3) and this method is not involved again
         # until the user exits it (Back, wired to _use_pairing_view) or
         # a genuinely unmapped key falls through to here.
+        #
+        # The discovered-servers list sits above the fields and is
+        # navigated the same way as the pairing view above: its buttons
+        # are NoFocus (matching every other sub-widget pattern in this
+        # app), so they never appear as QApplication.focusWidget() — real
+        # Qt focus stays on self and self._discovered_focus_active tracks
+        # whether the list currently owns "logical" focus.
+        if self._discovered_focus_active:
+            if action == InputAction.DOWN:
+                if self._discovered_focus_index + 1 < len(self._discovered_buttons):
+                    self._discovered_focus_index += 1
+                    self._reflect_discovered_focus()
+                else:
+                    self._discovered_focus_active = False
+                    self._url_input.setFocus()
+                return
+            if action == InputAction.UP and self._discovered_focus_index > 0:
+                self._discovered_focus_index -= 1
+                self._reflect_discovered_focus()
+                return
+            if action == InputAction.SELECT:
+                self._select_discovered_server(self._discovered_focus_index)
+                return
+            super().keyPressEvent(event)
+            return
+
         focused = QApplication.focusWidget()
         fields = [self._url_input, self._user_input, self._pass_input]
         if focused in fields:
@@ -256,8 +308,17 @@ class LoginScreen(QWidget):
                 else:
                     self._keyboard.setFocus()
                 return
-            if action == InputAction.UP and idx > 0:
-                fields[idx - 1].setFocus()
+            if action == InputAction.UP:
+                if idx > 0:
+                    fields[idx - 1].setFocus()
+                elif self._discovered_buttons:
+                    # Back up out of the fields into the discovered list —
+                    # the mirror image of the DOWN-past-the-last-button
+                    # transition above.
+                    self._discovered_focus_active = True
+                    self._discovered_focus_index = len(self._discovered_buttons) - 1
+                    self._reflect_discovered_focus()
+                    self.setFocus()
                 return
         super().keyPressEvent(event)
 
@@ -294,6 +355,13 @@ class LoginScreen(QWidget):
             )
             self._pairing_unavailable_label.setVisible(True)
             self._use_keyboard_fallback()
+            # Discovery is still useful here even though the phone-pairing
+            # server itself couldn't bind: the keyboard-fallback view (the
+            # only surface reachable in this branch) gets a populated list
+            # once the scan completes. _on_servers_discovered() skips the
+            # PairingServer.set_discovered_servers() call on its own since
+            # self._pairing_server is None in this branch.
+            scan_for_servers(self._deliver_scan_result)
             return
 
         self._qr_widget.set_data(self._pairing_server.pairing_url())
@@ -301,6 +369,11 @@ class LoginScreen(QWidget):
         self._pairing_url_label.setText(self._pairing_server.pairing_url())
         self._pairing_view.setVisible(True)
         self._keyboard_form.setVisible(False)
+        # Single scan per start_pairing() call, feeding both surfaces:
+        # the phone form (via PairingServer.set_discovered_servers, inside
+        # _on_servers_discovered) and this screen's own Qt list — whichever
+        # is actually reachable picks up the results.
+        scan_for_servers(self._deliver_scan_result)
         QTimer.singleShot(
             int(PairingServer.EXPIRY_SECONDS * 1000) + 1000,
             self._refresh_pairing_code,
@@ -327,8 +400,15 @@ class LoginScreen(QWidget):
     def _use_keyboard_fallback(self) -> None:
         self._pairing_view.setVisible(False)
         self._keyboard_form.setVisible(True)
-        self._active_field = self._url_input
-        self._url_input.setFocus()
+        if self._discovered_buttons:
+            self._discovered_focus_active = True
+            self._discovered_focus_index = 0
+            self._reflect_discovered_focus()
+            self.setFocus()
+        else:
+            self._discovered_focus_active = False
+            self._active_field = self._url_input
+            self._url_input.setFocus()
 
     def _use_pairing_view(self) -> None:
         """Switch back to the pairing view (mirror of _use_keyboard_fallback).
@@ -345,6 +425,61 @@ class LoginScreen(QWidget):
             return
         self._keyboard_form.setVisible(False)
         self._pairing_view.setVisible(True)
+
+    # ------------------------------------------------------------------
+    # LAN server discovery (shared scan feeds both the phone-pairing form
+    # via PairingServer.set_discovered_servers and this Qt-native list)
+    # ------------------------------------------------------------------
+
+    def _deliver_scan_result(self, servers: list[str]) -> None:
+        """scan_for_servers()'s on_result callback: invoked exactly once,
+        from the scan's background thread (scanner.py provides no
+        cancellation, so this can still fire well after this screen was
+        torn down — e.g. the app closed shortly after start_pairing()).
+
+        sip.isdeleted() guards against emitting into an already-deleted
+        C++ QObject: Qt's cross-thread signal delivery is not safe against
+        a concurrent deletion race and can segfault the whole process
+        rather than raise a catchable Python exception (reproduced during
+        this task's own testing). _scan_completed.emit() itself is what
+        does the actual thread-safe marshaling onto the GUI thread, once
+        we've confirmed there's a live object to deliver to.
+        """
+        if not sip.isdeleted(self):
+            self._scan_completed.emit(servers)
+
+    def _on_servers_discovered(self, servers: list[str]) -> None:
+        self._discovered_servers = servers
+        if self._pairing_server is not None:
+            self._pairing_server.set_discovered_servers(servers)
+        self._rebuild_discovered_list()
+
+    def _rebuild_discovered_list(self) -> None:
+        for btn in self._discovered_buttons:
+            btn.setParent(None)
+        self._discovered_buttons = []
+        for i, url in enumerate(self._discovered_servers):
+            btn = QPushButton(url)
+            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            btn.clicked.connect(lambda _checked=False, idx=i: self._select_discovered_server(idx))
+            self._discovered_list_layout.addWidget(btn)
+            self._discovered_buttons.append(btn)
+        self._discovered_list_container.setVisible(bool(self._discovered_buttons))
+        self._discovered_focus_index = 0
+        self._reflect_discovered_focus()
+
+    def _reflect_discovered_focus(self) -> None:
+        for i, btn in enumerate(self._discovered_buttons):
+            border = theme.ACCENT if i == self._discovered_focus_index else "transparent"
+            btn.setStyleSheet(
+                f"background: {theme.SURFACE_HIGH}; color: {theme.TEXT_PRIMARY}; "
+                f"border: 2px solid {border}; border-radius: 6px; padding: 10px; "
+                f"text-align: left; font-size: {theme.FONT_BODY}pt;"
+            )
+
+    def _select_discovered_server(self, index: int) -> None:
+        if 0 <= index < len(self._discovered_servers):
+            self._url_input.setText(self._discovered_servers[index])
 
     # ------------------------------------------------------------------
     # On-screen keyboard wiring

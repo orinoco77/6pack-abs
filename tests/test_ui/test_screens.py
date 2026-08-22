@@ -423,6 +423,174 @@ def test_login_set_prefill_still_works_unchanged(qtbot):
     assert screen._user_input.text() == "alice"
 
 
+# ---- LoginScreen: discovered-servers list (keyboard-fallback view) ----
+
+def test_login_no_discovered_servers_list_hidden_by_default(qtbot):
+    # isHidden() (the widget's own visibility flag), not isVisible() (which
+    # also requires every ancestor up to a shown top-level to be visible) —
+    # matching this file's established convention for the same kind of
+    # check elsewhere (e.g. test_login_starts_on_pairing_view_by_default),
+    # since this screen is never shown here.
+    screen = LoginScreen()
+    qtbot.addWidget(screen)
+    screen._use_keyboard_fallback()
+    assert screen._discovered_list_container.isHidden()
+
+
+def test_login_discovered_servers_shown_when_found(qtbot):
+    screen = LoginScreen()
+    qtbot.addWidget(screen)
+    screen._on_servers_discovered(["http://192.168.1.50:13378", "http://192.168.1.51:13378"])
+    screen._use_keyboard_fallback()
+    assert not screen._discovered_list_container.isHidden()
+    assert len(screen._discovered_buttons) == 2
+
+
+def test_login_selecting_discovered_server_fills_url_field(qtbot):
+    screen = LoginScreen()
+    qtbot.addWidget(screen)
+    screen._on_servers_discovered(["http://192.168.1.50:13378"])
+    screen._use_keyboard_fallback()
+    screen._select_discovered_server(0)
+    assert screen._url_input.text() == "http://192.168.1.50:13378"
+
+
+def test_login_dpad_reaches_discovered_list_and_selects(qtbot):
+    """Regression, matching this plan's own real-key-delivery convention:
+    the discovered-servers list must be reachable and selectable using
+    ONLY real key events, not direct method calls."""
+    from PyQt6.QtTest import QTest
+
+    screen = LoginScreen()
+    qtbot.addWidget(screen)
+    screen.show()
+    qtbot.waitExposed(screen)
+    screen.activateWindow()
+    QTest.qWaitForWindowActive(screen)
+    screen._on_servers_discovered(["http://192.168.1.50:13378"])
+    screen._use_keyboard_fallback()
+
+    # With a discovered server present, initial focus in the fallback view
+    # should land on the discovered list, not directly on the URL field.
+    qtbot.keyClick(screen, Qt.Key.Key_Return)  # SELECT the highlighted (only) discovered server
+    assert screen._url_input.text() == "http://192.168.1.50:13378"
+
+
+def test_login_dpad_up_down_across_discovered_list_and_fields(qtbot):
+    """DOWN past the last discovered server enters the URL field; UP from
+    the (topmost) URL field re-enters the discovered list — driven with
+    real key events against the actual focus owner at each step."""
+    from PyQt6.QtTest import QTest
+
+    screen = LoginScreen()
+    qtbot.addWidget(screen)
+    screen.show()
+    qtbot.waitExposed(screen)
+    screen.activateWindow()
+    QTest.qWaitForWindowActive(screen)
+    screen._on_servers_discovered(["http://192.168.1.50:13378", "http://192.168.1.51:13378"])
+    screen._use_keyboard_fallback()
+
+    assert screen._discovered_focus_active
+    assert screen._discovered_focus_index == 0
+
+    # DOWN moves within the discovered list first.
+    qtbot.keyClick(screen, Qt.Key.Key_Down)
+    assert screen._discovered_focus_active
+    assert screen._discovered_focus_index == 1
+
+    # DOWN past the last discovered server hands off to the URL field.
+    qtbot.keyClick(screen, Qt.Key.Key_Down)
+    assert not screen._discovered_focus_active
+    assert QApplication.focusWidget() is screen._url_input
+
+    # UP from the (topmost) URL field re-enters the discovered list, on
+    # its last item.
+    qtbot.keyClick(screen._url_input, Qt.Key.Key_Up)
+    assert screen._discovered_focus_active
+    assert screen._discovered_focus_index == 1
+
+
+def test_login_start_pairing_kicks_off_scan(qtbot, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "sixpack.ui.screens.login.scan_for_servers",
+        lambda on_result, **kw: calls.append(on_result),
+    )
+    screen = LoginScreen()
+    qtbot.addWidget(screen)
+    screen.start_pairing()
+    try:
+        assert len(calls) == 1
+        # Simulate the scan completing and reporting back.
+        calls[0](["http://192.168.1.50:13378"])
+        assert screen._discovered_servers == ["http://192.168.1.50:13378"]
+    finally:
+        screen.stop_pairing()
+
+
+def test_login_start_pairing_scans_on_bind_failure_too(qtbot, monkeypatch):
+    """Discovery is still useful on the keyboard-fallback view even when
+    the pairing server itself couldn't bind — but must only fire once per
+    start_pairing() call, not once per branch. Since there's no running
+    PairingServer in this branch, results must still populate the Qt
+    list (the only surface reachable here)."""
+    from sixpack.pairing.server import PairingServer
+
+    def _raise_oserror(self):
+        raise OSError("bind failed")
+
+    monkeypatch.setattr(PairingServer, "start", _raise_oserror)
+
+    calls = []
+    monkeypatch.setattr(
+        "sixpack.ui.screens.login.scan_for_servers",
+        lambda on_result, **kw: calls.append(on_result),
+    )
+    screen = LoginScreen()
+    qtbot.addWidget(screen)
+    screen.start_pairing()
+    try:
+        assert len(calls) == 1
+        assert screen._pairing_server is None
+        calls[0](["http://192.168.1.50:13378"])
+        assert len(screen._discovered_buttons) == 1
+        assert not screen._discovered_list_container.isHidden()
+    finally:
+        screen.stop_pairing()
+
+
+def test_login_scan_results_feed_pairing_server_and_qt_list(qtbot, monkeypatch):
+    """start_pairing()'s scan results must reach BOTH surfaces: the
+    phone-pairing form (via PairingServer.set_discovered_servers) and
+    this screen's own Qt-native discovered list — not just one or the
+    other."""
+    calls = []
+    monkeypatch.setattr(
+        "sixpack.ui.screens.login.scan_for_servers",
+        lambda on_result, **kw: calls.append(on_result),
+    )
+    screen = LoginScreen()
+    qtbot.addWidget(screen)
+    screen.start_pairing()
+    try:
+        assert screen._pairing_server is not None
+        set_discovered_calls = []
+        monkeypatch.setattr(
+            screen._pairing_server,
+            "set_discovered_servers",
+            lambda servers: set_discovered_calls.append(servers),
+        )
+
+        calls[0](["http://192.168.1.50:13378"])
+
+        assert set_discovered_calls == [["http://192.168.1.50:13378"]]
+        assert len(screen._discovered_buttons) == 1
+        assert screen._discovered_buttons[0].text() == "http://192.168.1.50:13378"
+    finally:
+        screen.stop_pairing()
+
+
 # ---- SeriesDetailScreen ----
 
 def _make_series() -> Series:
