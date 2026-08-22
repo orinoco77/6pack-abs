@@ -155,6 +155,23 @@ def test_post_with_failed_login_does_not_consume_code(server):
     assert "form" in resp2.text.lower()
 
 
+def test_post_with_html_in_error_message_is_escaped(server):
+    # A malicious server_url could point at an attacker-controlled server
+    # whose raw response body (truncated) becomes an APIError's message.
+    # That message must never be reflected into the served HTML unescaped.
+    _FakeABSClient.should_fail = True
+    _FakeABSClient.fail_message = "<script>alert(document.cookie)</script>"
+    body = urllib.parse.urlencode({
+        "server_url": "http://evil.example.com", "username": "alice",
+        "password": "x", "code": server.code,
+    })
+    resp = httpx.post(f"http://127.0.0.1:{server.port}/", content=body,
+                       headers={"Content-Type": "application/x-www-form-urlencoded"})
+    assert resp.status_code == 200
+    assert "<script>alert(document.cookie)</script>" not in resp.text
+    assert "&lt;script&gt;alert(document.cookie)&lt;/script&gt;" in resp.text
+
+
 def test_code_expires_after_ttl(server, monkeypatch):
     # Force the code to look old without a real sleep.
     server._issued_at = time.monotonic() - server.EXPIRY_SECONDS - 1
