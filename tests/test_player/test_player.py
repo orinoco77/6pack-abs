@@ -32,6 +32,7 @@ class MockMPV:
         self.duration = 0.0
         self.chapter = 0
         self.chapter_list = []
+        self.speed = 1.0
         self._http_header_fields = []
         self._played_url = None
         self._property_observers: dict = {}
@@ -288,6 +289,31 @@ def test_prev_chapter_at_first(player):
     _mock_mpv_instance.chapter_list = [{"title": "Ch1"}]
     _mock_mpv_instance.chapter = 0
     player.prev_chapter()
+    assert _mock_mpv_instance.chapter == 0
+
+
+def test_set_speed(player):
+    player.set_speed(1.5)
+    assert _mock_mpv_instance.speed == 1.5
+
+
+def test_seek_to_chapter_in_range(player):
+    _mock_mpv_instance.chapter_list = [{"title": "Ch1"}, {"title": "Ch2"}, {"title": "Ch3"}]
+    player.seek_to_chapter(2)
+    assert _mock_mpv_instance.chapter == 2
+
+
+def test_seek_to_chapter_out_of_range_is_noop(player):
+    _mock_mpv_instance.chapter_list = [{"title": "Ch1"}, {"title": "Ch2"}]
+    _mock_mpv_instance.chapter = 0
+    player.seek_to_chapter(5)
+    assert _mock_mpv_instance.chapter == 0
+
+
+def test_seek_to_chapter_negative_is_noop(player):
+    _mock_mpv_instance.chapter_list = [{"title": "Ch1"}]
+    _mock_mpv_instance.chapter = 0
+    player.seek_to_chapter(-1)
     assert _mock_mpv_instance.chapter == 0
 
 
