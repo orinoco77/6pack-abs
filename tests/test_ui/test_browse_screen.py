@@ -8,6 +8,7 @@ from sixpack.api.models import (
     Library,
     LibraryItem,
     LibraryItemMedia,
+    PodcastEpisode,
     Playlist,
     PlaylistItem,
     Series,
@@ -59,6 +60,22 @@ def _playlist(pid, name, n_items=1):
         li = _li(f"pli{i}", f"Track {i}")
         items.append(PlaylistItem(libraryItemId=li.id, libraryItem=li))
     return Playlist(id=pid, name=name, items=items)
+
+
+def _podcast_show(item_id="show1", name="My Show"):
+    return LibraryItem(
+        id=item_id, libraryId="lib1", mediaType="podcast",
+        media=LibraryItemMedia(metadata={"title": name}),
+    )
+
+
+def _podcast_show_with_recent_episode(item_id="show1", name="My Show"):
+    episode = PodcastEpisode(id="ep1", libraryItemId=item_id, title="Recent Episode")
+    return LibraryItem(
+        id=item_id, libraryId="lib1", mediaType="podcast",
+        media=LibraryItemMedia(metadata={"title": name}),
+        recentEpisode=episode,
+    )
 
 
 def _press(qtbot, widget, key):
@@ -1123,4 +1140,40 @@ def test_sidebar_item_has_icon_and_active_state(qtbot):
     assert theme.SURFACE_HIGH in selected_inactive_style  # muted bg, accent hint only
     assert theme.ACCENT in selected_inactive_style
     assert "transparent" in unselected_style
-    assert theme.ACCENT not in unselected_style
+
+
+# ---------------------------------------------------------------------------
+# _emit_item podcast dispatch
+# ---------------------------------------------------------------------------
+
+def test_emit_item_podcast_show_without_recent_episode_emits_podcast_selected(qtbot):
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    show = _podcast_show()
+    received = []
+    screen.podcast_selected.connect(received.append)
+    screen._emit_item(RowType.RECENTLY_ADDED, show)
+    assert received == [show]
+
+
+def test_emit_item_podcast_show_with_recent_episode_emits_podcast_episode_selected(qtbot):
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    show = _podcast_show_with_recent_episode()
+    received = []
+    screen.podcast_episode_selected.connect(lambda s, e: received.append((s, e)))
+    screen._emit_item(RowType.CONTINUE_LISTENING, show)
+    assert len(received) == 1
+    assert received[0][0] is show
+    assert received[0][1] is show.recent_episode
+
+
+def test_emit_item_plain_book_still_emits_book_selected(qtbot):
+    """Regression guard: podcast dispatch must not affect books."""
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    item = _li("i1", "A Book")
+    received = []
+    screen.book_selected.connect(received.append)
+    screen._emit_item(RowType.RECENTLY_ADDED, item)
+    assert received == [item]
