@@ -511,6 +511,71 @@ def test_login_dpad_up_down_across_discovered_list_and_fields(qtbot):
     assert screen._discovered_focus_index == 1
 
 
+def test_login_discovered_focus_ring_cleared_when_focus_leaves_list(qtbot):
+    """Regression for the final-review finding: DOWN out of the discovered
+    list into the URL field must clear the accent border on whichever
+    button last held the highlight — otherwise two focus rings (the list's
+    stale one and the URL field's real one) are visible at once."""
+    from sixpack.ui import theme
+
+    screen = LoginScreen()
+    qtbot.addWidget(screen)
+    screen._on_servers_discovered(["http://192.168.1.50:13378"])
+    screen._use_keyboard_fallback()
+
+    assert theme.ACCENT in screen._discovered_buttons[0].styleSheet()
+
+    screen.keyPressEvent(_down_event())
+
+    assert not screen._discovered_focus_active
+    assert theme.ACCENT not in screen._discovered_buttons[0].styleSheet()
+
+
+def test_login_discovered_focus_ring_not_painted_after_late_scan(qtbot):
+    """Regression: a scan landing after the user has already moved real
+    focus into a field must not paint a phantom accent border on the
+    discovered list (which has no logical focus at that point)."""
+    from sixpack.ui import theme
+
+    screen = LoginScreen()
+    qtbot.addWidget(screen)
+    screen._use_keyboard_fallback()  # no servers yet -> lands in URL field
+    assert not screen._discovered_focus_active
+
+    screen._on_servers_discovered(["http://192.168.1.50:13378"])
+
+    assert not screen._discovered_focus_active
+    assert theme.ACCENT not in screen._discovered_buttons[0].styleSheet()
+
+
+def test_login_discovered_focus_active_cleared_when_rescan_empties_list(qtbot):
+    """Regression: a later scan that returns fewer/zero servers while the
+    user is logically inside the discovered list must not leave
+    _discovered_focus_active True over a now-empty, invisible list (a
+    phantom zone escapable only via DOWN)."""
+    screen = LoginScreen()
+    qtbot.addWidget(screen)
+    screen._on_servers_discovered(["http://192.168.1.50:13378", "http://192.168.1.51:13378"])
+    screen._use_keyboard_fallback()
+    assert screen._discovered_focus_active
+
+    screen.keyPressEvent(_down_event())  # move to index 1, still active
+    assert screen._discovered_focus_active
+    assert screen._discovered_focus_index == 1
+
+    screen._on_servers_discovered([])  # rescan comes back empty
+
+    assert not screen._discovered_focus_active
+    assert screen._discovered_list_container.isHidden()
+
+
+def _down_event():
+    from PyQt6.QtCore import QEvent
+    from PyQt6.QtGui import QKeyEvent
+
+    return QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Down, Qt.KeyboardModifier.NoModifier)
+
+
 def test_login_start_pairing_kicks_off_scan(qtbot, monkeypatch):
     calls = []
     monkeypatch.setattr(

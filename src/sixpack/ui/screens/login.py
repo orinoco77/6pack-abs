@@ -290,6 +290,7 @@ class LoginScreen(QWidget):
                     self._reflect_discovered_focus()
                 else:
                     self._discovered_focus_active = False
+                    self._reflect_discovered_focus()
                     self._url_input.setFocus()
                 return
             if action == InputAction.UP and self._discovered_focus_index > 0:
@@ -526,12 +527,22 @@ class LoginScreen(QWidget):
             self._discovered_list_layout.addWidget(btn)
             self._discovered_buttons.append(btn)
         self._discovered_list_container.setVisible(bool(self._discovered_buttons))
+        if not self._discovered_buttons:
+            # A rescan can empty a previously-populated list while the user
+            # is logically "inside" it (e.g. a later scan finds nothing on
+            # a Wi-Fi hiccup); without this, _discovered_focus_active would
+            # stay True over a now-empty, invisible list — a phantom zone
+            # where SELECT/UP do nothing and only DOWN escapes. Clearing it
+            # here matches how the zone already correctly starts absent
+            # when the list is initially empty.
+            self._discovered_focus_active = False
         self._discovered_focus_index = 0
         self._reflect_discovered_focus()
 
     def _reflect_discovered_focus(self) -> None:
         for i, btn in enumerate(self._discovered_buttons):
-            border = theme.ACCENT if i == self._discovered_focus_index else "transparent"
+            active = self._discovered_focus_active and i == self._discovered_focus_index
+            border = theme.ACCENT if active else "transparent"
             btn.setStyleSheet(
                 f"background: {theme.SURFACE_HIGH}; color: {theme.TEXT_PRIMARY}; "
                 f"border: 2px solid {border}; border-radius: 6px; padding: 10px; "
