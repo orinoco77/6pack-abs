@@ -468,7 +468,120 @@ git commit -m "Redesign pairing form: mobile-responsive, branded, embeds discove
 - Consumes: `scan_for_servers` (Task 1), `PairingServer.set_discovered_servers` (Task 2).
 - Produces: no new public signals/methods beyond what's needed internally — `start_pairing()`'s existing behavior is extended (still no signature change), and the keyboard-fallback view gains a discovered-servers list purely as an internal UI addition.
 
-- [ ] **Step 1: Read the current `src/sixpack/ui/screens/login.py` in full** — it has changed since the prior plan (the Critical-bug fix wave added `keyPressEvent`/`showEvent`/the UP/DOWN field-navigation state machine). Your job is to EXTEND that existing navigation logic, not replace it. Also re-read `tests/test_ui/test_screens.py`'s existing `LoginScreen` tests, especially `test_login_keyboard_reachable_via_real_dpad_navigation` (the real-key-delivery integration test from the prior plan) — this MUST keep passing, and your new list should be a natural extension of the same navigation model that test already exercises.
+- [ ] **Step 1: Read the current `src/sixpack/ui/screens/login.py` in full** — it has changed since the prior plan (the Critical-bug fix wave added `keyPressEvent`/`showEvent`/the UP/DOWN field-navigation logic). Your job is to EXTEND that existing navigation logic, not replace it. Also re-read `tests/test_ui/test_screens.py`'s existing `LoginScreen` tests, especially `test_login_keyboard_reachable_via_real_dpad_navigation` (the real-key-delivery integration test from the prior plan) — this MUST keep passing, and your new list should be a natural extension of the same navigation model that test already exercises.
+
+**The real current `keyPressEvent`/`_use_keyboard_fallback` (confirmed by reading the live file — there is no `_focus_zone` string or similar state enum; focus-zone tracking is done by checking `QApplication.focusWidget() in fields` directly):**
+
+```python
+    def keyPressEvent(self, event) -> None:
+        from sixpack.input.actions import InputAction
+        from sixpack.input.keyboard import key_to_action
+
+        action = key_to_action(event.key())
+
+        if self._pairing_view.isVisible():
+            if action == InputAction.SELECT:
+                self._use_keyboard_fallback()
+                return
+            super().keyPressEvent(event)
+            return
+
+        focused = QApplication.focusWidget()
+        fields = [self._url_input, self._user_input, self._pass_input]
+        if focused in fields:
+            idx = fields.index(focused)
+            if action == InputAction.DOWN:
+                if idx + 1 < len(fields):
+                    fields[idx + 1].setFocus()
+                else:
+                    self._keyboard.setFocus()
+                return
+            if action == InputAction.UP and idx > 0:
+                fields[idx - 1].setFocus()
+                return
+        super().keyPressEvent(event)
+
+    def _use_keyboard_fallback(self) -> None:
+        self._pairing_view.setVisible(False)
+        self._keyboard_form.setVisible(True)
+        self._active_field = self._url_input
+        self._url_input.setFocus()
+```
+
+Your job is to insert a new "discovered list" zone into `keyPressEvent`, checked BEFORE the existing `focused in fields` branch (since the discovered-server buttons are `NoFocus` — matching every other sub-widget pattern in this app — they never appear as `QApplication.focusWidget()`, so this zone needs its own boolean flag rather than a focus-widget check). Use `self._discovered_focus_active: bool` (init `False` in `__init__`) to track whether the discovered list currently owns "logical" focus (with real Qt focus staying on `self`, the screen itself — the same pattern the existing pairing-view branch above already uses: `self.setFocus()`, `keyPressEvent` handles SELECT/UP/DOWN directly, no child widget involved).
+
+```python
+    def keyPressEvent(self, event) -> None:
+        from sixpack.input.actions import InputAction
+        from sixpack.input.keyboard import key_to_action
+
+        action = key_to_action(event.key())
+
+        if self._pairing_view.isVisible():
+            if action == InputAction.SELECT:
+                self._use_keyboard_fallback()
+                return
+            super().keyPressEvent(event)
+            return
+
+        if self._discovered_focus_active:
+            if action == InputAction.DOWN:
+                if self._discovered_focus_index + 1 < len(self._discovered_buttons):
+                    self._discovered_focus_index += 1
+                    self._reflect_discovered_focus()
+                else:
+                    self._discovered_focus_active = False
+                    self._url_input.setFocus()
+                return
+            if action == InputAction.UP and self._discovered_focus_index > 0:
+                self._discovered_focus_index -= 1
+                self._reflect_discovered_focus()
+                return
+            if action == InputAction.SELECT:
+                self._select_discovered_server(self._discovered_focus_index)
+                return
+            super().keyPressEvent(event)
+            return
+
+        focused = QApplication.focusWidget()
+        fields = [self._url_input, self._user_input, self._pass_input]
+        if focused in fields:
+            idx = fields.index(focused)
+            if action == InputAction.DOWN:
+                if idx + 1 < len(fields):
+                    fields[idx + 1].setFocus()
+                else:
+                    self._keyboard.setFocus()
+                return
+            if action == InputAction.UP:
+                if idx > 0:
+                    fields[idx - 1].setFocus()
+                elif self._discovered_buttons:
+                    # Back up out of the fields into the discovered list —
+                    # the mirror image of the DOWN-past-the-last-button
+                    # transition above.
+                    self._discovered_focus_active = True
+                    self._discovered_focus_index = len(self._discovered_buttons) - 1
+                    self._reflect_discovered_focus()
+                    self.setFocus()
+                return
+        super().keyPressEvent(event)
+
+    def _use_keyboard_fallback(self) -> None:
+        self._pairing_view.setVisible(False)
+        self._keyboard_form.setVisible(True)
+        if self._discovered_buttons:
+            self._discovered_focus_active = True
+            self._discovered_focus_index = 0
+            self._reflect_discovered_focus()
+            self.setFocus()
+        else:
+            self._discovered_focus_active = False
+            self._active_field = self._url_input
+            self._url_input.setFocus()
+```
+
+Add `self._discovered_focus_active: bool = False` to `__init__` alongside the other new state from this task (`_discovered_servers`, `_discovered_focus_index`, `_discovered_buttons`).
 
 - [ ] **Step 2: Write the failing tests**
 
@@ -604,7 +717,7 @@ Add the discovery-population/selection logic:
             self._url_input.setText(self._discovered_servers[index])
 ```
 
-**Navigation wiring — extend, do not replace, the existing `keyPressEvent`/`_focus_zone`-style logic already present in the file from the prior plan's Critical-bug fix.** Read that existing method fully before editing. You need to add a third zone (alongside whatever "fields" and "keyboard" handling already exists): when the keyboard-fallback view is shown AND `self._discovered_buttons` is non-empty, initial focus/navigation should start on the discovered list (UP/DOWN move `self._discovered_focus_index` within it, calling `_reflect_discovered_focus()`; SELECT calls `_select_discovered_server(self._discovered_focus_index)`; DOWN past the last discovered button moves into the URL field exactly the way the existing code already moves between fields). If `self._discovered_buttons` is empty, behavior should be identical to today (focus starts directly on the URL field) — do not force navigation through an empty, invisible list. Update `_use_keyboard_fallback()` to set initial focus to the discovered list (if non-empty) or the URL field (if empty), matching this.
+**Navigation wiring is already fully specified above (Step 1's corrected `keyPressEvent`/`_use_keyboard_fallback` code)** — implement exactly that, merged into the real current file. If `self._discovered_buttons` is empty, behavior is identical to today (focus starts directly on the URL field, the discovered-zone branch is simply never entered since `_discovered_focus_active` stays `False`) — do not force navigation through an empty, invisible list.
 
 **Wire the scan into `start_pairing()`** — find the exact current body (it now includes the Critical-fix-wave's `self.stop_pairing()` defensive call and the `QTimer.singleShot`-based auto-refresh from that same fix wave) and add, after the pairing server has successfully started:
 
