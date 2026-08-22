@@ -105,9 +105,11 @@ class AudioPlayer:
                 cb(state)
 
         @self._mpv.event_callback("end-file")
-        def _eof_handler(event: dict) -> None:
-            reason = event.get("reason", "")
-            if reason == "eof":
+        def _eof_handler(event) -> None:
+            # `event` is an MpvEvent struct, not a dict — the end-file
+            # payload (with its int `reason` code) lives at `event.data`.
+            data = event.data
+            if data is not None and data.reason == _mpv.MpvEventEndFile.EOF:
                 for cb in self._on_end_of_track:
                     cb()
 
