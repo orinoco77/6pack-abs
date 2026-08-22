@@ -422,7 +422,11 @@ class BrowseScreen(QWidget):
         # space in the grid.
         grid_page.setStyleSheet("background: transparent;")
         grid_page_layout = QVBoxLayout(grid_page)
-        grid_page_layout.setContentsMargins(32, 24, 32, 24)
+        # The hero overlay is stacked on top of whichever content-stack page
+        # is showing (see _build_hero/_hero_geometry) — it isn't specific to
+        # the rows page. Reserve the same top clearance the rows page uses
+        # (rows_layout above) or the grid's title/first row sit underneath it.
+        grid_page_layout.setContentsMargins(32, self._HERO_H, 32, 24)
         grid_page_layout.setSpacing(16)
 
         self._grid_title_lbl = QLabel()
@@ -512,12 +516,21 @@ class BrowseScreen(QWidget):
         self._focused_row = 0
         self._loading = True
         self._content_stack.setCurrentIndex(2)
+        # Discarding row data can leave the hero reflecting an item that no
+        # longer belongs to the now-selected library (e.g. switching
+        # libraries in the sidebar) — keep it in sync with the (now empty)
+        # focus rather than leaving stale title/author/backdrop showing.
+        self._reflect_current()
 
     def show_content(self) -> None:
         """Switch from the loading page to the rows page once content is ready."""
         self._loading = False
         if self._zone in ("sidebar", "rows"):
             self._content_stack.setCurrentIndex(0)
+        # Content just became available — sync the hero to whatever's now
+        # focused (e.g. the sidebar zone's first-item preview), since
+        # nothing else reflects it until the user navigates by hand.
+        self._reflect_current()
 
     def set_row_items(self, row_type: RowType, items: list[Any]) -> None:
         try:
