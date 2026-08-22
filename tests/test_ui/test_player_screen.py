@@ -390,3 +390,70 @@ def test_up_down_navigate_overlay_without_cycling_speed(qtbot, screen):
     assert screen._chapter_overlay.currentRow() == 0
     assert screen._speed_label.text() == "1.0x"
     assert screen._player.speed_calls == []
+
+
+# ----------------------------------------------------------------------
+# Chapter reset on play_* (Task 6 review fix)
+#
+# app.py's _on_next_item/_on_prev_item handlers (bound to the next_item/
+# prev_item manual-skip signals — reachable via the transport buttons and
+# PageUp/PageDown) call play_book/play_library_item/play_playlist_item
+# directly, bypassing BOTH of set_chapters()'s delivery paths. Without a
+# reset, the chapter overlay would show a previous item's stale chapters
+# over a different item's audio. Each play_* method must clear
+# self._chapters so the overlay instead falls back to its existing
+# no-chapters no-op (test_menu_key_does_nothing_without_chapters above)
+# rather than showing wrong data.
+# ----------------------------------------------------------------------
+
+
+def test_play_book_resets_stale_chapters(qtbot):
+    from sixpack.api.models import Chapter
+    s = PlayerScreen(player=_FakePlayer())
+    qtbot.addWidget(s)
+
+    book_a = _book(book_id="a", title="Book A")
+    book_b = _book(book_id="b", title="Book B")
+    series = _series([book_a, book_b])
+
+    s.play_book(book_a, 0.0, series, [book_a, book_b], "http://server", "tok")
+    s.set_chapters([Chapter(id=0, start=0.0, end=100.0, title="A Ch1")])
+    assert s._chapters != []
+
+    # Simulate app.py's next-item handler calling play_book again WITHOUT
+    # calling set_chapters() for the new book.
+    s.play_book(book_b, 0.0, series, [book_a, book_b], "http://server", "tok")
+
+    assert s._chapters == []
+
+
+def test_play_library_item_resets_stale_chapters(qtbot):
+    from sixpack.api.models import Chapter
+    s = PlayerScreen(player=_FakePlayer())
+    qtbot.addWidget(s)
+
+    s.play_library_item(_library_item(item_id="i1"), 0.0, "http://server", "tok")
+    s.set_chapters([Chapter(id=0, start=0.0, end=100.0, title="Ch1")])
+    assert s._chapters != []
+
+    s.play_library_item(_library_item(item_id="i2"), 0.0, "http://server", "tok")
+
+    assert s._chapters == []
+
+
+def test_play_playlist_item_resets_stale_chapters(qtbot):
+    from sixpack.api.models import Chapter
+    s = PlayerScreen(player=_FakePlayer())
+    qtbot.addWidget(s)
+
+    item_a = _playlist_item(item_id="a")
+    item_b = _playlist_item(item_id="b")
+    playlist = _playlist([item_a, item_b])
+
+    s.play_playlist_item(item_a, 0.0, playlist, [item_a, item_b], "http://server", "tok")
+    s.set_chapters([Chapter(id=0, start=0.0, end=100.0, title="Ch1")])
+    assert s._chapters != []
+
+    s.play_playlist_item(item_b, 0.0, playlist, [item_a, item_b], "http://server", "tok")
+
+    assert s._chapters == []
