@@ -16,11 +16,14 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import logging
 import socket
 import threading
 from collections.abc import Callable
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 ABS_PORT = 13378
 _SCAN_TIMEOUT = 0.5
@@ -55,7 +58,14 @@ async def _check_host(client: httpx.AsyncClient, host: str, sem: asyncio.Semapho
             data = resp.json()
         except ValueError:
             return None
-        if data.get("app") == "audiobookshelf":
+        # A device on the LAN can return valid JSON that isn't an object at
+        # all (a bare array/string/number/null — plausible from random IoT
+        # devices, printers, etc. sitting on ABS_PORT). Only a JSON object
+        # can possibly be an Audiobookshelf /status response; anything else
+        # is treated the same as "not an ABS server", exactly like the
+        # non-JSON-body branch above, rather than raising AttributeError
+        # from .get() on a non-dict.
+        if isinstance(data, dict) and data.get("app") == "audiobookshelf":
             return f"http://{host}:{ABS_PORT}"
         return None
 
@@ -65,8 +75,13 @@ async def _scan(hosts: list[str]) -> list[str]:
         return []
     sem = asyncio.Semaphore(_CONCURRENCY)
     async with httpx.AsyncClient() as client:
-        results = await asyncio.gather(*(_check_host(client, h, sem) for h in hosts))
-    return [r for r in results if r is not None]
+        results = await asyncio.gather(
+            *(_check_host(client, h, sem) for h in hosts), return_exceptions=True
+        )
+    # Belt-and-braces: even with the isinstance guard above, no future
+    # unexpected exception from an individual host check should be able to
+    # take down the whole gather (and with it, the on_result callback).
+    return [r for r in results if isinstance(r, str)]
 
 
 def scan_for_servers(
@@ -79,7 +94,11 @@ def scan_for_servers(
     tests use this to scan a small, controlled set instead of a real /24."""
     def _run() -> None:
         target_hosts = hosts if hosts is not None else _lan_subnet_hosts()
-        found = asyncio.run(_scan(target_hosts))
+        try:
+            found = asyncio.run(_scan(target_hosts))
+        except Exception:  # noqa: BLE001 — on_result must fire exactly once
+            logger.exception("LAN scan failed")
+            found = []
         on_result(found)
 
     threading.Thread(target=_run, daemon=True).start()
