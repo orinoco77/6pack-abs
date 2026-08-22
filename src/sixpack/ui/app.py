@@ -62,6 +62,8 @@ class AsyncWorker(QObject):
 
 
 class MainWindow(QMainWindow):
+    _UP_NEXT_DELAY_MS = 3000
+
     def __init__(self, config: AppConfig) -> None:
         super().__init__()
         self._config = config
@@ -138,6 +140,7 @@ class MainWindow(QMainWindow):
             self._player_screen.back_requested.connect(self._on_player_back)
             self._player_screen.next_item.connect(self._on_next_item)
             self._player_screen.prev_item.connect(self._on_prev_item)
+            self._player_screen.track_ended.connect(self._on_track_ended)
             self._player_screen.progress_update.connect(self._on_progress_update)
 
         self._login_screen.login_requested.connect(self._on_login_requested)
@@ -447,6 +450,53 @@ class MainWindow(QMainWindow):
         prev_idx = idx - 1
         if prev_idx >= 0:
             self._on_play_requested(books[prev_idx], 0.0)
+
+    def _on_track_ended(self) -> None:
+        """Automatic end-of-track: do NOT auto-play. Show an up-next
+        message, then navigate to the relevant grid with the next item
+        pre-focused (or Browse if there's no series/playlist context)."""
+        book = self._player_screen._current_book
+        books = self._player_screen._series_books
+        playlist_item = self._player_screen._current_playlist_item
+        playlist_items = self._player_screen._playlist_items
+
+        if book is not None and books:
+            idx = books.index(book) if book in books else -1
+            if 0 <= idx < len(books) - 1:
+                target = ("series", books[idx + 1].id)
+                message = f"Up next: {books[idx + 1].title}"
+            else:
+                target = ("series", None)
+                message = "End of series"
+        elif playlist_item is not None and playlist_items:
+            idx = playlist_items.index(playlist_item) if playlist_item in playlist_items else -1
+            if 0 <= idx < len(playlist_items) - 1:
+                target = ("playlist", playlist_items[idx + 1].library_item_id)
+                message = f"Up next: {playlist_items[idx + 1].title}"
+            else:
+                target = ("playlist", None)
+                message = "End of playlist"
+        else:
+            target = ("browse", None)
+            message = ""
+
+        if message:
+            self._player_screen.show_up_next(message)
+        QTimer.singleShot(self._UP_NEXT_DELAY_MS, lambda: self._advance_after_up_next(target))
+
+    def _advance_after_up_next(self, target: tuple[str, str | None]) -> None:
+        self._player_screen.hide_up_next()
+        kind, key = target
+        if kind == "series":
+            self._show_detail()
+            if key is not None:
+                self._detail_screen.focus_item_by_key(key)
+        elif kind == "playlist":
+            self._show_playlist_detail()
+            if key is not None:
+                self._playlist_detail_screen.focus_item_by_key(key)
+        else:
+            self._show_browse()
 
     @pyqtSlot(str, float, float, bool)
     def _on_progress_update(self, item_id: str, current_time: float, duration: float, is_finished: bool) -> None:
