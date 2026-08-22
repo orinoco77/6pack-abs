@@ -33,16 +33,72 @@ from sixpack.api.client import (  # noqa: F401 — re-exported for tests (server
 _CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O/1/I/l ambiguity
 _CODE_LENGTH = 6
 
+_ROOT_VARS = """
+    --bg: #0f0f0f; --surface: #1c1c1c; --surface-high: #2a2a2a;
+    --accent: #4a9eff; --accent-dim: #2a6fcc;
+    --text-primary: #ffffff; --text-secondary: #a0a0a0; --text-muted: #606060;
+"""
+
+# Shared dark-theme styling for the simpler status pages (expired/success/
+# error) — just enough to look like part of the same app, not a full form
+# layout.
+_STATUS_STYLE = f"""
+<style>
+  :root {{{_ROOT_VARS}}}
+  * {{ box-sizing: border-box; }}
+  body {{
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text-primary);
+    max-width: 480px; margin: 0 auto; padding: 48px 20px; text-align: center;
+  }}
+  h2 {{ color: var(--accent); font-size: 22px; margin: 0 0 12px; }}
+  p {{ color: var(--text-secondary); font-size: 15px; line-height: 1.5; }}
+  a {{ color: var(--accent); }}
+</style>"""
+
 _FORM_PAGE = """<!doctype html>
 <html><head><title>SixPack Pairing</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-body {{ font-family: sans-serif; max-width: 420px; margin: 40px auto; padding: 0 16px; }}
-input {{ display: block; width: 100%; padding: 10px; margin: 8px 0; box-sizing: border-box; }}
-button {{ padding: 10px 24px; }}
+  :root {{{root_vars}}}
+  * {{ box-sizing: border-box; }}
+  body {{
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text-primary);
+    max-width: 480px; margin: 0 auto; padding: 32px 20px;
+  }}
+  h1 {{
+    color: var(--accent); font-size: 28px; font-weight: 700;
+    text-align: center; margin: 0 0 4px;
+  }}
+  .subtitle {{
+    color: var(--text-secondary); text-align: center; margin: 0 0 32px; font-size: 14px;
+  }}
+  .discovered {{ margin-bottom: 24px; }}
+  .discovered p {{ color: var(--text-secondary); font-size: 13px; margin: 0 0 8px; }}
+  .discovered-btn {{
+    display: block; width: 100%; padding: 14px 16px; margin: 0 0 8px;
+    background: var(--surface-high); color: var(--text-primary);
+    border: 2px solid var(--accent-dim); border-radius: 8px;
+    font-size: 16px; text-align: left; cursor: pointer;
+  }}
+  .divider {{ color: var(--text-muted); text-align: center; font-size: 13px; margin: 16px 0; }}
+  input {{
+    display: block; width: 100%; padding: 14px 16px; margin: 0 0 12px;
+    background: var(--surface); color: var(--text-primary);
+    border: 2px solid var(--text-muted); border-radius: 8px; font-size: 16px;
+  }}
+  input:focus {{ border-color: var(--accent); outline: none; }}
+  button[type="submit"] {{
+    display: block; width: 100%; padding: 16px; margin-top: 8px;
+    background: var(--accent); color: #ffffff; border: none; border-radius: 8px;
+    font-size: 17px; font-weight: 700;
+  }}
 </style></head>
 <body>
-<h2>Connect SixPack</h2>
+<h1>SixPack</h1>
+<p class="subtitle">Connect to your Audiobookshelf server</p>
+{discovered_html}
 <form method="post" action="/">
   <input type="text" name="server_url" placeholder="Server URL (e.g. http://192.168.1.10:13378)"
     required>
@@ -53,24 +109,74 @@ button {{ padding: 10px 24px; }}
 </form>
 </body></html>"""
 
-_EXPIRED_PAGE = """<!doctype html>
-<html><head><title>SixPack Pairing</title></head>
+_VIEWPORT_META = '<meta name="viewport" content="width=device-width, initial-scale=1">'
+
+_EXPIRED_PAGE = f"""<!doctype html>
+<html><head><title>SixPack Pairing</title>
+{_VIEWPORT_META}{_STATUS_STYLE}</head>
 <body><h2>This pairing code has expired or is invalid</h2>
 <p>Go back to the TV and select "Pair a new device" to get a fresh code.</p>
 </body></html>"""
 
-_SUCCESS_PAGE = """<!doctype html>
-<html><head><title>SixPack Pairing</title></head>
+_SUCCESS_PAGE = f"""<!doctype html>
+<html><head><title>SixPack Pairing</title>
+{_VIEWPORT_META}{_STATUS_STYLE}</head>
 <body><h2>Connected!</h2>
 <p>You can return to the TV now.</p>
 </body></html>"""
 
-_ERROR_PAGE = """<!doctype html>
-<html><head><title>SixPack Pairing</title></head>
+# NOTE: unlike _STATUS_STYLE above (spliced pre-resolved, with single
+# braces, into pages that are never run through .format()), this page IS
+# run through .format() in do_POST (it has {message}/{code} slots) — so its
+# CSS braces must stay DOUBLED here (plain string, not an f-string) or
+# str.format() would try to treat raw CSS braces as format placeholders and
+# raise (confirmed: this broke do_POST's exception-handling path during
+# development). root_vars is filled in from _ROOT_VARS at format() time.
+_ERROR_PAGE = ("""<!doctype html>
+<html><head><title>SixPack Pairing</title>
+""" + _VIEWPORT_META + """
+<style>
+  :root {{{root_vars}}}
+  * {{ box-sizing: border-box; }}
+  body {{
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text-primary);
+    max-width: 480px; margin: 0 auto; padding: 48px 20px; text-align: center;
+  }}
+  h2 {{ color: var(--accent); font-size: 22px; margin: 0 0 12px; }}
+  p {{ color: var(--text-secondary); font-size: 15px; line-height: 1.5; }}
+  a {{ color: var(--accent); }}
+</style></head>
 <body><h2>Login failed</h2>
 <p>{message}</p>
 <p><a href="/?code={code}">Try again</a></p>
-</body></html>"""
+</body></html>""")
+
+
+def _discovered_servers_html(servers: list[str]) -> str:
+    """Build the tappable pre-fill buttons shown above the manual-entry
+    fields. `servers` entries are always f"http://{ip}:{port}" strings built
+    from ipaddress-validated IPs and int ports (see Task 1) — never derived
+    from a scanned host's response content — so they cannot contain a quote
+    character that would break out of either the HTML attribute or the JS
+    string literal below. html.escape() on the visible label text is still
+    applied as defense in depth.
+
+    Quoting note: `{s!r}` produces a Python repr, which for these plain
+    "http://ip:port" strings (no embedded quotes) is always a *single*-quoted
+    string, e.g. 'http://192.168.1.50:13378'. That's embedded inside the
+    onclick attribute's *double*-quoted HTML delimiters, so the single-quoted
+    JS string literal cannot collide with the attribute's own quoting.
+    Verified by rendering (see task report).
+    """
+    if not servers:
+        return ""
+    items = "\n".join(
+        f'<button type="button" class="discovered-btn" '
+        f'onclick="document.getElementsByName(\'server_url\')[0].value={s!r}">{html.escape(s)}</button>'
+        for s in servers
+    )
+    return f'<div class="discovered">\n<p>Servers found on your network:</p>\n{items}\n</div>'
 
 
 def _lan_ip() -> str:
@@ -104,7 +210,13 @@ class _Handler(BaseHTTPRequestHandler):
         query = urllib.parse.parse_qs(parsed.query)
         code = (query.get("code") or [""])[0]
         if server.is_code_valid(code):
-            self._respond(200, _FORM_PAGE.format(code=server.code))
+            discovered_html = _discovered_servers_html(server._discovered_servers)
+            self._respond(
+                200,
+                _FORM_PAGE.format(
+                    code=server.code, discovered_html=discovered_html, root_vars=_ROOT_VARS
+                ),
+            )
         else:
             self._respond(200, _EXPIRED_PAGE)
 
@@ -129,7 +241,10 @@ class _Handler(BaseHTTPRequestHandler):
             # APIError built from a malicious server_url's raw response
             # body), so it MUST be HTML-escaped before landing in the page.
             message = html.escape(str(exc))
-            self._respond(200, _ERROR_PAGE.format(message=message, code=server.code))
+            self._respond(
+                200,
+                _ERROR_PAGE.format(message=message, code=server.code, root_vars=_ROOT_VARS),
+            )
             return
 
         # NOTE: on_success runs on this background HTTP-server thread,
@@ -168,6 +283,17 @@ class PairingServer:
         self._used = False
         self._httpd: HTTPServer | None = None
         self._thread: threading.Thread | None = None
+        self._discovered_servers: list[str] = []
+
+    def set_discovered_servers(self, servers: list[str]) -> None:
+        """Store already-discovered server URLs to offer as tappable pre-fill
+        options on the NEXT served GET response. May be called from the GUI
+        thread while `do_GET` reads `_discovered_servers` from the server's
+        own background thread — always assign a NEW list (never mutate one
+        in place) so a plain reference reassignment is all that's needed;
+        no lock required.
+        """
+        self._discovered_servers = list(servers)
 
     def start(self) -> None:
         self._httpd = HTTPServer(("0.0.0.0", 0), _Handler)

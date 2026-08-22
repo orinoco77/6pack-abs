@@ -184,3 +184,28 @@ def test_stop_is_idempotent():
     srv.start()
     srv.stop()
     srv.stop()  # must not raise
+
+
+def test_form_page_shows_no_discovered_servers_section_by_default(server):
+    resp = httpx.get(f"http://127.0.0.1:{server.port}/?code={server.code}")
+    assert "discovered" not in resp.text.lower() or "no servers found" not in resp.text.lower()
+    # With no discovered servers, the manual-entry field is still present
+    # and usable, and nothing broken/empty-looking is shown in its place.
+    assert 'name="server_url"' in resp.text
+
+
+def test_form_page_embeds_discovered_servers(server):
+    server.set_discovered_servers(["http://192.168.1.50:13378", "http://192.168.1.51:13378"])
+    resp = httpx.get(f"http://127.0.0.1:{server.port}/?code={server.code}")
+    assert "192.168.1.50" in resp.text
+    assert "192.168.1.51" in resp.text
+    # Manual entry must still be present alongside discovered options.
+    assert 'name="server_url"' in resp.text
+
+
+def test_set_discovered_servers_updates_next_response(server):
+    resp1 = httpx.get(f"http://127.0.0.1:{server.port}/?code={server.code}")
+    assert "192.168.1.50" not in resp1.text
+    server.set_discovered_servers(["http://192.168.1.50:13378"])
+    resp2 = httpx.get(f"http://127.0.0.1:{server.port}/?code={server.code}")
+    assert "192.168.1.50" in resp2.text
