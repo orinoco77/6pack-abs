@@ -12,6 +12,7 @@ from sixpack.api.models import (
     LoginResponse,
     MediaProgress,
     PlaybackSession,
+    PodcastEpisode,
     Series,
     SeriesBook,
     User,
@@ -248,3 +249,67 @@ def test_login_response():
     resp = LoginResponse.model_validate(data)
     assert resp.user.username == "adam"
     assert resp.user.token == "abc"
+
+
+# ---- PodcastEpisode ----
+
+
+def _episode_payload(episode_id="ep1", title="Episode One", duration=1797.376):
+    return {
+        "id": episode_id,
+        "libraryItemId": "show1",
+        "title": title,
+        "chapters": [],
+        "audioFile": {"duration": duration, "index": 1},
+    }
+
+
+def test_podcast_episode_parses_duration_from_nested_audio_file():
+    ep = PodcastEpisode.model_validate(_episode_payload())
+    assert ep.id == "ep1"
+    assert ep.title == "Episode One"
+    assert ep.duration == 1797.376
+
+
+def test_podcast_episode_duration_defaults_to_zero_without_audio_file():
+    payload = _episode_payload()
+    del payload["audioFile"]
+    ep = PodcastEpisode.model_validate(payload)
+    assert ep.duration == 0.0
+
+
+def test_library_item_media_parses_episodes():
+    media = LibraryItemMedia.model_validate({
+        "metadata": {"title": "My Show"},
+        "episodes": [_episode_payload("ep1"), _episode_payload("ep2")],
+    })
+    assert len(media.episodes) == 2
+    assert media.episodes[0].id == "ep1"
+    assert media.episodes[1].id == "ep2"
+
+
+def test_library_item_media_episodes_defaults_empty():
+    media = LibraryItemMedia.model_validate({"metadata": {"title": "A Book"}})
+    assert media.episodes == []
+
+
+def test_library_item_parses_recent_episode():
+    item = LibraryItem.model_validate({
+        "id": "show1",
+        "libraryId": "lib1",
+        "mediaType": "podcast",
+        "media": {"metadata": {"title": "A Show"}},
+        "recentEpisode": _episode_payload("ep-recent"),
+    })
+    assert item.recent_episode is not None
+    assert item.recent_episode.id == "ep-recent"
+
+
+def test_library_item_recent_episode_defaults_none():
+    item = LibraryItem.model_validate({
+        "id": "book1",
+        "libraryId": "lib1",
+        "mediaType": "book",
+        "media": {"metadata": {"title": "A Book"}},
+    })
+    assert item.recent_episode is None

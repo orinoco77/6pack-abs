@@ -23,12 +23,27 @@ class AudioTrack(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class PodcastEpisode(BaseModel):
+    id: str
+    library_item_id: str = Field("", alias="libraryItemId")
+    title: str = ""
+    audio_file: dict[str, Any] = Field(default_factory=dict, alias="audioFile")
+    chapters: list[Chapter] = Field(default_factory=list)
+
+    model_config = {"populate_by_name": True, "extra": "allow"}
+
+    @property
+    def duration(self) -> float:
+        return float(self.audio_file.get("duration", 0.0) or 0.0)
+
+
 class LibraryItemMedia(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     duration: float | None = None
     chapters: list[Chapter] = Field(default_factory=list)
     audio_files: list[dict[str, Any]] = Field(default_factory=list, alias="audioFiles")
     tracks: list[AudioTrack] = Field(default_factory=list)
+    episodes: list[PodcastEpisode] = Field(default_factory=list)
 
     model_config = {"populate_by_name": True}
 
@@ -55,6 +70,7 @@ class LibraryItem(BaseModel):
     library_id: str = Field(alias="libraryId")
     media_type: str = Field("book", alias="mediaType")
     media: LibraryItemMedia
+    recent_episode: PodcastEpisode | None = Field(None, alias="recentEpisode")
     updated_at: int | None = Field(None, alias="updatedAt")
     added_at: int | None = Field(None, alias="addedAt")
 
