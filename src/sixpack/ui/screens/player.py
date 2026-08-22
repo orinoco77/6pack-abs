@@ -16,7 +16,16 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from sixpack.api.models import Chapter, LibraryItem, MediaProgress, PodcastEpisode, Series, SeriesBook, Playlist, PlaylistItem
+from sixpack.api.models import (
+    Chapter,
+    LibraryItem,
+    MediaProgress,
+    Playlist,
+    PlaylistItem,
+    PodcastEpisode,
+    Series,
+    SeriesBook,
+)
 from sixpack.player.player import AudioPlayer
 from sixpack.ui import theme
 from sixpack.ui.cover_cache import CoverCache
@@ -54,7 +63,8 @@ class PlayerScreen(QWidget):
     next_item = pyqtSignal()
     prev_item = pyqtSignal()
     track_ended = pyqtSignal()
-    progress_update = pyqtSignal(str, float, float, bool, str)  # item_id, current_time, duration, is_finished, episode_id
+    # item_id, current_time, duration, is_finished, episode_id
+    progress_update = pyqtSignal(str, float, float, bool, str)
 
     def __init__(self, player: AudioPlayer, cover_cache: CoverCache | None = None, parent=None) -> None:
         super().__init__(parent)

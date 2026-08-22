@@ -23,7 +23,14 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from sixpack.api.models import Chapter, LibraryItem, MediaProgress, PodcastEpisode, SeriesBook, PlaylistItem
+from sixpack.api.models import (
+    Chapter,
+    LibraryItem,
+    MediaProgress,
+    PlaylistItem,
+    PodcastEpisode,
+    SeriesBook,
+)
 from sixpack.ui import theme
 from sixpack.ui.cover_cache import CoverCache, dominant_color
 from sixpack.ui.widgets.hero_backdrop import HeroBackdrop
@@ -202,7 +209,8 @@ class ChapterSelectScreen(QWidget):
     play_requested = pyqtSignal(object, float)                  # SeriesBook, start_time
     playlist_item_play_requested = pyqtSignal(object, float)    # PlaylistItem, start_time
     library_item_play_requested = pyqtSignal(object, float)     # LibraryItem, start_time
-    podcast_episode_play_requested = pyqtSignal(object, object, float)  # LibraryItem show, PodcastEpisode, start_time
+    # LibraryItem show, PodcastEpisode, start_time
+    podcast_episode_play_requested = pyqtSignal(object, object, float)
     back_requested = pyqtSignal()
 
     def __init__(self, cover_cache: CoverCache | None = None, parent=None) -> None:
@@ -472,7 +480,9 @@ class ChapterSelectScreen(QWidget):
         elif self._playlist_item:
             self.playlist_item_play_requested.emit(self._playlist_item, chapter.start)
         elif self._podcast_episode:
-            self.podcast_episode_play_requested.emit(self._podcast_show, self._podcast_episode, chapter.start)
+            self.podcast_episode_play_requested.emit(
+                self._podcast_show, self._podcast_episode, chapter.start
+            )
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
