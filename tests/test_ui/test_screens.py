@@ -211,14 +211,83 @@ def test_detail_screen_focus_item_by_key(qtbot):
     assert screen._grid._focused_index == 1
 
 
-def test_detail_screen_hero_subtitle_includes_episode_title(qtbot):
+def test_detail_screen_hero_subtitle_shows_episode_number_and_title(qtbot):
     screen = SeriesDetailScreen()
     qtbot.addWidget(screen)
-    series = _make_series()
+    media = LibraryItemMedia(metadata={"title": "The Vanishing Point"}, duration=1800.0)
+    book = SeriesBook(id="bx", libraryId="lib1", media=media, sequence="3")
+    series = Series(id="sx", name="Some Series", books=[book])
     screen.load(series, {}, "http://localhost", "tok")
-    sub = screen._hero_backdrop._hero_sub.text()
-    assert "1" in sub
-    assert "Episode 1" in sub
+    assert screen._hero_backdrop._hero_sub.text() == "Episode 3 · The Vanishing Point"
+
+
+def test_detail_screen_card_subtitle_is_short_form_not_duplicated(qtbot):
+    """Regression test: Task 4 once made the hero-subtitle fix leak into the
+    card's own subtitle, duplicating the (unelided) title under every card.
+    """
+    screen = SeriesDetailScreen()
+    qtbot.addWidget(screen)
+    media = LibraryItemMedia(metadata={"title": "The Vanishing Point"}, duration=1800.0)
+    book = SeriesBook(id="bx", libraryId="lib1", media=media, sequence="3")
+    series = Series(id="sx", name="Some Series", books=[book])
+    screen.load(series, {}, "http://localhost", "tok")
+    assert screen._grid._items[0]._subtitle == "Episode 3"
+
+
+def test_detail_screen_hero_subtitle_no_sequence_falls_back_to_title(qtbot):
+    screen = SeriesDetailScreen()
+    qtbot.addWidget(screen)
+    media = LibraryItemMedia(metadata={"title": "Standalone Book"}, duration=1800.0)
+    book = SeriesBook(id="bx", libraryId="lib1", media=media)  # no sequence -> None (model default)
+    series = Series(id="sx", name="Some Series", books=[book])
+    screen.load(series, {}, "http://localhost", "tok")
+    assert screen._hero_backdrop._hero_sub.text() == "Standalone Book"
+
+
+def test_series_detail_screen_backdrop_not_occluded(qtbot):
+    """Regression test for the occlusion bug class Task 2 verified only via
+    a one-off, uncommitted script: an opaque scroll/container widget hiding
+    Backdrop's content. Task 2 moved Backdrop from a direct screen child to
+    a grandchild inside HeroBackdrop — exactly the kind of structural
+    change that could silently reintroduce this. Samples a point below the
+    hero band but above the first card — squarely inside FocusGrid's scroll
+    viewport/container, which must stay transparent for Backdrop to show
+    through.
+    """
+    from PyQt6.QtGui import QColor, QPixmap
+
+    from sixpack.ui import theme
+
+    screen = SeriesDetailScreen()
+    qtbot.addWidget(screen)
+    screen.resize(800, 600)
+    screen.load(_make_series(), {}, "http://localhost", "tok")
+    screen._hero_backdrop.backdrop.show_color(QColor(255, 0, 0))
+    screen.show()
+    qtbot.waitExposed(screen)
+
+    pix = QPixmap(screen.size())
+    screen.render(pix)
+    img = pix.toImage()
+
+    x, y, height = 400, 160, screen.height()
+    color = img.pixelColor(x, y)
+
+    # Backdrop.show_color paints a vertical gradient from red.darker(150)
+    # at y=0 to theme.BG at the bottom (see backdrop.py). Verify the
+    # sampled pixel actually matches that ramp — not black (fully
+    # occluded), not raw #FF0000 (would mean darker()/gradient isn't being
+    # applied), and not a flat opaque widget color like theme.SURFACE.
+    dark_red = QColor(255, 0, 0).darker(150)
+    bg = QColor(theme.BG)
+    fraction = y / height
+    expected_r = dark_red.red() + (bg.red() - dark_red.red()) * fraction
+    expected_g = dark_red.green() + (bg.green() - dark_red.green()) * fraction
+    expected_b = dark_red.blue() + (bg.blue() - dark_red.blue()) * fraction
+
+    assert abs(color.red() - expected_r) <= 10
+    assert abs(color.green() - expected_g) <= 10
+    assert abs(color.blue() - expected_b) <= 10
 
 
 def test_detail_screen_item_progress_fraction(qtbot):
@@ -288,6 +357,57 @@ def test_chapter_screen_hero_shows_book_title(qtbot):
     book = _make_box_set_book()
     screen.load(book, _make_chapters(), None, "http://localhost", "tok")
     assert screen._hero_backdrop._hero_title.text() == book.title
+
+
+def test_chapter_select_screen_backdrop_not_occluded(qtbot):
+    """Regression test for the occlusion bug class Task 2 verified only via
+    a one-off, uncommitted script: an opaque scroll/container widget hiding
+    Backdrop's content. Task 2 moved Backdrop from a direct screen child to
+    a grandchild inside HeroBackdrop — exactly the kind of structural
+    change that could silently reintroduce this.
+
+    Unlike FocusGrid, ChapterSelectScreen's QListWidget rows start
+    immediately below the hero band with no extra margin, so this samples
+    below the last chapter row instead, where the list viewport's
+    transparent background should let Backdrop show through.
+    """
+    from PyQt6.QtGui import QColor, QPixmap
+
+    from sixpack.ui import theme
+    from sixpack.ui.screens.chapter_select import ChapterSelectScreen
+
+    screen = ChapterSelectScreen()
+    qtbot.addWidget(screen)
+    screen.resize(800, 600)
+    screen.load(_make_box_set_book(), _make_chapters(), None)
+    screen._hero_backdrop.backdrop.show_color(QColor(255, 0, 0))
+    screen.show()
+    qtbot.waitExposed(screen)
+
+    pix = QPixmap(screen.size())
+    screen.render(pix)
+    img = pix.toImage()
+
+    # 3 chapter rows (68px + spacing each) end well before y=400, leaving
+    # empty (transparent) list viewport below them.
+    x, y, height = 400, 400, screen.height()
+    color = img.pixelColor(x, y)
+
+    # Backdrop.show_color paints a vertical gradient from red.darker(150)
+    # at y=0 to theme.BG at the bottom (see backdrop.py). Verify the
+    # sampled pixel actually matches that ramp — not black (fully
+    # occluded), not raw #FF0000, and not a flat opaque widget color like
+    # theme.SURFACE (ChapterItem's own row background).
+    dark_red = QColor(255, 0, 0).darker(150)
+    bg = QColor(theme.BG)
+    fraction = y / height
+    expected_r = dark_red.red() + (bg.red() - dark_red.red()) * fraction
+    expected_g = dark_red.green() + (bg.green() - dark_red.green()) * fraction
+    expected_b = dark_red.blue() + (bg.blue() - dark_red.blue()) * fraction
+
+    assert abs(color.red() - expected_r) <= 10
+    assert abs(color.green() - expected_g) <= 10
+    assert abs(color.blue() - expected_b) <= 10
 
 
 def test_chapter_screen_play_signal(qtbot):
@@ -547,6 +667,45 @@ def test_chapter_screen_stale_color_callback_is_dropped(qtbot):
     # The current book's callback must still apply normally.
     current_color_cb(QPixmap())
     assert len(calls) == 1
+
+
+def test_chapter_screen_backdrop_image_shown_blocks_late_color_reset(qtbot):
+    """Regression test for the same-key race Task 6 didn't cover: fetch()
+    and fetch_backdrop() can resolve at different speeds for the SAME book
+    (e.g. the raw cover was evicted from CoverCache but the backdrop JPEG
+    wasn't — the backdrop file is always written after its raw cover, so
+    it's always newer under eviction pressure). If `_backdrop_cb` fires
+    FIRST and starts showing the real image, a later same-key `_color_cb`
+    must not call show_color and hard-reset the Backdrop back to a flat
+    gradient over the already-shown image.
+    """
+    from PyQt6.QtGui import QPixmap
+
+    from sixpack.ui.screens.chapter_select import ChapterSelectScreen
+
+    fake_cache = _FakeCoverCache()
+    screen = ChapterSelectScreen(cover_cache=fake_cache)
+    qtbot.addWidget(screen)
+
+    book = _make_box_set_book()
+    screen.load(book, _make_chapters(), None, "http://localhost", "tok")
+    assert len(fake_cache.fetch_calls) == 1
+    assert len(fake_cache.fetch_backdrop_calls) == 1
+    color_cb = fake_cache.fetch_calls[0][2]
+    backdrop_cb = fake_cache.fetch_backdrop_calls[0][2]
+
+    color_calls = []
+    screen._hero_backdrop.backdrop.show_color = lambda color: color_calls.append(color)
+    image_calls = []
+    screen._hero_backdrop.backdrop.show_image = lambda pm, key=None: image_calls.append((pm, key))
+
+    # Backdrop image resolves FIRST (e.g. a cache hit on the backdrop JPEG),
+    # then the dominant-color fetch resolves LATER for the SAME key.
+    backdrop_cb(QPixmap())
+    assert len(image_calls) == 1
+
+    color_cb(QPixmap())
+    assert color_calls == []
 
 
 # ---- Config ----

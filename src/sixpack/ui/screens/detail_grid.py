@@ -61,6 +61,10 @@ class DetailGridScreen(QWidget):
         layout.setContentsMargins(0, HeroBackdrop.HERO_H, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(self._grid)
+        # Explicit z-order: HeroBackdrop only manages stacking among its own
+        # children (backdrop vs. hero overlay), not relative to external
+        # siblings like _grid — see HeroBackdrop's class docstring.
+        self._hero_backdrop.lower()
 
     def resizeEvent(self, event) -> None:
         self._hero_backdrop.setGeometry(self.rect())
@@ -119,6 +123,7 @@ class DetailGridScreen(QWidget):
             # reused screen instance, rather than leaving it visible under
             # the new (correct) hero title.
             self._hero_backdrop.set_subtitle("")
+            self._hero_backdrop.backdrop.set_expected_key("")
             self._hero_backdrop.backdrop.show_color(QColor(theme.SURFACE))
 
     def _refresh_progress(self, progress: dict) -> None:
@@ -178,7 +183,9 @@ class DetailGridScreen(QWidget):
             self._reflect_focus(self._items[index])
 
     def _reflect_focus(self, item: Any) -> None:
-        self._hero_backdrop.set_subtitle(self._item_subtitle(item) or self._item_title(item))
+        sub = self._item_subtitle(item)
+        title = self._item_title(item)
+        self._hero_backdrop.set_subtitle(f"{sub} · {title}" if sub else title)
         if self._cover_cache is None:
             return
         cover = self._item_cover_url(item, self._server_url, self._token)

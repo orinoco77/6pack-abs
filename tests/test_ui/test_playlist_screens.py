@@ -55,6 +55,52 @@ def test_playlist_detail_screen_load(qtbot):
     assert screen._grid.item_count == 2
 
 
+def test_playlist_detail_screen_backdrop_not_occluded(qtbot):
+    """Regression test for the occlusion bug class Task 2 verified only via
+    a one-off, uncommitted script: an opaque scroll/container widget hiding
+    Backdrop's content. Task 2 moved Backdrop from a direct screen child to
+    a grandchild inside HeroBackdrop — exactly the kind of structural
+    change that could silently reintroduce this. Samples a point below the
+    hero band but above the first card — squarely inside FocusGrid's scroll
+    viewport/container, which must stay transparent for Backdrop to show
+    through.
+    """
+    from PyQt6.QtGui import QColor, QPixmap
+
+    from sixpack.ui import theme
+
+    screen = PlaylistDetailScreen()
+    qtbot.addWidget(screen)
+    screen.resize(800, 600)
+    screen.load(_make_playlist(), {}, "http://localhost", "tok")
+    screen._hero_backdrop.backdrop.show_color(QColor(255, 0, 0))
+    screen.show()
+    qtbot.waitExposed(screen)
+
+    pix = QPixmap(screen.size())
+    screen.render(pix)
+    img = pix.toImage()
+
+    x, y, height = 400, 160, screen.height()
+    color = img.pixelColor(x, y)
+
+    # Backdrop.show_color paints a vertical gradient from red.darker(150)
+    # at y=0 to theme.BG at the bottom (see backdrop.py). Verify the
+    # sampled pixel actually matches that ramp — not black (fully
+    # occluded), not raw #FF0000 (would mean darker()/gradient isn't being
+    # applied), and not a flat opaque widget color like theme.SURFACE.
+    dark_red = QColor(255, 0, 0).darker(150)
+    bg = QColor(theme.BG)
+    fraction = y / height
+    expected_r = dark_red.red() + (bg.red() - dark_red.red()) * fraction
+    expected_g = dark_red.green() + (bg.green() - dark_red.green()) * fraction
+    expected_b = dark_red.blue() + (bg.blue() - dark_red.blue()) * fraction
+
+    assert abs(color.red() - expected_r) <= 10
+    assert abs(color.green() - expected_g) <= 10
+    assert abs(color.blue() - expected_b) <= 10
+
+
 def test_playlist_detail_screen_back_signal(qtbot):
     screen = PlaylistDetailScreen()
     qtbot.addWidget(screen)

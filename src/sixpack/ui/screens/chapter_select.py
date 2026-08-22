@@ -212,6 +212,7 @@ class ChapterSelectScreen(QWidget):
         self._chapters: list[Chapter] = []
         self._cover_cache = cover_cache
         self._backdrop_key: str = ""
+        self._backdrop_image_shown: bool = False
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -262,6 +263,10 @@ class ChapterSelectScreen(QWidget):
         layout.setContentsMargins(0, HeroBackdrop.HERO_H, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(self._list)
+        # Explicit z-order: HeroBackdrop only manages stacking among its own
+        # children (backdrop vs. hero overlay), not relative to external
+        # siblings like _list — see HeroBackdrop's class docstring.
+        self._hero_backdrop.lower()
 
     def resizeEvent(self, event) -> None:
         self._hero_backdrop.setGeometry(self.rect())
@@ -377,18 +382,33 @@ class ChapterSelectScreen(QWidget):
         # applied here at the screen level since it guards the dominant-
         # color fetch below, which Backdrop.show_color itself doesn't key-
         # check the way Backdrop.show_image does.
+        #
+        # `_backdrop_image_shown` guards a SECOND, same-key race: fetch()
+        # and fetch_backdrop() can resolve at different speeds (sync on a
+        # cache hit, async on a miss) for the SAME book — e.g. the raw cover
+        # was evicted from CoverCache but the backdrop JPEG wasn't (the
+        # backdrop file is always written after its raw cover, so it's
+        # always newer, making this the systematic case under eviction
+        # pressure). If `_backdrop_cb` fires first and starts cross-fading
+        # to the real image, a later same-key `_color_cb` must not call
+        # show_color and hard-reset the Backdrop back to a flat gradient —
+        # the `_backdrop_key` guard alone doesn't catch this because the key
+        # still matches; only "has the real image already started showing"
+        # does.
         self._backdrop_key = key
+        self._backdrop_image_shown = False
         if not cover_url or self._cover_cache is None:
             return
 
         def _color_cb(pm: QPixmap) -> None:
-            if sip.isdeleted(self) or self._backdrop_key != key:
+            if sip.isdeleted(self) or self._backdrop_key != key or self._backdrop_image_shown:
                 return
             self._hero_backdrop.backdrop.show_color(dominant_color(pm))
 
         def _backdrop_cb(pm: QPixmap, k: str = key) -> None:
             if sip.isdeleted(self):
                 return
+            self._backdrop_image_shown = True
             self._hero_backdrop.backdrop.show_image(pm, key=k)
 
         self._cover_cache.fetch(cover_url, token, _color_cb)
