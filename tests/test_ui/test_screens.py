@@ -221,6 +221,28 @@ def test_detail_screen_hero_subtitle_includes_episode_title(qtbot):
     assert "Episode 1" in sub
 
 
+def test_detail_screen_item_progress_fraction(qtbot):
+    """_item_progress computes current_time / duration, keyed by item.id."""
+    screen = SeriesDetailScreen()
+    qtbot.addWidget(screen)
+    book = _make_series().sorted_books[0]  # id "b1", duration 1800.0
+    prog = MediaProgress(currentTime=900.0, duration=1800.0, isFinished=False)
+    fraction, finished = screen._item_progress(book, {book.id: prog})
+    assert abs(fraction - 0.5) < 1e-6
+    assert finished is False
+
+
+def test_detail_screen_item_progress_finished_is_zero_fraction(qtbot):
+    """A finished item reports fraction 0.0 regardless of current_time."""
+    screen = SeriesDetailScreen()
+    qtbot.addWidget(screen)
+    book = _make_series().sorted_books[0]
+    prog = MediaProgress(currentTime=1800.0, duration=1800.0, isFinished=True)
+    fraction, finished = screen._item_progress(book, {book.id: prog})
+    assert fraction == 0.0
+    assert finished is True
+
+
 # ---- ChapterSelectScreen ----
 
 def _make_chapters():
@@ -333,6 +355,31 @@ def test_chapter_status_in_progress():
     assert _chapter_status(ch, 2000.0, is_finished=False) == "in_progress"
     assert _chapter_status(ch, 3001.0, is_finished=False) == "finished"
     assert _chapter_status(ch, 1000.0, is_finished=False) == "unstarted"
+
+
+def test_chapter_fraction_not_in_progress_is_zero():
+    """Any status other than in_progress (unstarted, finished) reports 0.0."""
+    from sixpack.ui.screens.chapter_select import _chapter_fraction
+    from sixpack.api.models import Chapter
+    ch = Chapter(id=0, start=0.0, end=1500.0, title="Part One")
+    assert _chapter_fraction(ch, current_time=0.0, status="unstarted") == 0.0
+    assert _chapter_fraction(ch, current_time=1500.0, status="finished") == 0.0
+
+
+def test_chapter_fraction_in_progress_computes_correctly():
+    from sixpack.ui.screens.chapter_select import _chapter_fraction
+    from sixpack.api.models import Chapter
+    ch = Chapter(id=1, start=1500.0, end=3000.0, title="Part Two")
+    # 375s into a 1500s chapter that starts at t=1500 -> 25%
+    assert abs(_chapter_fraction(ch, current_time=1875.0, status="in_progress") - 0.25) < 1e-6
+
+
+def test_chapter_fraction_zero_span_is_zero():
+    """A zero-length chapter (start == end) must not raise ZeroDivisionError."""
+    from sixpack.ui.screens.chapter_select import _chapter_fraction
+    from sixpack.api.models import Chapter
+    ch = Chapter(id=0, start=60.0, end=60.0, title="Ch (zero-length)")
+    assert _chapter_fraction(ch, current_time=60.0, status="in_progress") == 0.0
 
 
 def test_chapter_screen_load_from_library_item(qtbot):
