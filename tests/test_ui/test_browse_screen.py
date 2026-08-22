@@ -1140,6 +1140,7 @@ def test_sidebar_item_has_icon_and_active_state(qtbot):
     assert theme.SURFACE_HIGH in selected_inactive_style  # muted bg, accent hint only
     assert theme.ACCENT in selected_inactive_style
     assert "transparent" in unselected_style
+    assert theme.ACCENT not in unselected_style
 
 
 # ---------------------------------------------------------------------------
