@@ -1232,7 +1232,7 @@ def test_chapter_screen_stale_color_callback_is_dropped(qtbot):
     current_color_cb = fake_cache.fetch_calls[1][2]
 
     calls = []
-    screen._hero_backdrop.backdrop.show_color = lambda color: calls.append(color)
+    screen._hero_backdrop.backdrop.show_color = lambda color, key=None: calls.append(color)
 
     # Stale callback (book_a) resolving after focus already moved to book_b
     # must be dropped — not paint a color at all.
@@ -1270,7 +1270,7 @@ def test_chapter_screen_backdrop_image_shown_blocks_late_color_reset(qtbot):
     backdrop_cb = fake_cache.fetch_backdrop_calls[0][2]
 
     color_calls = []
-    screen._hero_backdrop.backdrop.show_color = lambda color: color_calls.append(color)
+    screen._hero_backdrop.backdrop.show_color = lambda color, key=None: color_calls.append(color)
     image_calls = []
     screen._hero_backdrop.backdrop.show_image = lambda pm, key=None: image_calls.append((pm, key))
 

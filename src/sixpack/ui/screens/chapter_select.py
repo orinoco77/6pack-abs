@@ -402,7 +402,10 @@ class ChapterSelectScreen(QWidget):
         # show_color and hard-reset the Backdrop back to a flat gradient —
         # the `_backdrop_key` guard alone doesn't catch this because the key
         # still matches; only "has the real image already started showing"
-        # does.
+        # does. This screen-level guard covers the fade-in-progress window;
+        # Backdrop.show_color's own key check (passed below) covers the
+        # complementary case of a book reloaded later, after its image was
+        # already fully settled from an earlier load of this reused screen.
         self._backdrop_key = key
         self._backdrop_image_shown = False
         if not cover_url or self._cover_cache is None:
@@ -411,7 +414,7 @@ class ChapterSelectScreen(QWidget):
         def _color_cb(pm: QPixmap) -> None:
             if sip.isdeleted(self) or self._backdrop_key != key or self._backdrop_image_shown:
                 return
-            self._hero_backdrop.backdrop.show_color(dominant_color(pm))
+            self._hero_backdrop.backdrop.show_color(dominant_color(pm), key=key)
 
         def _backdrop_cb(pm: QPixmap, k: str = key) -> None:
             if sip.isdeleted(self):

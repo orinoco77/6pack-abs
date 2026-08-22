@@ -39,6 +39,16 @@ class Backdrop(QWidget):
         # silently dropped instead of clobbering what's currently displayed.
         self._current_key: str = ""
 
+        # Key of the item whose blurred image is the fully-settled display
+        # right now (set once a cross-fade finishes). Lets show_color/
+        # show_image skip redundant work when they're asked to (re-)show
+        # content for an item that's already fully displayed — e.g. a
+        # background data refresh re-reflecting the still-focused item,
+        # which would otherwise fade the image onto itself (a visible
+        # flicker with no actual visual change) or regress the display
+        # back to a flat gradient placeholder.
+        self._image_key: str = ""
+
         # One long-lived QVariantAnimation, reused (stopped/reconfigured/
         # restarted) on every cross-fade rather than recreated per call.
         # Backdrop is a single long-lived widget for the whole app session
@@ -80,7 +90,11 @@ class Backdrop(QWidget):
         """
         self._current_key = key
 
-    def show_color(self, color: QColor) -> None:
+    def show_color(self, color: QColor, key: str | None = None) -> None:
+        if key is not None and key == self._image_key:
+            # Already showing this item's blurred image — don't regress to
+            # a flat gradient placeholder for a same-item re-reflect.
+            return
         pix = QPixmap(max(1, self.width()), max(1, self.height()))
         grad = QLinearGradient(0, 0, 0, pix.height())
         grad.setColorAt(0.0, color.darker(150))
@@ -102,6 +116,11 @@ class Backdrop(QWidget):
         if key is not None and key != self._current_key:
             return
 
+        if key is not None and key == self._image_key:
+            # Already fully showing this exact item's blurred image —
+            # skip the redundant cross-fade (no visual change to make).
+            return
+
         # Promote whatever was mid-fade-in to the settled layer, then fade
         # the new pixmap in on top of it.
         if self._incoming_pixmap is not None and not self._incoming_pixmap.isNull():
@@ -121,6 +140,7 @@ class Backdrop(QWidget):
     def _on_fade_finished(self) -> None:
         if self._incoming_pixmap is not None:
             self._current_pixmap = self._incoming_pixmap
+            self._image_key = self._current_key
         self._incoming_pixmap = None
         self._fade = 0.0
         self.update()

@@ -632,7 +632,7 @@ class BrowseScreen(QWidget):
         self._backdrop.set_expected_key(key)
         color = self._dom_colors.get(key)
         if color is not None:
-            self._backdrop.show_color(color)
+            self._backdrop.show_color(color, key=key)
         self._cover_cache.fetch_backdrop(
             cover, self._token, lambda pm, k=key: self._backdrop.show_image(pm, k)
         )
