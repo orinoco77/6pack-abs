@@ -3,8 +3,6 @@ cinematic-redesign visual wiring (Backdrop feed, larger cover, restyled
 progress/transport controls)."""
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import pytest
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap
@@ -17,7 +15,6 @@ from sixpack.api.models import (
     Series,
     SeriesBook,
 )
-from sixpack.player.player import AudioPlayer
 from sixpack.ui.screens.player import PlayerScreen
 
 
@@ -29,6 +26,7 @@ class _FakePlayer:
     def __init__(self):
         self.speed_calls = []
         self.seek_to_chapter_calls = []
+        self.seek_absolute_calls = []
         self.chapter_count = 0
         self.current_chapter = 0
 
@@ -46,6 +44,7 @@ class _FakePlayer:
     def prev_chapter(self): pass
     def set_speed(self, speed): self.speed_calls.append(speed)
     def seek_to_chapter(self, index): self.seek_to_chapter_calls.append(index)
+    def seek_absolute(self, seconds): self.seek_absolute_calls.append(seconds)
 
 
 class _FakeCoverCache:
@@ -335,6 +334,11 @@ def test_menu_key_closes_open_overlay(qtbot, screen):
 
 
 def test_select_in_overlay_seeks_and_closes(qtbot, screen):
+    """Regression: the overlay must seek by TIME (seek_absolute), not by
+    index (seek_to_chapter) — `row` indexes into self._chapters (ABS's own
+    chapter metadata), a different domain than mpv's internally-derived
+    chapter list that seek_to_chapter indexes into. See _on_overlay_chapter_
+    activated's docstring in player.py for the full rationale."""
     from sixpack.api.models import Chapter
     screen.set_chapters([Chapter(id=0, start=0.0, end=100.0, title="Ch1"),
                           Chapter(id=1, start=100.0, end=200.0, title="Ch2")])
@@ -344,7 +348,8 @@ def test_select_in_overlay_seeks_and_closes(qtbot, screen):
     screen._chapter_overlay.setCurrentRow(1)
     qtbot.keyClick(screen, Qt.Key.Key_Return)  # select — closes AND seeks
 
-    assert screen._player.seek_to_chapter_calls == [1]
+    assert screen._player.seek_absolute_calls == [100.0]
+    assert screen._player.seek_to_chapter_calls == []
     assert not screen._chapter_overlay.isVisible()
 
 
@@ -356,6 +361,7 @@ def test_back_closes_overlay_without_seeking(qtbot, screen):
     qtbot.keyClick(screen, Qt.Key.Key_Return)  # open
     qtbot.keyClick(screen, Qt.Key.Key_Escape)  # BACK
 
+    assert screen._player.seek_absolute_calls == []
     assert screen._player.seek_to_chapter_calls == []
     assert not screen._chapter_overlay.isVisible()
 
@@ -457,3 +463,124 @@ def test_play_playlist_item_resets_stale_chapters(qtbot):
     s.play_playlist_item(item_b, 0.0, playlist, [item_a, item_b], "http://server", "tok")
 
     assert s._chapters == []
+
+
+# ----------------------------------------------------------------------
+# Cross-mode per-item state reset (final whole-plan review, Fix 1 + Fix 3)
+#
+# PlayerScreen is a process-lifetime singleton reused across every item
+# played. play_book() previously left playlist-mode fields
+# (_current_playlist_item/_playlist/_playlist_items) untouched, and
+# play_playlist_item() previously left series-mode fields (_current_book/
+# _series/_series_books) untouched — so app.py's _on_track_ended, which
+# branches on the series fields FIRST, could read stale cross-mode state
+# after a session like: play a series book -> back out -> play a playlist
+# item -> track ends. Both play_* methods now go through
+# _reset_per_item_state(), which clears both sides unconditionally.
+# ----------------------------------------------------------------------
+
+
+def test_play_book_clears_stale_playlist_fields(qtbot):
+    """Regression for Fix 1: playing a series book after a playlist item
+    must clear the playlist-mode fields, or app.py's _on_track_ended could
+    still see a stale _current_playlist_item/_playlist_items pair (not the
+    bug path itself — that's the series-fields-checked-first order — but
+    this is the other half of the same singleton-reuse bug: leftover
+    cross-mode state that should never survive a play_book() call)."""
+    s = PlayerScreen(player=_FakePlayer())
+    qtbot.addWidget(s)
+
+    item = _playlist_item(item_id="p1")
+    playlist = _playlist([item])
+    s.play_playlist_item(item, 0.0, playlist, [item], "http://server", "tok")
+    assert s._current_playlist_item is not None
+    assert s._playlist is not None
+    assert s._playlist_items != []
+
+    book = _book(book_id="b1")
+    series = _series([book])
+    s.play_book(book, 0.0, series, [book], "http://server", "tok")
+
+    assert s._current_playlist_item is None
+    assert s._playlist is None
+    assert s._playlist_items == []
+
+
+def test_play_playlist_item_clears_stale_series_fields(qtbot):
+    """Regression for Fix 1: playing a playlist item after a series book
+    must clear the series-mode fields (_current_book/_series/
+    _series_books) — this is the field state app.py's _on_track_ended
+    actually branches on FIRST, so leaving these stale after
+    play_playlist_item() is exactly the reachable bug the final review
+    traced: series book -> back out -> playlist item -> track ends would
+    take the (wrong) series branch using the old book's stale title."""
+    s = PlayerScreen(player=_FakePlayer())
+    qtbot.addWidget(s)
+
+    book = _book(book_id="b1")
+    series = _series([book])
+    s.play_book(book, 0.0, series, [book], "http://server", "tok")
+    assert s._current_book is not None
+    assert s._series is not None
+    assert s._series_books != []
+
+    item = _playlist_item(item_id="p1")
+    playlist = _playlist([item])
+    s.play_playlist_item(item, 0.0, playlist, [item], "http://server", "tok")
+
+    assert s._current_book is None
+    assert s._series is None
+    assert s._series_books == []
+
+
+def test_play_library_item_clears_both_sides(qtbot):
+    """play_library_item() already cleared both sides before this fix wave
+    — confirm it still does after routing through _reset_per_item_state()."""
+    s = PlayerScreen(player=_FakePlayer())
+    qtbot.addWidget(s)
+
+    book = _book(book_id="b1")
+    series = _series([book])
+    s.play_book(book, 0.0, series, [book], "http://server", "tok")
+
+    s.play_library_item(_library_item(item_id="i1"), 0.0, "http://server", "tok")
+
+    assert s._current_book is None
+    assert s._series is None
+    assert s._series_books == []
+    assert s._current_playlist_item is None
+    assert s._playlist is None
+    assert s._playlist_items == []
+
+
+def test_play_book_hides_and_clears_open_chapter_overlay(qtbot):
+    """Regression for Fix 3: if the chapter overlay is left open (still
+    visible+populated with the PREVIOUS item's rows) when a new item starts
+    playing — e.g. via the transport's next/prev buttons, which stay
+    mouse-clickable while the overlay is open — the overlay must not
+    silently carry over into the new item. Without this reset the overlay
+    would still be visible, still populated with the old item's chapter
+    rows, and (per keyPressEvent's overlay-open branch) would hijack all
+    player input for the new item until BACK/MENU is pressed."""
+    from sixpack.api.models import Chapter
+
+    s = PlayerScreen(player=_FakePlayer())
+    qtbot.addWidget(s)
+    s.show()
+
+    book_a = _book(book_id="a", title="Book A")
+    book_b = _book(book_id="b", title="Book B")
+    series = _series([book_a, book_b])
+
+    s.play_book(book_a, 0.0, series, [book_a, book_b], "http://server", "tok")
+    s.set_chapters([Chapter(id=0, start=0.0, end=100.0, title="A Ch1")])
+    s._toggle_chapter_overlay()  # open it, populated with book A's chapter
+    assert s._chapter_overlay.isVisible()
+    assert s._chapter_overlay.count() == 1
+
+    # Simulate the transport next-button path: play_book() called again
+    # directly, overlay never explicitly closed by the user.
+    s.play_book(book_b, 0.0, series, [book_a, book_b], "http://server", "tok")
+
+    assert not s._chapter_overlay.isVisible()
+    assert s._chapter_overlay.count() == 0
