@@ -127,8 +127,8 @@ class OnScreenKeyboard(QWidget):
         self._reflect_focus()
 
     def keyPressEvent(self, event) -> None:
-        from sixpack.input.keyboard import key_to_action
         from sixpack.input.actions import InputAction
+        from sixpack.input.keyboard import key_to_action
 
         action = key_to_action(event.key())
         if action == InputAction.BACK:

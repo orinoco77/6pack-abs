@@ -22,4 +22,6 @@ def test_set_data_builds_matrix(qtbot):
 def test_set_data_empty_string_does_not_crash(qtbot):
     widget = QRCodeWidget()
     qtbot.addWidget(widget)
-    widget.set_data("")  # qrcode raises on empty data internally — confirm this is handled gracefully
+    # qrcode.add_data("") produces a minimal valid matrix — verify the
+    # widget handles it gracefully.
+    widget.set_data("")

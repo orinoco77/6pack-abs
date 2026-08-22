@@ -719,6 +719,19 @@ class MainWindow(QMainWindow):
             self._login_screen.show_error(f"Login failed: {message}")
         elif tag == "autologin":
             self._show_login()
+        elif tag == "libraries":
+            # Order is load-bearing: _show_login() calls start_pairing(),
+            # which (re)shows the pairing view and issues a fresh code —
+            # if show_error() ran first, that would immediately clobber
+            # the error's visibility by re-hiding the keyboard-fallback
+            # view it just forced open. Showing the login screen (with a
+            # fresh pairing code, since the old one was already consumed)
+            # BEFORE show_error() lets show_error()'s own visibility fix
+            # (Fix 3 Part A) be the last word, so the error is what the
+            # user actually sees.
+            self._login_screen.stop_pairing()
+            self._show_login()
+            self._login_screen.show_error(f"Couldn't load your libraries: {message}")
         elif tag == "book_chapters":
             book = self._pending_book
             if book:

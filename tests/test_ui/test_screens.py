@@ -320,6 +320,93 @@ def test_login_pairing_bind_failure_falls_back_to_keyboard(qtbot, monkeypatch):
         screen.stop_pairing()
 
 
+def test_login_keyboard_reachable_via_real_dpad_navigation(qtbot):
+    """Regression: the on-screen-keyboard fallback must be reachable and
+    operable using ONLY this app's real D-pad input mapping — no direct
+    method calls, no direct signal emission. This is the app's only real
+    input model (10-ft remote-control UX, no mouse/keyboard as primary
+    path) and a prior version of this screen had a Critical bug where the
+    keyboard fallback was completely unreachable this way."""
+    from PyQt6.QtTest import QTest
+
+    screen = LoginScreen()
+    qtbot.addWidget(screen)
+    screen.show()
+    qtbot.waitExposed(screen)
+    # QApplication.focusWidget() is unreliable under the offscreen platform
+    # unless the (top-level, in this test) window is explicitly activated —
+    # do that once, up front, so the real Qt focus this test observes below
+    # matches what a real windowed app would report.
+    screen.activateWindow()
+    QTest.qWaitForWindowActive(screen)
+    screen.start_pairing()
+    try:
+        # SELECT on the pairing view reaches the keyboard-fallback view.
+        focus = QApplication.focusWidget()
+        qtbot.keyClick(focus, Qt.Key.Key_Return)
+        assert screen._keyboard_form.isVisible()
+
+        # Down from the initially-focused URL field, through the 3
+        # fields, into the keyboard widget itself.
+        for _ in range(3):
+            focus = QApplication.focusWidget()
+            qtbot.keyClick(focus, Qt.Key.Key_Down)
+        assert screen._keyboard.hasFocus()
+
+        # The keyboard, now genuinely focused, actually types a
+        # character into whichever field is active when Select is
+        # pressed on a key.
+        before = screen._url_input.text()
+        qtbot.keyClick(screen._keyboard, Qt.Key.Key_Return)  # selects the keyboard's default-focused key
+        assert (
+            screen._url_input.text() != before
+            or screen._user_input.text()
+            or screen._pass_input.text()
+        )
+    finally:
+        screen.stop_pairing()
+
+
+def test_login_refresh_pairing_code_issues_fresh_server(qtbot):
+    """_refresh_pairing_code() (scheduled by start_pairing() to fire shortly
+    after PairingServer.EXPIRY_SECONDS elapses) must replace the pairing
+    server with a brand-new one — a TV left on this screen past 10 minutes
+    shouldn't strand a later visitor with an already-expired code."""
+    screen = LoginScreen()
+    qtbot.addWidget(screen)
+    screen.start_pairing()
+    try:
+        old_server = screen._pairing_server
+        old_code = old_server.code
+        old_port = old_server.port
+
+        screen._refresh_pairing_code()
+
+        assert screen._pairing_server is not None
+        assert screen._pairing_server is not old_server
+        assert (screen._pairing_server.code, screen._pairing_server.port) != (
+            old_code,
+            old_port,
+        )
+        assert screen._pairing_code_label.text() == screen._pairing_server.code
+        assert not screen._pairing_view.isHidden()
+    finally:
+        screen.stop_pairing()
+
+
+def test_login_refresh_pairing_code_noop_when_no_server(qtbot):
+    """_refresh_pairing_code() must be a safe no-op once the user already
+    left the pairing flow (fallback / success / screen torn down) — no
+    server running means nothing to refresh."""
+    screen = LoginScreen()
+    qtbot.addWidget(screen)
+    assert screen._pairing_server is None
+
+    screen._refresh_pairing_code()  # must not raise, must not create a server
+
+    assert screen._pairing_server is None
+
+
 def test_login_show_error_still_works_unchanged(qtbot):
     screen = LoginScreen()
     qtbot.addWidget(screen)

@@ -22,7 +22,8 @@ class SplashScreen(QWidget):
         title = QLabel("SixPack")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet(
-            f"font-size: {theme.FONT_HUGE}pt; font-weight: bold; color: {theme.ACCENT}; letter-spacing: 4px;"
+            f"font-size: {theme.FONT_HUGE}pt; font-weight: bold; "
+            f"color: {theme.ACCENT}; letter-spacing: 4px;"
         )
         layout.addWidget(title)
 

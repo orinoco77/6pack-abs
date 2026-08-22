@@ -47,6 +47,33 @@ def test_down_moves_to_letter_row(qtbot):
     assert received == ["q"]
 
 
+def test_left_moves_focus_back(qtbot):
+    kb = OnScreenKeyboard()
+    qtbot.addWidget(kb)
+    kb.show()
+    qtbot.waitExposed(kb)
+    received = []
+    kb.key_pressed.connect(received.append)
+    qtbot.keyClick(kb, Qt.Key.Key_Right)
+    qtbot.keyClick(kb, Qt.Key.Key_Right)
+    qtbot.keyClick(kb, Qt.Key.Key_Left)
+    qtbot.keyClick(kb, Qt.Key.Key_Return)
+    assert received == ["2"]
+
+
+def test_up_moves_focus_back_to_digit_row(qtbot):
+    kb = OnScreenKeyboard()
+    qtbot.addWidget(kb)
+    kb.show()
+    qtbot.waitExposed(kb)
+    received = []
+    kb.key_pressed.connect(received.append)
+    qtbot.keyClick(kb, Qt.Key.Key_Down)  # digits -> letters ("q" row)
+    qtbot.keyClick(kb, Qt.Key.Key_Up)  # back up to digits row
+    qtbot.keyClick(kb, Qt.Key.Key_Return)
+    assert received == ["1"]
+
+
 def test_back_emits_back_requested(qtbot):
     kb = OnScreenKeyboard()
     qtbot.addWidget(kb)

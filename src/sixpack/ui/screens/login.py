@@ -20,9 +20,10 @@ Switching views only toggles container visibility.
 """
 from __future__ import annotations
 
-from PyQt6.QtCore import QEvent, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
+    QApplication,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -54,6 +55,7 @@ class LoginScreen(QWidget):
         # the keyboard-fallback view is (re)shown.
         self._active_field: QLineEdit | None = None
         self._build_ui()
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
     # ------------------------------------------------------------------
     # UI construction
@@ -122,6 +124,14 @@ class LoginScreen(QWidget):
             f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_META}pt;"
         )
         layout.addWidget(instructions)
+
+        self._pairing_url_label = QLabel("")
+        self._pairing_url_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._pairing_url_label.setWordWrap(True)
+        self._pairing_url_label.setStyleSheet(
+            f"color: {theme.TEXT_MUTED}; font-size: {theme.FONT_META}pt;"
+        )
+        layout.addWidget(self._pairing_url_label)
 
         use_remote_btn = QPushButton("Use the remote instead")
         use_remote_btn.clicked.connect(self._use_keyboard_fallback)
@@ -206,6 +216,51 @@ class LoginScreen(QWidget):
         self._backdrop.setGeometry(self.rect())
         super().resizeEvent(event)
 
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if self._pairing_view.isVisible():
+            self.setFocus()
+        else:
+            self._url_input.setFocus()
+
+    def keyPressEvent(self, event) -> None:
+        from sixpack.input.actions import InputAction
+        from sixpack.input.keyboard import key_to_action
+
+        action = key_to_action(event.key())
+
+        if self._pairing_view.isVisible():
+            if action == InputAction.SELECT:
+                self._use_keyboard_fallback()
+                return
+            super().keyPressEvent(event)
+            return
+
+        # Keyboard-fallback view. The 3 QLineEdits keep real Qt focus and
+        # their own native text-editing behavior (Left/Right = cursor
+        # move, Enter = advance via the existing returnPressed chain) —
+        # this screen only needs to handle moving focus UP/DOWN *between*
+        # the fields and into/out of the keyboard widget. Once
+        # self._keyboard itself holds real focus, it owns its own D-pad
+        # navigation entirely (per its established focus-ownership
+        # design from Task 3) and this method is not involved again
+        # until the user exits it (Back, wired to _use_pairing_view) or
+        # a genuinely unmapped key falls through to here.
+        focused = QApplication.focusWidget()
+        fields = [self._url_input, self._user_input, self._pass_input]
+        if focused in fields:
+            idx = fields.index(focused)
+            if action == InputAction.DOWN:
+                if idx + 1 < len(fields):
+                    fields[idx + 1].setFocus()
+                else:
+                    self._keyboard.setFocus()
+                return
+            if action == InputAction.UP and idx > 0:
+                fields[idx - 1].setFocus()
+                return
+        super().keyPressEvent(event)
+
     def eventFilter(self, obj, event) -> bool:  # noqa: N802 — Qt-mandated name
         if event.type() == QEvent.Type.FocusIn and obj in (
             self._url_input,
@@ -223,8 +278,12 @@ class LoginScreen(QWidget):
         """Start a fresh pairing server and show the pairing view.
 
         Falls back to the keyboard view automatically if the server can't
-        bind a local port.
+        bind a local port. Automatically issues a fresh code shortly after
+        this one's TTL elapses, so a TV left on this screen doesn't strand
+        a later visitor with an already-expired code and no way to get a
+        new one.
         """
+        self.stop_pairing()  # defensive: never leak a prior server
         self._pairing_server = PairingServer(on_success=self._on_pairing_success)
         try:
             self._pairing_server.start()
@@ -239,8 +298,18 @@ class LoginScreen(QWidget):
 
         self._qr_widget.set_data(self._pairing_server.pairing_url())
         self._pairing_code_label.setText(self._pairing_server.code)
+        self._pairing_url_label.setText(self._pairing_server.pairing_url())
         self._pairing_view.setVisible(True)
         self._keyboard_form.setVisible(False)
+        QTimer.singleShot(
+            int(PairingServer.EXPIRY_SECONDS * 1000) + 1000,
+            self._refresh_pairing_code,
+        )
+
+    def _refresh_pairing_code(self) -> None:
+        if self._pairing_server is None:
+            return  # user already left this flow (fallback / success / screen torn down)
+        self.start_pairing()
 
     def stop_pairing(self) -> None:
         """Tear down the pairing server, if one is running. Idempotent."""
@@ -313,6 +382,8 @@ class LoginScreen(QWidget):
         self.login_requested.emit(url, username, password)
 
     def show_error(self, message: str) -> None:
+        if not self._keyboard_form.isVisible():
+            self._use_keyboard_fallback()
         self._error_label.setText(message)
         self._error_label.setVisible(True)
         self._login_btn.setEnabled(True)
