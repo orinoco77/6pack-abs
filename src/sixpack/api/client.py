@@ -228,8 +228,13 @@ class ABSClient:
     # Progress
     # ------------------------------------------------------------------
 
-    async def get_progress(self, item_id: str) -> MediaProgress | None:
-        response = await self._http.get(f"/api/me/progress/{item_id}")
+    async def get_progress(
+        self, item_id: str, episode_id: str | None = None
+    ) -> MediaProgress | None:
+        path = f"/api/me/progress/{item_id}"
+        if episode_id:
+            path = f"{path}/{episode_id}"
+        response = await self._http.get(path)
         if response.status_code == 404:
             return None
         self._raise_for_status(response)
@@ -244,6 +249,7 @@ class ABSClient:
         current_time: float,
         duration: float,
         is_finished: bool = False,
+        episode_id: str | None = None,
     ) -> None:
         progress = 0.0 if duration <= 0 else min(current_time / duration, 1.0)
         payload: dict[str, Any] = {
@@ -252,7 +258,10 @@ class ABSClient:
             "progress": progress,
             "isFinished": is_finished,
         }
-        response = await self._http.patch(f"/api/me/progress/{item_id}", json=payload)
+        path = f"/api/me/progress/{item_id}"
+        if episode_id:
+            path = f"{path}/{episode_id}"
+        response = await self._http.patch(path, json=payload)
         self._raise_for_status(response)
 
     # ------------------------------------------------------------------
@@ -263,6 +272,7 @@ class ABSClient:
         self,
         item_id: str,
         start_time: float = 0.0,
+        episode_id: str | None = None,
     ) -> PlaybackSession:
         payload = {
             "deviceInfo": {"deviceId": "sixpack-linux", "clientName": "SixPack"},
@@ -278,7 +288,10 @@ class ABSClient:
             ],
             "mediaPlayer": "SixPack",
         }
-        response = await self._http.post(f"/api/items/{item_id}/play", json=payload)
+        path = f"/api/items/{item_id}/play"
+        if episode_id:
+            path = f"{path}/{episode_id}"
+        response = await self._http.post(path, json=payload)
         self._raise_for_status(response)
         session = PlaybackSession.model_validate(response.json())
         if start_time > 0:
