@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import json
 import secrets
 import socket
 import threading
@@ -155,25 +156,31 @@ _ERROR_PAGE = ("""<!doctype html>
 
 def _discovered_servers_html(servers: list[str]) -> str:
     """Build the tappable pre-fill buttons shown above the manual-entry
-    fields. `servers` entries are always f"http://{ip}:{port}" strings built
-    from ipaddress-validated IPs and int ports (see Task 1) — never derived
-    from a scanned host's response content — so they cannot contain a quote
-    character that would break out of either the HTML attribute or the JS
-    string literal below. html.escape() on the visible label text is still
-    applied as defense in depth.
+    fields. `servers` entries currently always come from Task 1's
+    ipaddress-validated LAN scan (f"http://{ip}:{port}", which can never
+    contain a quote character) — but this function does not rely on that
+    external invariant holding. Each value is independently made safe here:
 
-    Quoting note: `{s!r}` produces a Python repr, which for these plain
-    "http://ip:port" strings (no embedded quotes) is always a *single*-quoted
-    string, e.g. 'http://192.168.1.50:13378'. That's embedded inside the
-    onclick attribute's *double*-quoted HTML delimiters, so the single-quoted
-    JS string literal cannot collide with the attribute's own quoting.
-    Verified by rendering (see task report).
+    - `json.dumps(s)` produces a valid, double-quoted JS string literal with
+      every JS-special character (including `"`) correctly backslash-escaped
+      — safe to drop into the `onclick` JS body as-is.
+    - That JS literal is then run through `html.escape()` before being
+      embedded in the (double-quoted) `onclick="..."` HTML attribute, so it
+      cannot contain a raw `"` that would terminate the attribute early
+      regardless of what characters `s` contains. The browser HTML-decodes
+      the attribute value before handing it to the JS parser, so the
+      resulting `\&quot;` -> `\"` round-trips back to the exact JS-escaped
+      quote `json.dumps` produced — the JS string content is unaffected.
+
+    html.escape() on the visible label text is separately applied as
+    defense in depth for the button's inner text content.
     """
     if not servers:
         return ""
     items = "\n".join(
         f'<button type="button" class="discovered-btn" '
-        f'onclick="document.getElementsByName(\'server_url\')[0].value={s!r}">{html.escape(s)}</button>'
+        f'onclick="document.getElementsByName(\'server_url\')[0].value='
+        f'{html.escape(json.dumps(s))}">{html.escape(s)}</button>'
         for s in servers
     )
     return f'<div class="discovered">\n<p>Servers found on your network:</p>\n{items}\n</div>'

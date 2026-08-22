@@ -203,6 +203,39 @@ def test_form_page_embeds_discovered_servers(server):
     assert 'name="server_url"' in resp.text
 
 
+def test_discovered_server_onclick_survives_quote_injection(server):
+    # Task 1's ipaddress-validated LAN scan can never produce a URL
+    # containing a `"` character, so this exact string can't arrive via the
+    # real scanner today. But _discovered_servers_html() must not depend on
+    # that external invariant — it has to be safe on its own. Simulate what
+    # a future, less-careful caller of set_discovered_servers() could pass.
+    adversarial = 'http://192.168.1.50:13378" onclick="alert(1)'
+    server.set_discovered_servers([adversarial])
+    resp = httpx.get(f"http://127.0.0.1:{server.port}/?code={server.code}")
+    assert resp.status_code == 200
+    text = resp.text
+
+    # The pre-fix `{s!r}` approach produced a Python repr for this string
+    # (no embedded single quote, so repr picks single-quote delimiters and
+    # leaves the double quote completely unescaped):
+    #   'http://192.168.1.50:13378" onclick="alert(1)'
+    # embedded straight into the onclick="..." HTML attribute. That raw `"`
+    # would terminate the attribute early, and the literal text
+    # `onclick="alert(1)` would land in the page as a second, real HTML
+    # attribute — i.e. a working injected onclick handler. Assert that
+    # exact breakout string is never present verbatim in the response.
+    broken_onclick = 'value=\'http://192.168.1.50:13378" onclick="alert(1)\''
+    assert broken_onclick not in text
+
+    # More directly: an injected `onclick="alert(1)"` must never appear as
+    # its own separate HTML attribute anywhere in the response.
+    assert 'onclick="alert(1)"' not in text
+
+    # The value must still make it into the page in some safe, escaped
+    # form (proving we didn't just drop/reject it).
+    assert "192.168.1.50" in text
+
+
 def test_set_discovered_servers_updates_next_response(server):
     resp1 = httpx.get(f"http://127.0.0.1:{server.port}/?code={server.code}")
     assert "192.168.1.50" not in resp1.text
