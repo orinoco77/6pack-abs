@@ -21,6 +21,9 @@ from sixpack.ui.cover_cache import CoverCache
 from sixpack.ui.widgets.backdrop import Backdrop
 
 
+_SPEED_STEPS = [1.0, 1.25, 1.5, 1.75, 2.0]
+
+
 def _fmt_time(seconds: float) -> str:
     if not math.isfinite(seconds) or seconds < 0:
         seconds = 0.0
@@ -64,6 +67,7 @@ class PlayerScreen(QWidget):
         self._duration = 0.0
         self._position = 0.0
         self._item_id = ""
+        self._speed_index = 0
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._build_ui()
@@ -216,6 +220,13 @@ class PlayerScreen(QWidget):
                 f"background: transparent; color: {theme.TEXT_SECONDARY}; "
                 f"border: none; font-size: 18pt;"
             )
+
+        self._speed_label = QLabel("1.0x")
+        self._speed_label.setStyleSheet(
+            f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_META}pt; "
+            f"background: transparent;"
+        )
+        controls.addWidget(self._speed_label)
 
         root.addLayout(controls)
 
@@ -458,6 +469,12 @@ class PlayerScreen(QWidget):
                 self._item_id, self._position, self._duration, is_finished
             )
 
+    def _cycle_speed(self) -> None:
+        self._speed_index = (self._speed_index + 1) % len(_SPEED_STEPS)
+        speed = _SPEED_STEPS[self._speed_index]
+        self._player.set_speed(speed)
+        self._speed_label.setText(f"{speed}x")
+
     # ------------------------------------------------------------------
     # Keyboard / gamepad
     # ------------------------------------------------------------------
@@ -475,6 +492,8 @@ class PlayerScreen(QWidget):
             self.back_requested.emit()
         elif action == InputAction.PLAY_PAUSE:
             self._player.toggle_pause()
+        elif action == InputAction.UP:
+            self._cycle_speed()
         elif action == InputAction.STOP:
             self._player.stop()
             self.back_requested.emit()
