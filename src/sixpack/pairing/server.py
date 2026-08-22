@@ -75,6 +75,7 @@ _FORM_PAGE = """<!doctype html>
   .subtitle {{
     color: var(--text-secondary); text-align: center; margin: 0 0 32px; font-size: 14px;
   }}
+  #discovered-container {{ display: contents; }}
   .discovered {{ margin-bottom: 24px; }}
   .discovered p {{ color: var(--text-secondary); font-size: 13px; margin: 0 0 8px; }}
   .discovered-btn {{
@@ -99,7 +100,7 @@ _FORM_PAGE = """<!doctype html>
 <body>
 <h1>SixPack</h1>
 <p class="subtitle">Connect to your Audiobookshelf server</p>
-{discovered_html}
+<div id="discovered-container">{discovered_html}</div>
 <form method="post" action="/">
   <input type="text" name="server_url" placeholder="Server URL (e.g. http://192.168.1.10:13378)"
     required>
@@ -108,6 +109,75 @@ _FORM_PAGE = """<!doctype html>
   <input type="hidden" name="code" value="{code}">
   <button type="submit">Connect</button>
 </form>
+<script>
+(function() {{
+  // Poll a small `/discovered` endpoint on this same pairing server for
+  // newly-discovered LAN servers and, if any turn up, inject them into
+  // #discovered-container in place. A real /24 LAN scan can take several
+  // seconds (measured ~3.6s worst case) and the QR code / this page is
+  // shown before that scan finishes, so a user who loads this page early
+  // would otherwise see an empty discovered-servers section forever. This
+  // script NEVER touches the <form> or any of its input fields — it only
+  // ever appends/replaces children of the standalone #discovered-container
+  // div above the form, so text a user has already started typing into
+  // the manual-entry fields can never be disturbed by a poll landing.
+  var container = document.getElementById('discovered-container');
+  if (container.children.length > 0) {{
+    return;  // already server-rendered with results — nothing to poll for
+  }}
+  var code = {code_json};
+  var attempts = 0;
+  var maxAttempts = 10;      // ~15s of polling at 1.5s intervals — comfortably
+  var intervalMs = 1500;     // above the measured ~3.6s worst-case scan time
+
+  function renderDiscovered(servers) {{
+    var wrap = document.createElement('div');
+    wrap.className = 'discovered';
+    var p = document.createElement('p');
+    p.textContent = 'Servers found on your network:';
+    wrap.appendChild(p);
+    servers.forEach(function(s) {{
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'discovered-btn';
+      // textContent (not innerHTML) and addEventListener with a closure
+      // (not an inline onclick="..." HTML-attribute string) — the server
+      // value never passes through any HTML/JS string-building step here,
+      // so there is no escaping to get wrong on this path.
+      btn.textContent = s;
+      btn.addEventListener('click', function() {{
+        document.getElementsByName('server_url')[0].value = s;
+      }});
+      wrap.appendChild(btn);
+    }});
+    container.innerHTML = '';
+    container.appendChild(wrap);
+  }}
+
+  function poll() {{
+    attempts += 1;
+    fetch('/discovered?code=' + encodeURIComponent(code))
+      .then(function(r) {{ return r.json(); }})
+      .then(function(data) {{
+        var servers = (data && data.servers) || [];
+        if (servers.length > 0) {{
+          renderDiscovered(servers);
+          return;  // found results — stop polling
+        }}
+        if (attempts < maxAttempts) {{
+          setTimeout(poll, intervalMs);
+        }}
+      }})
+      .catch(function() {{
+        if (attempts < maxAttempts) {{
+          setTimeout(poll, intervalMs);
+        }}
+      }});
+  }}
+
+  setTimeout(poll, intervalMs);
+}})();
+</script>
 </body></html>"""
 
 _VIEWPORT_META = '<meta name="viewport" content="width=device-width, initial-scale=1">'
@@ -216,12 +286,26 @@ class _Handler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         query = urllib.parse.parse_qs(parsed.query)
         code = (query.get("code") or [""])[0]
+
+        if parsed.path == "/discovered":
+            # Small polling endpoint the form page's own script calls (see
+            # _FORM_PAGE) to pick up scan results that land after the page
+            # was first served. Gated on code validity like the form page
+            # itself — an invalid/expired code just gets an empty list
+            # rather than leaking scan results.
+            servers = list(server._discovered_servers) if server.is_code_valid(code) else []
+            self._respond_json(200, {"servers": servers})
+            return
+
         if server.is_code_valid(code):
             discovered_html = _discovered_servers_html(server._discovered_servers)
             self._respond(
                 200,
                 _FORM_PAGE.format(
-                    code=server.code, discovered_html=discovered_html, root_vars=_ROOT_VARS
+                    code=server.code,
+                    code_json=json.dumps(server.code),
+                    discovered_html=discovered_html,
+                    root_vars=_ROOT_VARS,
                 ),
             )
         else:
@@ -272,6 +356,18 @@ class _Handler(BaseHTTPRequestHandler):
         body = body_html.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _respond_json(self, status: int, payload: dict) -> None:
+        # json.dumps produces a well-formed JSON document regardless of
+        # what characters the discovered server URLs contain — no manual
+        # escaping needed on this path, unlike the HTML-attribute embedding
+        # _discovered_servers_html does for the initial page render.
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
