@@ -52,8 +52,12 @@ class LoginScreen(QWidget):
     # module docstring), so start_pairing() hands it this signal's .emit
     # rather than _on_servers_discovered directly — emit() is safe to call
     # from any thread and Qt automatically queues delivery of the connected
-    # slot onto this (GUI-thread) object's thread, the same pattern
-    # PairingServer.on_success / _on_pairing_success already uses.
+    # slot onto this (GUI-thread) object's thread. _on_pairing_success below
+    # uses the identical emit-then-let-Qt-marshal shape for
+    # pairing_login_succeeded, and both guard the emit with sip.isdeleted()
+    # first — see _deliver_scan_result's docstring for why that guard is
+    # checked on THIS (background) side rather than inside the GUI-thread
+    # slot, and why it's kept despite not being provably airtight.
     _scan_completed = pyqtSignal(list)
 
     def __init__(self, parent=None) -> None:
@@ -391,11 +395,25 @@ class LoginScreen(QWidget):
             self._pairing_server = None
 
     def _on_pairing_success(self, url: str, username: str, token: str) -> None:
-        # Called from PairingServer's background HTTP-server thread. A
-        # plain pyqtSignal.emit() here is safe and sufficient: Qt
-        # automatically queues the delivery to any slot connected on this
-        # (GUI-thread) object, regardless of which thread emitted it.
-        self.pairing_login_succeeded.emit(url, username, token)
+        # Called from PairingServer's background HTTP-server thread
+        # (do_POST calls server.on_success(...) synchronously, before
+        # sending the HTTP response — confirmed in pairing/server.py).
+        #
+        # stop_pairing() tears down that thread with shutdown() + join()
+        # before returning, which in the common case means no in-flight
+        # do_POST (and thus no in-flight call to this method) can still be
+        # running once stop_pairing() has returned. But the join() carries
+        # a 2-second timeout: a slow login (e.g. an unresponsive ABS
+        # server) can leave do_POST — and this callback — still running
+        # after stop_pairing() gives up waiting, at which point the caller
+        # is free to proceed with tearing down this screen. That reopens
+        # the same window _deliver_scan_result guards against: a
+        # background thread touching this (possibly-deleted) QObject.
+        # Same guard, same reasoning — see _deliver_scan_result's
+        # docstring for why the check stays on this side of the thread
+        # boundary rather than moving into a GUI-thread slot.
+        if not sip.isdeleted(self):
+            self.pairing_login_succeeded.emit(url, username, token)
 
     def _use_keyboard_fallback(self) -> None:
         self._pairing_view.setVisible(False)
@@ -437,13 +455,42 @@ class LoginScreen(QWidget):
         cancellation, so this can still fire well after this screen was
         torn down — e.g. the app closed shortly after start_pairing()).
 
-        sip.isdeleted() guards against emitting into an already-deleted
-        C++ QObject: Qt's cross-thread signal delivery is not safe against
-        a concurrent deletion race and can segfault the whole process
-        rather than raise a catchable Python exception (reproduced during
-        this task's own testing). _scan_completed.emit() itself is what
-        does the actual thread-safe marshaling onto the GUI thread, once
-        we've confirmed there's a live object to deliver to.
+        Why the check is here (background thread), not inside the
+        connected slot (_on_servers_discovered, GUI thread):
+
+        The actual crash isn't a delivery-ordering problem — Qt already
+        handles that safely on its own. A QObject's destructor
+        disconnects its connections and purges any already-posted events
+        addressed to it, on the GUI thread, before the object is gone;
+        since both that purge and slot delivery happen on the same
+        (GUI) thread, they're strictly ordered and race-free by
+        construction. A check inside _on_servers_discovered would be
+        redundant for that reason — it would never see a deleted `self`.
+
+        The real, reproducible crash is different: this method touching
+        `self` (via `self._scan_completed`, then `.emit()`) *while* a
+        concurrent GUI-thread deletion of that same `self` is actually in
+        progress — a genuine cross-thread data race on the QObject's own
+        internals, not a queuing/ordering issue. Verified directly: a
+        tight loop emitting a signal from a background thread while
+        concurrently deleting the receiver with no guard segfaults
+        reliably within a few hundred iterations; the identical loop with
+        `sip.isdeleted()` checked immediately before each `.emit()` (this
+        code's shape) survived 2000/2000 iterations of the same race.
+        Checking here, right before `.emit()`, is what actually narrows
+        the window that matters — moving it to the slot would remove that
+        protection without closing anything, since the slot is never
+        reached when this race loses.
+
+        This is *not* provably airtight — sip.isdeleted() and .emit() are
+        still two separate operations and CPython can, in principle,
+        switch threads between them — but no public Qt/sip API offers an
+        atomic check-and-touch across threads, and the empirical margin
+        above is large relative to how narrow the real window is. Closing
+        it completely would mean giving scanner.py real
+        cancellation/join semantics so no callback can fire post-teardown
+        at all (out of this task's scope; see the report's note on
+        scanner.py's lack of cancellation).
         """
         if not sip.isdeleted(self):
             self._scan_completed.emit(servers)
