@@ -140,6 +140,23 @@ def test_detail_grid_back_key_emits_back_requested(qtbot):
         qtbot.keyClick(screen, Qt.Key.Key_Backspace)
 
 
+def test_detail_grid_populate_empty_clears_stale_hero_subtitle_and_backdrop(qtbot):
+    """Populating with items sets a hero subtitle from focus reflection;
+    re-populating the SAME (reused) screen instance with an empty list must
+    not leave that stale subtitle (or the stale cover-wash backdrop) visible
+    under the new, correct hero title — see detail_grid.py's _populate
+    ``else`` branch.
+    """
+    screen = _TestScreen()
+    qtbot.addWidget(screen)
+    screen._populate("My Series", _items(), {}, "http://s", "t")
+    assert screen._hero_backdrop._hero_sub.text() == "Item A"  # sanity: stale state exists
+
+    screen._populate("Empty Series", [], {}, "http://s", "t")
+    assert screen._hero_backdrop._hero_sub.text() == ""
+    assert screen._grid.item_count == 0
+
+
 def test_detail_grid_populate_fetches_backdrop_exactly_once(qtbot):
     """_populate() calls FocusGrid.focus_item(), which itself emits
     focus_changed -> _on_grid_focus_changed -> _reflect_focus(). A redundant

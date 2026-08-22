@@ -40,7 +40,7 @@ class PlaylistDetailScreen(DetailGridScreen):
         return item.media_type
 
     def show_loading(self, playlist: Playlist, server_url: str = "", token: str = "") -> None:
-        self._populate(playlist.name, playlist.items, {}, server_url, token, loading=True)
+        self._populate(playlist.name, playlist.items, {}, server_url, token)
 
     def load(
         self,
