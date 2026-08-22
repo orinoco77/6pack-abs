@@ -399,19 +399,33 @@ class LoginScreen(QWidget):
         # (do_POST calls server.on_success(...) synchronously, before
         # sending the HTTP response — confirmed in pairing/server.py).
         #
-        # stop_pairing() tears down that thread with shutdown() + join()
-        # before returning, which in the common case means no in-flight
-        # do_POST (and thus no in-flight call to this method) can still be
-        # running once stop_pairing() has returned. But the join() carries
-        # a 2-second timeout: a slow login (e.g. an unresponsive ABS
-        # server) can leave do_POST — and this callback — still running
-        # after stop_pairing() gives up waiting, at which point the caller
-        # is free to proceed with tearing down this screen. That reopens
-        # the same window _deliver_scan_result guards against: a
-        # background thread touching this (possibly-deleted) QObject.
-        # Same guard, same reasoning — see _deliver_scan_result's
-        # docstring for why the check stays on this side of the thread
-        # boundary rather than moving into a GUI-thread slot.
+        # When stop_pairing() is what tears the server down, there's no
+        # race here at all: it calls HTTPServer.shutdown() before
+        # server_close()/join(), and shutdown() blocks the calling (GUI)
+        # thread *unconditionally* — no timeout — until serve_forever()'s
+        # loop has fully returned, which can't happen while a do_POST
+        # (and therefore this callback) is still in flight. So the GUI
+        # thread cannot proceed to tear this screen down until any
+        # in-flight call to this method has already completed; the
+        # thread.join(timeout=2.0) that follows is just cleanup of an
+        # already-finished thread, not a race-defining deadline.
+        #
+        # The real exposure is different: nothing guarantees stop_pairing()
+        # is called before this widget is deleted in the first place.
+        # It's only invoked from a handful of call sites in app.py
+        # (successful/failed libraries load, MainWindow.closeEvent); a
+        # test that constructs/destroys a LoginScreen without going
+        # through those paths, an abrupt process kill, or a future code
+        # path that forgets to call it would all leave the daemon
+        # PairingServer thread running independently of this screen's
+        # lifetime — reopening the same window _deliver_scan_result
+        # guards against: a background thread touching this
+        # (possibly-deleted) QObject. Same guard, same reasoning — see
+        # _deliver_scan_result's docstring for why the check stays on
+        # this side of the thread boundary rather than moving into a
+        # GUI-thread slot. Kept here as cheap defense-in-depth even
+        # though the common (stop_pairing()-mediated) path is already
+        # race-free by construction.
         if not sip.isdeleted(self):
             self.pairing_login_succeeded.emit(url, username, token)
 
