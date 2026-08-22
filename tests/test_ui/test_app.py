@@ -180,6 +180,23 @@ def test_close_event_stops_pairing_server(window):
     assert calls == [True]
 
 
+def test_on_error_libraries_shows_recoverable_error_on_login_screen(window, qtbot):
+    """A "libraries" fetch failure after a successful login (pairing or
+    manual) must not strand the user silently: the login screen is shown,
+    its error is genuinely visible, and any pairing server left running
+    from before is stopped."""
+    old_server = window._login_screen._pairing_server
+    assert old_server is not None  # start_pairing() already ran during __init__ (_show_login)
+
+    window._on_error("libraries", "connection reset")
+    qtbot.wait(20)
+
+    assert window._stack.currentWidget() is window._login_screen
+    assert window._login_screen._error_label.isVisible()
+    assert "connection reset" in window._login_screen._error_label.text()
+    assert window._login_screen._keyboard_form.isVisible()
+
+
 def test_on_result_book_chapters_single_chapter_sets_chapters_after_play(window):
     """Round-2 regression test (Task 6 fix): the single-chapter direct-play
     path in _on_result("book_chapters", ...) must call set_chapters() AFTER

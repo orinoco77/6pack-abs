@@ -24,7 +24,11 @@ import urllib.parse
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-from sixpack.api.client import ABSClient, APIError, AuthenticationError
+from sixpack.api.client import (  # noqa: F401 — re-exported for tests (server_module.AuthenticationError / .APIError)
+    ABSClient,
+    APIError,
+    AuthenticationError,
+)
 
 _CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O/1/I/l ambiguity
 _CODE_LENGTH = 6
@@ -120,7 +124,7 @@ class _Handler(BaseHTTPRequestHandler):
 
         try:
             token = asyncio.run(self._login(server_url, username, password))
-        except (AuthenticationError, APIError, Exception) as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             # exc's message can embed attacker-controlled content (e.g. an
             # APIError built from a malicious server_url's raw response
             # body), so it MUST be HTML-escaped before landing in the page.
@@ -142,8 +146,8 @@ class _Handler(BaseHTTPRequestHandler):
             result = await client.login(username, password)
             return result.user.token
 
-    def _respond(self, status: int, html: str) -> None:
-        body = html.encode("utf-8")
+    def _respond(self, status: int, body_html: str) -> None:
+        body = body_html.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
