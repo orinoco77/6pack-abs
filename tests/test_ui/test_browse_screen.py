@@ -421,10 +421,12 @@ def test_reset_rows_clears_hero(qtbot):
     assert screen._hero_sub.text() == ""
 
 
-def test_sidebar_down_to_unloaded_library_clears_stale_hero(qtbot):
+def test_sidebar_down_to_unloaded_library_shows_new_library_name(qtbot):
     """Regression test: switching the sidebar selection to a library whose
     content hasn't loaded yet must not leave the previously-focused
-    library's item still showing in the hero."""
+    library's item still showing in the hero — it should show the newly
+    highlighted library's name instead (sidebar zone: nothing is actually
+    selected yet)."""
     screen = BrowseScreen()
     qtbot.addWidget(screen)
     screen.load_libraries([_lib("l1", "A"), _lib("l2", "B")], "http://s", "tok")
@@ -440,27 +442,29 @@ def test_sidebar_down_to_unloaded_library_clears_stale_hero(qtbot):
     _press(qtbot, screen, Qt.Key.Key_Backspace)  # back to sidebar
     _press(qtbot, screen, Qt.Key.Key_Down)  # highlight lib2 (not yet loaded)
 
-    assert screen._hero_title.text() == ""
+    assert screen._hero_title.text() == "B"
     assert screen._hero_sub.text() == ""
 
 
-def test_show_content_previews_new_library_while_still_in_sidebar(qtbot):
-    """Once a newly-selected library's content finishes loading, the hero
-    should preview it (matching _current_focused_item()'s documented
-    sidebar-zone behavior) even if the user never left the sidebar to
-    trigger navigation-driven reflection."""
+def test_sidebar_zone_shows_library_name_not_item_preview(qtbot):
+    """Sidebar zone: the hero must show the highlighted library's name,
+    never a preview of an item from its rows — even once that library's
+    content has finished loading, and even if the user never leaves the
+    sidebar to trigger navigation-driven reflection."""
     screen = BrowseScreen()
     qtbot.addWidget(screen)
     screen.load_libraries([_lib("l1", "A"), _lib("l2", "B")], "http://s", "tok")
     screen.show()
+    assert screen._hero_title.text() == "A"  # initial load, still in sidebar
 
     _press(qtbot, screen, Qt.Key.Key_Down)  # highlight lib2, still in sidebar
     assert screen._zone == "sidebar"
+    assert screen._hero_title.text() == "B"
 
     screen.set_row_items(RowType.RECENTLY_ADDED, [_li("i2", "Lib2 Book")])
     screen.show_content()
 
-    assert screen._hero_title.text() == "Lib2 Book"
+    assert screen._hero_title.text() == "B"  # not "Lib2 Book"
 
 
 # ---------------------------------------------------------------------------
