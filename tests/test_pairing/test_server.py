@@ -242,3 +242,62 @@ def test_set_discovered_servers_updates_next_response(server):
     server.set_discovered_servers(["http://192.168.1.50:13378"])
     resp2 = httpx.get(f"http://127.0.0.1:{server.port}/?code={server.code}")
     assert "192.168.1.50" in resp2.text
+
+
+# ---- /discovered polling endpoint (phone-form live-update mechanism) ----
+
+
+def test_form_page_embeds_discovered_container_and_poll_script(server):
+    # The form page's <form>/input markup must be completely unaffected by
+    # the new polling mechanism — same assertions the pre-existing
+    # test_get_with_valid_code_serves_form makes, plus checks for the new
+    # container + script.
+    resp = httpx.get(f"http://127.0.0.1:{server.port}/?code={server.code}")
+    assert resp.status_code == 200
+    text = resp.text
+    assert 'id="discovered-container"' in text
+    assert "/discovered?code=" in text
+    assert 'name="server_url"' in text
+    assert 'name="username"' in text
+    assert 'name="password"' in text
+    assert 'name="code"' in text
+    assert "<form" in text.lower()
+
+
+def test_discovered_endpoint_returns_empty_list_by_default(server):
+    resp = httpx.get(f"http://127.0.0.1:{server.port}/discovered?code={server.code}")
+    assert resp.status_code == 200
+    assert resp.json() == {"servers": []}
+
+
+def test_discovered_endpoint_returns_current_discovered_list(server):
+    server.set_discovered_servers(["http://192.168.1.50:13378", "http://192.168.1.51:13378"])
+    resp = httpx.get(f"http://127.0.0.1:{server.port}/discovered?code={server.code}")
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "servers": ["http://192.168.1.50:13378", "http://192.168.1.51:13378"]
+    }
+
+
+def test_discovered_endpoint_reflects_live_state_across_polls(server):
+    # Mirrors test_set_discovered_servers_updates_next_response, but for
+    # the new polling endpoint: a client that polls once and gets an empty
+    # result, then polls again after set_discovered_servers() is called,
+    # must see the update — the endpoint reflects live state, not a
+    # snapshot frozen at first request.
+    resp1 = httpx.get(f"http://127.0.0.1:{server.port}/discovered?code={server.code}")
+    assert resp1.json() == {"servers": []}
+
+    server.set_discovered_servers(["http://192.168.1.50:13378"])
+
+    resp2 = httpx.get(f"http://127.0.0.1:{server.port}/discovered?code={server.code}")
+    assert resp2.json() == {"servers": ["http://192.168.1.50:13378"]}
+
+
+def test_discovered_endpoint_with_invalid_code_returns_empty_list(server):
+    # Gated the same way the form page itself is — an invalid/expired code
+    # must not leak discovered servers.
+    server.set_discovered_servers(["http://192.168.1.50:13378"])
+    resp = httpx.get(f"http://127.0.0.1:{server.port}/discovered?code=WRONG1")
+    assert resp.status_code == 200
+    assert resp.json() == {"servers": []}
