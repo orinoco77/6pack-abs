@@ -144,3 +144,81 @@ def test_backdrop_show_image_without_key_always_applies(qtbot):
     pix.fill(QColor(1, 2, 3))
     b.show_image(pix)  # no key passed
     assert b._incoming_pixmap is pix
+
+
+def test_backdrop_show_image_skips_redundant_fade_for_same_settled_key(qtbot):
+    """Regression test: a background data refresh that re-reflects the SAME
+    still-focused item must not re-trigger the cross-fade — the backdrop is
+    already showing this item's blurred image, so a second show_image()
+    for the same key would just fade the image onto itself: a visible
+    flicker with zero actual visual change. Root-caused live: the app's
+    browse-content cache-then-refresh flow calls _reflect_focus twice for
+    a still-focused item (once from the cache-primed first paint, once
+    when the real network result lands)."""
+    b = Backdrop()
+    qtbot.addWidget(b)
+    b.resize(640, 360)
+
+    b.set_expected_key("item-a")
+    pix_a = QPixmap(640, 360)
+    pix_a.fill(QColor(200, 0, 0))
+    b.show_image(pix_a, key="item-a")
+    assert b._incoming_pixmap is pix_a
+    b._on_fade_finished()  # simulate the cross-fade animation completing
+    assert b._current_pixmap is pix_a
+    assert b._incoming_pixmap is None
+
+    # Same key, called again (e.g. a background refresh re-reflecting the
+    # same still-focused item) — must be a no-op, not a new fade.
+    pix_a_again = QPixmap(640, 360)
+    pix_a_again.fill(QColor(200, 0, 0))
+    b.show_image(pix_a_again, key="item-a")
+
+    assert b._incoming_pixmap is None  # no new fade was started
+    assert b._current_pixmap is pix_a  # still showing the original settled pixmap
+
+
+def test_backdrop_show_color_skips_regression_to_gradient_for_same_settled_key(qtbot):
+    """Same root cause as the show_image case, for show_color(): once the
+    blurred image for a key is fully settled, a later show_color() call for
+    that SAME key (e.g. _reflect_focus's own synchronous show_color call,
+    which always runs right before the fetch_backdrop callback) must not
+    instantly regress the display back to a flat gradient."""
+    b = Backdrop()
+    qtbot.addWidget(b)
+    b.resize(640, 360)
+
+    b.set_expected_key("item-a")
+    pix_a = QPixmap(640, 360)
+    pix_a.fill(QColor(200, 0, 0))
+    b.show_image(pix_a, key="item-a")
+    b._on_fade_finished()
+    assert b._current_pixmap is pix_a
+
+    b.show_color(QColor(10, 10, 10), key="item-a")
+
+    assert b._current_pixmap is pix_a  # unchanged — no regression to gradient
+
+
+def test_backdrop_show_color_and_show_image_still_apply_for_a_new_key(qtbot):
+    """Sanity check: the dedup guard is per-key, not global — focusing a
+    genuinely different item must still show its gradient placeholder and
+    then fade in its real image normally."""
+    b = Backdrop()
+    qtbot.addWidget(b)
+    b.resize(640, 360)
+
+    b.set_expected_key("item-a")
+    pix_a = QPixmap(640, 360)
+    pix_a.fill(QColor(200, 0, 0))
+    b.show_image(pix_a, key="item-a")
+    b._on_fade_finished()
+
+    b.set_expected_key("item-b")
+    b.show_color(QColor(10, 10, 10), key="item-b")
+    assert b._current_pixmap is not pix_a  # gradient replaced it
+
+    pix_b = QPixmap(640, 360)
+    pix_b.fill(QColor(0, 200, 0))
+    b.show_image(pix_b, key="item-b")
+    assert b._incoming_pixmap is pix_b  # new fade started normally

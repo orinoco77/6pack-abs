@@ -195,7 +195,7 @@ class DetailGridScreen(QWidget):
         color = self._dom_colors.get(key)
         self._hero_backdrop.backdrop.set_expected_key(key)
         if color is not None:
-            self._hero_backdrop.backdrop.show_color(color)
+            self._hero_backdrop.backdrop.show_color(color, key=key)
         self._cover_cache.fetch_backdrop(
             cover, self._token,
             lambda pm, k=key: self._hero_backdrop.backdrop.show_image(pm, key=k),
