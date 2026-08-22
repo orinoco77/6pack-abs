@@ -18,6 +18,7 @@ from sixpack.api.models import LibraryItem, MediaProgress, Series, SeriesBook, P
 from sixpack.player.player import AudioPlayer
 from sixpack.ui import theme
 from sixpack.ui.cover_cache import CoverCache
+from sixpack.ui.widgets.backdrop import Backdrop
 
 
 def _fmt_time(seconds: float) -> str:
@@ -74,7 +75,8 @@ class PlayerScreen(QWidget):
         self._sync_timer.timeout.connect(self._sync_progress)
 
     def _build_ui(self) -> None:
-        self.setStyleSheet(f"background-color: {theme.BG};")
+        self._backdrop = Backdrop(self)
+        self._backdrop.lower()
 
         root = QVBoxLayout(self)
         root.setContentsMargins(60, 40, 60, 40)
@@ -90,7 +92,8 @@ class PlayerScreen(QWidget):
         top.addStretch()
         self._series_label = QLabel()
         self._series_label.setStyleSheet(
-            f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_META}pt;"
+            f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_META}pt; "
+            f"background: transparent;"
         )
         top.addWidget(self._series_label)
         root.addLayout(top)
@@ -102,7 +105,7 @@ class PlayerScreen(QWidget):
         middle.setSpacing(40)
 
         self._cover_label = QLabel()
-        self._cover_label.setFixedSize(280, 280)
+        self._cover_label.setFixedSize(400, 400)
         self._cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._cover_label.setStyleSheet(
             f"background-color: {theme.SURFACE_HIGH}; border-radius: 12px;"
@@ -116,13 +119,15 @@ class PlayerScreen(QWidget):
         self._title_label = QLabel()
         self._title_label.setWordWrap(True)
         self._title_label.setStyleSheet(
-            f"font-size: {theme.FONT_TITLE}pt; font-weight: bold; color: {theme.TEXT_PRIMARY};"
+            f"font-size: {theme.FONT_TITLE}pt; font-weight: bold; color: {theme.TEXT_PRIMARY}; "
+            f"background: transparent;"
         )
         info.addWidget(self._title_label)
 
         self._episode_label = QLabel()
         self._episode_label.setStyleSheet(
-            f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_BODY}pt;"
+            f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_BODY}pt; "
+            f"background: transparent;"
         )
         info.addWidget(self._episode_label)
 
@@ -140,15 +145,30 @@ class PlayerScreen(QWidget):
         self._progress_bar.setRange(0, 10000)
         self._progress_bar.setValue(0)
         self._progress_bar.setTextVisible(False)
+        self._progress_bar.setStyleSheet(f"""
+            QProgressBar {{
+                background: {theme.SURFACE_HIGH};
+                border: none;
+                border-radius: 5px;
+            }}
+            QProgressBar::chunk {{
+                background: {theme.ACCENT};
+                border-radius: 5px;
+            }}
+        """)
         progress_area.addWidget(self._progress_bar)
 
         times = QHBoxLayout()
         self._elapsed_label = QLabel("0:00")
-        self._elapsed_label.setStyleSheet(f"color: {theme.TEXT_SECONDARY};")
+        self._elapsed_label.setStyleSheet(
+            f"color: {theme.TEXT_SECONDARY}; background: transparent;"
+        )
         times.addWidget(self._elapsed_label)
         times.addStretch()
         self._remaining_label = QLabel("0:00")
-        self._remaining_label.setStyleSheet(f"color: {theme.TEXT_SECONDARY};")
+        self._remaining_label.setStyleSheet(
+            f"color: {theme.TEXT_SECONDARY}; background: transparent;"
+        )
         times.addWidget(self._remaining_label)
         progress_area.addLayout(times)
         root.addLayout(progress_area)
@@ -188,6 +208,15 @@ class PlayerScreen(QWidget):
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             controls.addWidget(btn)
 
+        # De-emphasize the secondary transport buttons — flat/muted — so
+        # they read as present-but-not-focusable next to the accent-filled
+        # play/pause button, which stays the one visually "hot" control.
+        for btn in (self._prev_btn, self._rew_btn, self._fwd_btn, self._next_btn):
+            btn.setStyleSheet(
+                f"background: transparent; color: {theme.TEXT_SECONDARY}; "
+                f"border: none; font-size: 18pt;"
+            )
+
         root.addLayout(controls)
 
         self._up_next_label = QLabel("")
@@ -200,6 +229,10 @@ class PlayerScreen(QWidget):
         root.addWidget(self._up_next_label)
 
         root.addStretch(1)
+
+    def resizeEvent(self, event) -> None:
+        self._backdrop.setGeometry(self.rect())
+        super().resizeEvent(event)
 
     def _connect_player(self) -> None:
         self._player.on_position_changed(self._on_position)
@@ -235,6 +268,7 @@ class PlayerScreen(QWidget):
         cover_url = book.cover_url(server_url, token)
         if self._cover_cache is not None:
             self._cover_cache.fetch(cover_url, token, self._set_cover_pixmap)
+            self._cover_cache.fetch_backdrop(cover_url, token, self._set_backdrop_pixmap)
 
         self._server_url = server_url
         self._token = token
@@ -264,6 +298,7 @@ class PlayerScreen(QWidget):
         cover_url = item.cover_url(server_url, token)
         if self._cover_cache is not None:
             self._cover_cache.fetch(cover_url, token, self._set_cover_pixmap)
+            self._cover_cache.fetch_backdrop(cover_url, token, self._set_backdrop_pixmap)
 
         self._server_url = server_url
         self._token = token
@@ -293,6 +328,7 @@ class PlayerScreen(QWidget):
         cover_url = item.cover_url(server_url, token)
         if self._cover_cache is not None:
             self._cover_cache.fetch(cover_url, token, self._set_cover_pixmap)
+            self._cover_cache.fetch_backdrop(cover_url, token, self._set_backdrop_pixmap)
 
         self._server_url = server_url
         self._token = token
@@ -311,11 +347,14 @@ class PlayerScreen(QWidget):
 
     def _set_cover_pixmap(self, pix: QPixmap) -> None:
         scaled = pix.scaled(
-            280, 280,
+            400, 400,
             Qt.AspectRatioMode.KeepAspectRatioByExpanding,
             Qt.TransformationMode.SmoothTransformation,
         )
         self._cover_label.setPixmap(scaled)
+
+    def _set_backdrop_pixmap(self, pix: QPixmap) -> None:
+        self._backdrop.show_image(pix)
 
     # ------------------------------------------------------------------
     # Player callbacks  (called from mpv thread — no Qt widget access here)
