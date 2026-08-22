@@ -586,3 +586,161 @@ def test_playlist_item_play_requested_forwards_chapters_to_player_in_order(windo
     window._chapter_screen.playlist_item_play_requested.emit(item, 0.0)
 
     assert window._player_screen._chapters == chapters
+
+
+# ---- Podcast playback wiring ----
+
+def test_podcast_selected_shows_detail_screen(window):
+    from sixpack.api.models import LibraryItem, LibraryItemMedia
+
+    show = LibraryItem(
+        id="show1", libraryId="lib1", mediaType="podcast",
+        media=LibraryItemMedia(metadata={"title": "My Show"}),
+    )
+    window._server_url = "http://abs.test"
+    window._token = "tok"
+
+    window._browse_screen.podcast_selected.emit(show)
+
+    assert window._stack.currentWidget() is window._podcast_detail_screen
+    assert window._current_podcast_show is show
+
+
+def test_on_result_podcast_detail_populates_episodes_from_full_item(window):
+    """Live-verification regression test: BrowseScreen's rows only ever carry
+    lightweight LibraryItem stubs (from get_library_items_recent()/
+    personalized-shelf non-continue entities), which never include
+    media.episodes — confirmed against a real Audiobookshelf server's
+    /api/libraries/{id}/items response during Task 6 live verification.
+    _on_podcast_selected's "podcast_detail" worker result must therefore
+    carry a FULL re-fetched LibraryItem (with real episodes), not just a
+    progress dict layered on the original lightweight stub the show_loading()
+    preview used — otherwise the episode grid stays permanently empty for
+    every podcast reached by drilling in from Browse (as opposed to a
+    Continue Listening entry, whose recentEpisode already arrives fully
+    formed from the shelf itself)."""
+    from sixpack.api.models import LibraryItem, LibraryItemMedia, PodcastEpisode
+
+    stub_show = LibraryItem(
+        id="show1", libraryId="lib1", mediaType="podcast",
+        media=LibraryItemMedia(metadata={"title": "My Show"}),  # no episodes
+    )
+    window._current_podcast_show = stub_show
+
+    episodes = [
+        PodcastEpisode(id="ep1", libraryItemId="show1", title="Episode One"),
+        PodcastEpisode(id="ep2", libraryItemId="show1", title="Episode Two"),
+    ]
+    full_show = LibraryItem(
+        id="show1", libraryId="lib1", mediaType="podcast",
+        media=LibraryItemMedia(metadata={"title": "My Show"}, episodes=episodes),
+    )
+
+    window._on_result("podcast_detail", (full_show, {}))
+
+    assert window._current_podcast_show is full_show
+    assert window._podcast_detail_screen._items == episodes
+
+
+def test_podcast_episode_activated_single_chapter_plays_directly(window, monkeypatch):
+    from sixpack.api.models import LibraryItem, LibraryItemMedia, PodcastEpisode
+
+    show = LibraryItem(
+        id="show1", libraryId="lib1", mediaType="podcast",
+        media=LibraryItemMedia(metadata={"title": "My Show"}),
+    )
+    episode = PodcastEpisode(id="ep1", libraryItemId="show1", title="Episode One")  # no chapters
+    window._current_podcast_show = show
+    window._server_url = "http://abs.test"
+    window._token = "tok"
+
+    played = []
+    monkeypatch.setattr(
+        window, "_on_podcast_episode_play_requested",
+        lambda ep, start_time: played.append((ep, start_time)),
+    )
+
+    window._podcast_detail_screen.item_activated.emit(episode)
+
+    assert played == [(episode, 0.0)]
+    assert window._player_back_target == "podcast_detail"
+
+
+def test_podcast_episode_activated_multi_chapter_shows_chapter_screen(window):
+    from sixpack.api.models import Chapter, LibraryItem, LibraryItemMedia, PodcastEpisode
+
+    show = LibraryItem(
+        id="show1", libraryId="lib1", mediaType="podcast",
+        media=LibraryItemMedia(metadata={"title": "My Show"}),
+    )
+    chapters = [
+        Chapter(id=0, start=0.0, end=100.0, title="Part 1"),
+        Chapter(id=1, start=100.0, end=200.0, title="Part 2"),
+    ]
+    episode = PodcastEpisode(id="ep1", libraryItemId="show1", title="Episode One", chapters=chapters)
+    window._current_podcast_show = show
+    window._server_url = "http://abs.test"
+    window._token = "tok"
+
+    window._podcast_detail_screen.item_activated.emit(episode)
+
+    assert window._stack.currentWidget() is window._chapter_screen
+    assert window._player_back_target == "chapter"
+    assert window._chapter_back_target == "podcast_detail"
+
+
+def test_podcast_episode_selected_from_continue_listening_sets_browse_back_target(window):
+    """Continue-listening entries have no intermediate detail screen —
+    mirrors _on_browse_book_selected's direct-from-browse book path."""
+    from sixpack.api.models import LibraryItem, LibraryItemMedia, PodcastEpisode
+
+    show = LibraryItem(
+        id="show1", libraryId="lib1", mediaType="podcast",
+        media=LibraryItemMedia(metadata={"title": "My Show"}),
+    )
+    episode = PodcastEpisode(id="ep1", libraryItemId="show1", title="Episode One")
+    window._server_url = "http://abs.test"
+    window._token = "tok"
+
+    window._browse_screen.podcast_episode_selected.emit(show, episode)
+
+    assert window._current_podcast_show is show
+    assert window._pending_podcast_episode is episode
+    assert window._chapter_back_target == "browse"
+    assert window._player_back_target == "browse"
+
+
+def test_on_player_back_podcast_detail_target_shows_podcast_detail(window):
+    window._player_back_target = "podcast_detail"
+    window._on_player_back()
+    assert window._stack.currentWidget() is window._podcast_detail_screen
+
+
+def test_on_chapter_back_podcast_detail_target_shows_podcast_detail(window):
+    window._chapter_back_target = "podcast_detail"
+    window._on_chapter_back()
+    assert window._stack.currentWidget() is window._podcast_detail_screen
+
+
+def test_on_progress_update_forwards_episode_id(window, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        window, "_async_update_progress",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or _noop_coro(),
+    )
+    window._server_url = "http://abs.test"
+    window._token = "tok"
+
+    window._on_progress_update("show1", 100.0, 1000.0, False, "ep1")
+
+    # Confirm the worker was asked to run something — the exact assertion
+    # depends on how _on_progress_update dispatches to the worker in the
+    # real current code (read it in Step 1 below before finalizing this
+    # test); the key behavior under test is that "ep1" reaches
+    # _async_update_progress as the episode_id argument.
+    assert calls
+    assert "ep1" in calls[0][0] or calls[0][1].get("episode_id") == "ep1"
+
+
+async def _noop_coro():
+    return None

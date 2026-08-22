@@ -10,7 +10,7 @@ from PyQt6.QtGui import QCursor, QKeyEvent, QKeySequence, QShortcut
 from PyQt6.QtWidgets import QMainWindow, QStackedWidget, QApplication
 
 from sixpack.api.client import ABSClient, AuthenticationError, APIError
-from sixpack.api.models import Library, LibraryItem, Series, SeriesBook, MediaProgress, Playlist, PlaylistItem
+from sixpack.api.models import Library, LibraryItem, Series, SeriesBook, MediaProgress, PodcastEpisode, Playlist, PlaylistItem
 from sixpack.config import AppConfig, ServerConfig
 from sixpack.player.player import AudioPlayer, PlayerError
 from sixpack.ui import theme
@@ -19,6 +19,7 @@ from sixpack.ui.cover_cache import CoverCache
 from sixpack.ui.screens.browse import BrowseScreen, RowType
 from sixpack.ui.screens.login import LoginScreen
 from sixpack.ui.screens.playlist_detail import PlaylistDetailScreen
+from sixpack.ui.screens.podcast_detail import PodcastDetailScreen
 from sixpack.ui.screens.chapter_select import ChapterSelectScreen
 from sixpack.ui.screens.series_detail import SeriesDetailScreen
 from sixpack.ui.screens.player import PlayerScreen
@@ -76,10 +77,12 @@ class MainWindow(QMainWindow):
         self._pending_book: SeriesBook | None = None
         self._pending_playlist_item: PlaylistItem | None = None
         self._pending_browse_item: LibraryItem | None = None
+        self._current_podcast_show: LibraryItem | None = None
+        self._pending_podcast_episode: PodcastEpisode | None = None
         self._libraries: list[Library] = []
-        # Back-navigation context: "detail" | "browse" | "playlist_detail"
+        # Back-navigation context: "detail" | "browse" | "playlist_detail" | "podcast_detail"
         self._chapter_back_target = "detail"
-        # Back-navigation context: "detail" | "chapter" | "browse" | "playlist_detail"
+        # Back-navigation context: "detail" | "chapter" | "browse" | "playlist_detail" | "podcast_detail"
         self._player_back_target = "detail"
         # Generation counter guarding the pending "up next" QTimer.singleShot
         # scheduled by _on_track_ended — see _on_track_ended/
@@ -129,6 +132,7 @@ class MainWindow(QMainWindow):
         self._browse_screen = BrowseScreen(cover_cache=self._cover_cache)
         self._detail_screen = SeriesDetailScreen(cover_cache=self._cover_cache)
         self._playlist_detail_screen = PlaylistDetailScreen(cover_cache=self._cover_cache)
+        self._podcast_detail_screen = PodcastDetailScreen(cover_cache=self._cover_cache)
         self._chapter_screen = ChapterSelectScreen(cover_cache=self._cover_cache)
 
         if self._player:
@@ -141,6 +145,7 @@ class MainWindow(QMainWindow):
         self._stack.addWidget(self._browse_screen)
         self._stack.addWidget(self._detail_screen)
         self._stack.addWidget(self._playlist_detail_screen)
+        self._stack.addWidget(self._podcast_detail_screen)
         self._stack.addWidget(self._chapter_screen)
 
         if self._player_screen:
@@ -158,13 +163,18 @@ class MainWindow(QMainWindow):
         self._browse_screen.book_selected.connect(self._on_browse_book_selected)
         self._browse_screen.library_changed.connect(self._on_browse_library_changed)
         self._browse_screen.see_all_requested.connect(self._on_see_all_requested)
+        self._browse_screen.podcast_selected.connect(self._on_podcast_selected)
+        self._browse_screen.podcast_episode_selected.connect(self._on_podcast_episode_selected)
         self._detail_screen.episode_activated.connect(self._on_episode_activated)
         self._detail_screen.back_requested.connect(self._show_browse)
         self._playlist_detail_screen.item_activated.connect(self._on_playlist_item_activated)
         self._playlist_detail_screen.back_requested.connect(self._show_browse)
+        self._podcast_detail_screen.item_activated.connect(self._on_podcast_episode_activated)
+        self._podcast_detail_screen.back_requested.connect(self._show_browse)
         self._chapter_screen.play_requested.connect(self._on_play_requested)
         self._chapter_screen.playlist_item_play_requested.connect(self._on_playlist_item_play_requested)
         self._chapter_screen.library_item_play_requested.connect(self._on_browse_item_play_requested)
+        self._chapter_screen.podcast_episode_play_requested.connect(self._on_podcast_episode_play_requested_from_chapter)
         self._chapter_screen.back_requested.connect(self._on_chapter_back)
         # Thread the chapter list the user just picked from through to
         # PlayerScreen's in-player chapter overlay. self._chapter_screen
@@ -178,6 +188,7 @@ class MainWindow(QMainWindow):
         self._chapter_screen.play_requested.connect(self._forward_chapters_to_player)
         self._chapter_screen.playlist_item_play_requested.connect(self._forward_chapters_to_player)
         self._chapter_screen.library_item_play_requested.connect(self._forward_chapters_to_player)
+        self._chapter_screen.podcast_episode_play_requested.connect(self._forward_chapters_to_player)
 
         self._setup_quit_shortcut()
         self._show_splash()
@@ -210,6 +221,9 @@ class MainWindow(QMainWindow):
     def _show_playlist_detail(self) -> None:
         self._stack.setCurrentWidget(self._playlist_detail_screen)
 
+    def _show_podcast_detail(self) -> None:
+        self._stack.setCurrentWidget(self._podcast_detail_screen)
+
     def _on_player_back(self) -> None:
         # Invalidate any in-flight "up next" timer — a manual Back
         # supersedes whatever the automatic end-of-track flow had pending.
@@ -220,6 +234,8 @@ class MainWindow(QMainWindow):
             self._stack.setCurrentWidget(self._chapter_screen)
         elif target == "playlist_detail":
             self._show_playlist_detail()
+        elif target == "podcast_detail":
+            self._show_podcast_detail()
         elif target == "browse":
             self._show_browse()
         else:
@@ -231,6 +247,8 @@ class MainWindow(QMainWindow):
             self._show_browse()
         elif target == "playlist_detail":
             self._show_playlist_detail()
+        elif target == "podcast_detail":
+            self._show_podcast_detail()
         else:
             self._show_detail()
 
@@ -519,6 +537,98 @@ class MainWindow(QMainWindow):
         self._player_screen.setFocus()
 
     # ------------------------------------------------------------------
+    # Podcasts
+    # ------------------------------------------------------------------
+
+    def _on_podcast_selected(self, show: LibraryItem) -> None:
+        # `show` here is the lightweight item BrowseScreen's rows carry (from
+        # get_library_items_recent()/personalized shelves' non-continue
+        # entities), which does NOT include media.episodes — same asymmetry
+        # as SeriesBook (no chapters) and PlaylistItem (no chapters), both of
+        # which app.py already re-fetches the full item for before showing
+        # chapter-level detail (see _on_episode_activated/
+        # _async_get_book_chapters, _on_browse_book_selected/
+        # _async_get_browse_book). show_loading() is called with the
+        # lightweight item purely for an instant title/cover-only loading
+        # state; the real episode grid is populated once the full item
+        # fetch below resolves.
+        self._current_podcast_show = show
+        self._podcast_detail_screen.show_loading(show, self._server_url, self._token)
+        self._show_podcast_detail()
+        self._worker.run("podcast_detail", self._async_fetch_podcast_detail(show))
+
+    async def _async_fetch_podcast_detail(self, show: LibraryItem):
+        async with ABSClient(self._server_url, token=self._token) as client:
+            full_show = await client.get_library_item(show.id)
+
+        sem = asyncio.Semaphore(10)
+
+        async def _fetch_one(client: ABSClient, episode_id: str) -> tuple[str, MediaProgress | None]:
+            async with sem:
+                try:
+                    return episode_id, await client.get_progress(full_show.id, episode_id)
+                except Exception as exc:
+                    logger.warning("Progress fetch failed for %s/%s: %s", full_show.id, episode_id, exc)
+                    return episode_id, None
+
+        async with ABSClient(self._server_url, token=self._token) as client:
+            pairs = await asyncio.gather(
+                *(_fetch_one(client, ep.id) for ep in full_show.media.episodes)
+            )
+        return full_show, dict(pairs)
+
+    def _on_podcast_episode_activated(self, episode: PodcastEpisode) -> None:
+        self._pending_podcast_episode = episode
+        self._chapter_back_target = "podcast_detail"
+        self._player_back_target = "podcast_detail"
+        prog = self._podcast_detail_screen._progress.get(episode.id)
+        start_time = prog.current_time if prog and not prog.is_finished else 0.0
+        if len(episode.chapters) > 1:
+            self._player_back_target = "chapter"
+            self._chapter_screen.load_from_podcast_episode(
+                self._current_podcast_show, episode, episode.chapters, prog,
+                self._server_url, self._token,
+            )
+            self._stack.setCurrentWidget(self._chapter_screen)
+        else:
+            self._on_podcast_episode_play_requested(episode, start_time)
+
+    def _on_podcast_episode_play_requested_from_chapter(
+        self, show: LibraryItem, episode: PodcastEpisode, start_time: float
+    ) -> None:
+        self._current_podcast_show = show
+        self._on_podcast_episode_play_requested(episode, start_time)
+
+    def _on_podcast_episode_play_requested(self, episode: PodcastEpisode, start_time: float) -> None:
+        if not self._player or not self._player_screen:
+            return
+        show = self._current_podcast_show
+        if show is None:
+            return
+        self._pending_podcast_episode = episode
+        self._player_screen.play_podcast_episode(episode, show, start_time, self._server_url, self._token)
+        self._worker.run(
+            "start_session",
+            self._async_start_session(show.id, start_time, episode_id=episode.id),
+        )
+        self._stack.setCurrentWidget(self._player_screen)
+        self._player_screen.setFocus()
+
+    def _on_podcast_episode_selected(self, show: LibraryItem, episode: PodcastEpisode) -> None:
+        self._current_podcast_show = show
+        self._pending_podcast_episode = episode
+        self._chapter_back_target = "browse"
+        self._player_back_target = "browse"
+        self._worker.run(
+            "podcast_continue_progress",
+            self._async_get_podcast_progress(show.id, episode.id),
+        )
+
+    async def _async_get_podcast_progress(self, item_id: str, episode_id: str):
+        async with ABSClient(self._server_url, token=self._token) as client:
+            return await client.get_progress(item_id, episode_id)
+
+    # ------------------------------------------------------------------
     # Chapter selection
     # ------------------------------------------------------------------
 
@@ -552,9 +662,9 @@ class MainWindow(QMainWindow):
         self._stack.setCurrentWidget(self._player_screen)
         self._player_screen.setFocus()
 
-    async def _async_start_session(self, item_id: str, start_time: float):
+    async def _async_start_session(self, item_id: str, start_time: float, episode_id: str | None = None):
         async with ABSClient(self._server_url, token=self._token) as client:
-            return await client.start_playback_session(item_id, start_time)
+            return await client.start_playback_session(item_id, start_time, episode_id=episode_id)
 
     def _on_next_item(self) -> None:
         # Invalidate any in-flight "up next" timer and hide its label — a
@@ -643,16 +753,21 @@ class MainWindow(QMainWindow):
         else:
             self._show_browse()
 
-    @pyqtSlot(str, float, float, bool)
-    def _on_progress_update(self, item_id: str, current_time: float, duration: float, is_finished: bool) -> None:
+    @pyqtSlot(str, float, float, bool, str)
+    def _on_progress_update(
+        self, item_id: str, current_time: float, duration: float, is_finished: bool, episode_id: str,
+    ) -> None:
         self._worker.run(
             "progress",
-            self._async_update_progress(item_id, current_time, duration, is_finished),
+            self._async_update_progress(item_id, current_time, duration, is_finished, episode_id or None),
         )
 
-    async def _async_update_progress(self, item_id: str, current_time: float, duration: float, is_finished: bool):
+    async def _async_update_progress(
+        self, item_id: str, current_time: float, duration: float, is_finished: bool,
+        episode_id: str | None = None,
+    ):
         async with ABSClient(self._server_url, token=self._token) as client:
-            await client.update_progress(item_id, current_time, duration, is_finished)
+            await client.update_progress(item_id, current_time, duration, is_finished, episode_id=episode_id)
 
     # ------------------------------------------------------------------
     # Async result handling
@@ -764,6 +879,28 @@ class MainWindow(QMainWindow):
                 self._on_playlist_item_play_requested(item, start_time)
                 if self._player_screen:
                     self._player_screen.set_chapters(chapters)
+
+        elif tag == "podcast_detail":
+            full_show, progress = result
+            if self._current_podcast_show and full_show.id == self._current_podcast_show.id:
+                self._current_podcast_show = full_show
+                self._podcast_detail_screen.load(full_show, progress, self._server_url, self._token)
+
+        elif tag == "podcast_continue_progress":
+            episode = self._pending_podcast_episode
+            if episode is None:
+                return
+            progress = result
+            if len(episode.chapters) > 1:
+                self._player_back_target = "chapter"
+                self._chapter_screen.load_from_podcast_episode(
+                    self._current_podcast_show, episode, episode.chapters, progress,
+                    self._server_url, self._token,
+                )
+                self._stack.setCurrentWidget(self._chapter_screen)
+            else:
+                start_time = progress.current_time if progress and not progress.is_finished else 0.0
+                self._on_podcast_episode_play_requested(episode, start_time)
 
         elif tag == "start_session":
             # result is a PlaybackSession — build URL and start playback
