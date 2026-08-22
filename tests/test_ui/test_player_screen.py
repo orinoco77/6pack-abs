@@ -277,3 +277,29 @@ def test_secondary_transport_buttons_are_flat_not_accent(screen):
     for btn in (screen._prev_btn, screen._rew_btn, screen._fwd_btn, screen._next_btn):
         assert theme.ACCENT not in btn.styleSheet()
         assert "transparent" in btn.styleSheet()
+
+
+# ----------------------------------------------------------------------
+# Playback speed control (Task 5)
+# ----------------------------------------------------------------------
+
+
+def test_speed_starts_at_1x(screen):
+    assert screen._speed_label.text() == "1.0x"
+
+
+def test_up_key_cycles_speed_forward(qtbot, screen):
+    screen.show()
+    qtbot.waitExposed(screen)
+    qtbot.keyClick(screen, Qt.Key.Key_Up)
+    assert screen._speed_label.text() == "1.25x"
+    assert screen._player.speed_calls == [1.25]
+
+
+def test_speed_cycle_wraps_around(qtbot, screen):
+    screen.show()
+    qtbot.waitExposed(screen)
+    for _ in range(5):  # 1.0 -> 1.25 -> 1.5 -> 1.75 -> 2.0 -> 1.0
+        qtbot.keyClick(screen, Qt.Key.Key_Up)
+    assert screen._speed_label.text() == "1.0x"
+    assert screen._player.speed_calls[-1] == 1.0
