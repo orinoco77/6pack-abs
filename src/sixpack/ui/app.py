@@ -10,7 +10,16 @@ from PyQt6.QtGui import QCursor, QKeyEvent, QKeySequence, QShortcut
 from PyQt6.QtWidgets import QMainWindow, QStackedWidget, QApplication
 
 from sixpack.api.client import ABSClient, AuthenticationError, APIError
-from sixpack.api.models import Library, LibraryItem, Series, SeriesBook, MediaProgress, PodcastEpisode, Playlist, PlaylistItem
+from sixpack.api.models import (
+    Library,
+    LibraryItem,
+    MediaProgress,
+    Playlist,
+    PlaylistItem,
+    PodcastEpisode,
+    Series,
+    SeriesBook,
+)
 from sixpack.config import AppConfig, ServerConfig
 from sixpack.player.player import AudioPlayer, PlayerError
 from sixpack.ui import theme
@@ -82,7 +91,8 @@ class MainWindow(QMainWindow):
         self._libraries: list[Library] = []
         # Back-navigation context: "detail" | "browse" | "playlist_detail" | "podcast_detail"
         self._chapter_back_target = "detail"
-        # Back-navigation context: "detail" | "chapter" | "browse" | "playlist_detail" | "podcast_detail"
+        # Back-navigation context:
+        # "detail" | "chapter" | "browse" | "playlist_detail" | "podcast_detail"
         self._player_back_target = "detail"
         # Generation counter guarding the pending "up next" QTimer.singleShot
         # scheduled by _on_track_ended — see _on_track_ended/
@@ -558,22 +568,25 @@ class MainWindow(QMainWindow):
         self._worker.run("podcast_detail", self._async_fetch_podcast_detail(show))
 
     async def _async_fetch_podcast_detail(self, show: LibraryItem):
-        async with ABSClient(self._server_url, token=self._token) as client:
-            full_show = await client.get_library_item(show.id)
-
         sem = asyncio.Semaphore(10)
 
-        async def _fetch_one(client: ABSClient, episode_id: str) -> tuple[str, MediaProgress | None]:
+        async def _fetch_one(
+            client: ABSClient, item_id: str, episode_id: str
+        ) -> tuple[str, MediaProgress | None]:
             async with sem:
                 try:
-                    return episode_id, await client.get_progress(full_show.id, episode_id)
+                    return episode_id, await client.get_progress(item_id, episode_id)
                 except Exception as exc:
-                    logger.warning("Progress fetch failed for %s/%s: %s", full_show.id, episode_id, exc)
+                    logger.warning("Progress fetch failed for %s/%s: %s", item_id, episode_id, exc)
                     return episode_id, None
 
+        # One client shared by both the item-detail fetch and the
+        # per-episode progress fan-out — matches _async_get_browse_book's
+        # equivalent pattern for books.
         async with ABSClient(self._server_url, token=self._token) as client:
+            full_show = await client.get_library_item(show.id)
             pairs = await asyncio.gather(
-                *(_fetch_one(client, ep.id) for ep in full_show.media.episodes)
+                *(_fetch_one(client, full_show.id, ep.id) for ep in full_show.media.episodes)
             )
         return full_show, dict(pairs)
 
@@ -592,6 +605,8 @@ class MainWindow(QMainWindow):
             self._stack.setCurrentWidget(self._chapter_screen)
         else:
             self._on_podcast_episode_play_requested(episode, start_time)
+            if self._player_screen:
+                self._player_screen.set_chapters(episode.chapters)
 
     def _on_podcast_episode_play_requested_from_chapter(
         self, show: LibraryItem, episode: PodcastEpisode, start_time: float
@@ -599,17 +614,26 @@ class MainWindow(QMainWindow):
         self._current_podcast_show = show
         self._on_podcast_episode_play_requested(episode, start_time)
 
-    def _on_podcast_episode_play_requested(self, episode: PodcastEpisode, start_time: float) -> None:
+    def _on_podcast_episode_play_requested(
+        self, episode: PodcastEpisode, start_time: float
+    ) -> None:
         if not self._player or not self._player_screen:
             return
         show = self._current_podcast_show
         if show is None:
             return
         self._pending_podcast_episode = episode
-        self._player_screen.play_podcast_episode(episode, show, start_time, self._server_url, self._token)
+        self._player_screen.play_podcast_episode(
+            episode, show, start_time, self._server_url, self._token
+        )
+        # Prefer the episode's own library_item_id over self._current_podcast_show.id —
+        # the episode is self-contained data, not mutable instance state
+        # that can have drifted since this play request was queued.
         self._worker.run(
             "start_session",
-            self._async_start_session(show.id, start_time, episode_id=episode.id),
+            self._async_start_session(
+                episode.library_item_id or show.id, start_time, episode_id=episode.id
+            ),
         )
         self._stack.setCurrentWidget(self._player_screen)
         self._player_screen.setFocus()
@@ -621,12 +645,22 @@ class MainWindow(QMainWindow):
         self._player_back_target = "browse"
         self._worker.run(
             "podcast_continue_progress",
-            self._async_get_podcast_progress(show.id, episode.id),
+            self._async_get_podcast_progress(show, episode),
         )
 
-    async def _async_get_podcast_progress(self, item_id: str, episode_id: str):
+    async def _async_get_podcast_progress(
+        self, show: LibraryItem, episode: PodcastEpisode
+    ) -> tuple[LibraryItem, PodcastEpisode, MediaProgress | None]:
+        # Returns (show, episode, progress) as one self-contained tuple —
+        # not just the progress — so the "podcast_continue_progress" result
+        # handler in _on_result never needs to re-read self._current_podcast_show/
+        # self._pending_podcast_episode (mutable instance state that can
+        # have changed while this fetch was in flight, e.g. the user
+        # navigated to a different podcast show) to know which show/episode
+        # this result belongs to.
         async with ABSClient(self._server_url, token=self._token) as client:
-            return await client.get_progress(item_id, episode_id)
+            progress = await client.get_progress(show.id, episode.id)
+        return show, episode, progress
 
     # ------------------------------------------------------------------
     # Chapter selection
@@ -662,7 +696,9 @@ class MainWindow(QMainWindow):
         self._stack.setCurrentWidget(self._player_screen)
         self._player_screen.setFocus()
 
-    async def _async_start_session(self, item_id: str, start_time: float, episode_id: str | None = None):
+    async def _async_start_session(
+        self, item_id: str, start_time: float, episode_id: str | None = None
+    ):
         async with ABSClient(self._server_url, token=self._token) as client:
             return await client.start_playback_session(item_id, start_time, episode_id=episode_id)
 
@@ -702,6 +738,7 @@ class MainWindow(QMainWindow):
         books = self._player_screen._series_books
         playlist_item = self._player_screen._current_playlist_item
         playlist_items = self._player_screen._playlist_items
+        episode_id = self._player_screen._episode_id
 
         if book is not None and books:
             idx = books.index(book) if book in books else -1
@@ -719,6 +756,13 @@ class MainWindow(QMainWindow):
             else:
                 target = ("playlist", None)
                 message = "End of playlist"
+        elif episode_id:
+            # Single-episode playback (spec: no next/prev-episode
+            # navigation or auto-advance) — always return to the episode
+            # list, with the just-finished episode re-focused. No "up
+            # next" message, since there's never a next episode to name.
+            target = ("podcast", episode_id)
+            message = ""
         else:
             target = ("browse", None)
             message = ""
@@ -750,16 +794,27 @@ class MainWindow(QMainWindow):
             self._show_playlist_detail()
             if key is not None:
                 self._playlist_detail_screen.focus_item_by_key(key)
+        elif kind == "podcast":
+            self._show_podcast_detail()
+            if key is not None:
+                self._podcast_detail_screen.focus_item_by_key(key)
         else:
             self._show_browse()
 
     @pyqtSlot(str, float, float, bool, str)
     def _on_progress_update(
-        self, item_id: str, current_time: float, duration: float, is_finished: bool, episode_id: str,
+        self,
+        item_id: str,
+        current_time: float,
+        duration: float,
+        is_finished: bool,
+        episode_id: str,
     ) -> None:
         self._worker.run(
             "progress",
-            self._async_update_progress(item_id, current_time, duration, is_finished, episode_id or None),
+            self._async_update_progress(
+                item_id, current_time, duration, is_finished, episode_id or None
+            ),
         )
 
     async def _async_update_progress(
@@ -767,7 +822,9 @@ class MainWindow(QMainWindow):
         episode_id: str | None = None,
     ):
         async with ABSClient(self._server_url, token=self._token) as client:
-            await client.update_progress(item_id, current_time, duration, is_finished, episode_id=episode_id)
+            await client.update_progress(
+                item_id, current_time, duration, is_finished, episode_id=episode_id
+            )
 
     # ------------------------------------------------------------------
     # Async result handling
@@ -887,20 +944,27 @@ class MainWindow(QMainWindow):
                 self._podcast_detail_screen.load(full_show, progress, self._server_url, self._token)
 
         elif tag == "podcast_continue_progress":
-            episode = self._pending_podcast_episode
-            if episode is None:
+            # result is a self-contained (show, episode, progress) tuple —
+            # see _async_get_podcast_progress's docstring for why this
+            # branch never reads self._current_podcast_show/
+            # self._pending_podcast_episode to pair them.
+            show, episode, progress = result
+            if show is None:
                 return
-            progress = result
+            self._current_podcast_show = show
+            self._pending_podcast_episode = episode
             if len(episode.chapters) > 1:
                 self._player_back_target = "chapter"
                 self._chapter_screen.load_from_podcast_episode(
-                    self._current_podcast_show, episode, episode.chapters, progress,
+                    show, episode, episode.chapters, progress,
                     self._server_url, self._token,
                 )
                 self._stack.setCurrentWidget(self._chapter_screen)
             else:
                 start_time = progress.current_time if progress and not progress.is_finished else 0.0
                 self._on_podcast_episode_play_requested(episode, start_time)
+                if self._player_screen:
+                    self._player_screen.set_chapters(episode.chapters)
 
         elif tag == "start_session":
             # result is a PlaybackSession — build URL and start playback
@@ -951,6 +1015,17 @@ class MainWindow(QMainWindow):
         elif tag == "playlist_detail":
             if self._current_playlist:
                 self._playlist_detail_screen.update_progress({})
+        elif tag == "podcast_detail":
+            # Unlike series_detail/playlist_detail (whose detail screens
+            # already show real, cover-fetched items instantly from the
+            # browse row, so a progress-only fetch failure just means
+            # missing progress bars), "podcast_detail" is also the ONLY
+            # fetch that ever populates real episodes into the grid — the
+            # browse-row item show_loading() used has none (see Task 6's
+            # note in _on_podcast_selected). A failure here means the grid
+            # will stay empty forever, so don't leave the user stranded on
+            # it — bounce back to Browse instead.
+            self._show_browse()
 
     # ------------------------------------------------------------------
     # Quit

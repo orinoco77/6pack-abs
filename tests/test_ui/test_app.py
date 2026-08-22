@@ -677,7 +677,9 @@ def test_podcast_episode_activated_multi_chapter_shows_chapter_screen(window):
         Chapter(id=0, start=0.0, end=100.0, title="Part 1"),
         Chapter(id=1, start=100.0, end=200.0, title="Part 2"),
     ]
-    episode = PodcastEpisode(id="ep1", libraryItemId="show1", title="Episode One", chapters=chapters)
+    episode = PodcastEpisode(
+        id="ep1", libraryItemId="show1", title="Episode One", chapters=chapters
+    )
     window._current_podcast_show = show
     window._server_url = "http://abs.test"
     window._token = "tok"
@@ -721,7 +723,13 @@ def test_on_result_podcast_continue_progress_multi_chapter_sets_chapter_back_tar
     inside this one branch, which is exactly the kind of state-machine
     subtlety this task exists to guard against. Previously uncovered: no
     test drove _on_result("podcast_continue_progress", ...) at all."""
-    from sixpack.api.models import Chapter, LibraryItem, LibraryItemMedia, MediaProgress, PodcastEpisode
+    from sixpack.api.models import (
+        Chapter,
+        LibraryItem,
+        LibraryItemMedia,
+        MediaProgress,
+        PodcastEpisode,
+    )
 
     show = LibraryItem(
         id="show1", libraryId="lib1", mediaType="podcast",
@@ -731,7 +739,9 @@ def test_on_result_podcast_continue_progress_multi_chapter_sets_chapter_back_tar
         Chapter(id=0, start=0.0, end=100.0, title="Part 1"),
         Chapter(id=1, start=100.0, end=200.0, title="Part 2"),
     ]
-    episode = PodcastEpisode(id="ep1", libraryItemId="show1", title="Episode One", chapters=chapters)
+    episode = PodcastEpisode(
+        id="ep1", libraryItemId="show1", title="Episode One", chapters=chapters
+    )
     window._current_podcast_show = show
     window._pending_podcast_episode = episode
     window._server_url = "http://abs.test"
@@ -742,7 +752,7 @@ def test_on_result_podcast_continue_progress_multi_chapter_sets_chapter_back_tar
     window._player_back_target = "browse"
 
     progress = MediaProgress(libraryItemId="show1", episodeId="ep1", currentTime=42.0)
-    window._on_result("podcast_continue_progress", progress)
+    window._on_result("podcast_continue_progress", (show, episode, progress))
 
     assert window._stack.currentWidget() is window._chapter_screen
     assert window._chapter_back_target == "browse"
@@ -772,13 +782,260 @@ def test_on_progress_update_forwards_episode_id(window, monkeypatch):
 
     window._on_progress_update("show1", 100.0, 1000.0, False, "ep1")
 
-    # Confirm the worker was asked to run something — the exact assertion
-    # depends on how _on_progress_update dispatches to the worker in the
-    # real current code (read it in Step 1 below before finalizing this
-    # test); the key behavior under test is that "ep1" reaches
-    # _async_update_progress as the episode_id argument.
+    # Confirm the worker was asked to run something — the key behavior
+    # under test is that "ep1" reaches _async_update_progress as the
+    # episode_id argument.
     assert calls
     assert "ep1" in calls[0][0] or calls[0][1].get("episode_id") == "ep1"
+
+
+def test_on_track_ended_podcast_episode_returns_to_episode_list_with_focus(window, qtbot):
+    """End-of-episode (not manual Back) must return to the podcast episode
+    list, per the spec's "return to the episode list on finish/back" —
+    not fall through to the generic default branch, which lands on Browse
+    and loses the show context (final whole-plan review, Fix 1)."""
+    from sixpack.api.models import LibraryItem, LibraryItemMedia, PodcastEpisode
+
+    ep1 = PodcastEpisode(id="ep1", libraryItemId="show1", title="Episode One")
+    ep2 = PodcastEpisode(id="ep2", libraryItemId="show1", title="Episode Two")
+    show = LibraryItem(
+        id="show1", libraryId="lib1", mediaType="podcast",
+        media=LibraryItemMedia(metadata={"title": "My Show"}, episodes=[ep1, ep2]),
+    )
+    window._podcast_detail_screen.load(show, {}, "http://abs.test", "tok")
+    window._current_podcast_show = show
+
+    # play_podcast_episode() is what sets _episode_id — _current_book/
+    # _current_playlist_item stay None the whole time (_reset_per_item_state
+    # never touches them for a podcast play), which is the exact discriminator
+    # gap Fix 1 closes.
+    window._player_screen._current_book = None
+    window._player_screen._current_playlist_item = None
+    window._player_screen._series_books = []
+    window._player_screen._playlist_items = []
+    window._player_screen._episode_id = "ep1"
+
+    window._UP_NEXT_DELAY_MS = 50
+    window._on_track_ended()
+    qtbot.wait(window._UP_NEXT_DELAY_MS + 200)
+
+    assert window._stack.currentWidget() is window._podcast_detail_screen
+    assert window._podcast_detail_screen._grid._focused_index == 0  # ep1 refocused
+
+
+def test_on_error_podcast_detail_returns_to_browse(window):
+    """A transient network failure on drill-in must not leave the user
+    stuck on a permanently blank episode grid with no way out except Back
+    (final whole-plan review, Fix 3)."""
+    from sixpack.api.models import LibraryItem, LibraryItemMedia
+
+    show = LibraryItem(
+        id="show1", libraryId="lib1", mediaType="podcast",
+        media=LibraryItemMedia(metadata={"title": "My Show"}),
+    )
+    window._current_podcast_show = show
+    window._show_podcast_detail()
+
+    window._on_error("podcast_detail", "connection reset")
+
+    assert window._stack.currentWidget() is window._browse_screen
+
+
+def test_podcast_continue_progress_result_is_self_contained_not_stale_current_show(
+    window, monkeypatch
+):
+    """Regression test for the show/episode desync race (final whole-plan
+    review, Fix 2): _pending_podcast_episode/_current_podcast_show are two
+    independently-mutable instance fields. If the user navigates to a
+    DIFFERENT podcast show while a Continue Listening progress fetch for an
+    earlier show/episode is still in flight, the OLD code would pair the
+    stale episode with the now-current (wrong) show when the result finally
+    arrived. _async_get_podcast_progress now returns (show, episode,
+    progress) as a self-contained tuple, so the result handler never needs
+    to re-read (possibly-changed) instance state to pair them — verify the
+    play-request fires with the ORIGINAL, correctly-paired show/episode."""
+    from sixpack.api.models import LibraryItem, LibraryItemMedia, MediaProgress, PodcastEpisode
+
+    show_a = LibraryItem(
+        id="showA", libraryId="lib1", mediaType="podcast",
+        media=LibraryItemMedia(metadata={"title": "Show A"}),
+    )
+    episode_a = PodcastEpisode(id="epA", libraryItemId="showA", title="Episode A")
+    show_b = LibraryItem(
+        id="showB", libraryId="lib1", mediaType="podcast",
+        media=LibraryItemMedia(metadata={"title": "Show B"}),
+    )
+    window._server_url = "http://abs.test"
+    window._token = "tok"
+
+    # Simulate the race: show_A/episode_A's fetch is in flight...
+    window._current_podcast_show = show_a
+    window._pending_podcast_episode = episode_a
+    # ...then, before it resolves, the user navigates to a DIFFERENT show.
+    window._current_podcast_show = show_b
+
+    played = []
+    monkeypatch.setattr(
+        window, "_on_podcast_episode_play_requested",
+        lambda ep, start_time: played.append(ep),
+    )
+
+    progress = MediaProgress(libraryItemId="showA", episodeId="epA", currentTime=10.0)
+    # The self-contained result still carries show_A/episode_A, paired
+    # together, regardless of what _current_podcast_show has since become.
+    window._on_result("podcast_continue_progress", (show_a, episode_a, progress))
+
+    assert played == [episode_a]
+    # The handler re-syncs instance state to the result it actually acted
+    # on, rather than trusting whatever _current_podcast_show had drifted to.
+    assert window._current_podcast_show is show_a
+
+
+def test_on_podcast_episode_selected_calls_progress_fetch_with_show_and_episode(
+    window, monkeypatch
+):
+    """_async_get_podcast_progress must be handed the show/episode pair
+    directly (not just ids read back off mutable instance state later),
+    so its result is self-contained end to end."""
+    from sixpack.api.models import LibraryItem, LibraryItemMedia, PodcastEpisode
+
+    show = LibraryItem(
+        id="show1", libraryId="lib1", mediaType="podcast",
+        media=LibraryItemMedia(metadata={"title": "My Show"}),
+    )
+    episode = PodcastEpisode(id="ep1", libraryItemId="show1", title="Episode One")
+    window._server_url = "http://abs.test"
+    window._token = "tok"
+
+    async def _fake_result():
+        # (None, None, None) is a harmless, well-formed result — the "podcast_continue_progress"
+        # branch's None-show guard (Fix 12) treats it as a no-op once the
+        # worker thread actually runs this coroutine.
+        return None, None, None
+
+    calls = []
+    monkeypatch.setattr(
+        window, "_async_get_podcast_progress",
+        lambda *args: calls.append(args) or _fake_result(),
+    )
+
+    window._browse_screen.podcast_episode_selected.emit(show, episode)
+
+    assert calls == [(show, episode)]
+
+
+def test_on_result_podcast_continue_progress_none_show_is_noop(window):
+    """Defensive guard (final whole-plan review, Fix 12): a None show in
+    the result tuple must not crash — mirrors the existing None-check in
+    _on_podcast_episode_play_requested."""
+    from sixpack.api.models import PodcastEpisode
+
+    episode = PodcastEpisode(id="ep1", libraryItemId="show1", title="Episode One")
+    window._current_podcast_show = None
+    window._on_result("podcast_continue_progress", (None, episode, None))
+    assert window._stack.currentWidget() is not window._chapter_screen
+    assert window._stack.currentWidget() is not window._player_screen
+
+
+def test_podcast_episode_activated_single_chapter_sets_player_chapters(window, monkeypatch):
+    """Every other single-chapter direct-play path (book, library item,
+    playlist item) calls set_chapters() so the in-player MENU overlay is
+    populated even for a single "chapter" — the podcast equivalent path was
+    missing this call (final whole-plan review, Fix 6)."""
+    from sixpack.api.models import Chapter, LibraryItem, LibraryItemMedia, PodcastEpisode
+
+    show = LibraryItem(
+        id="show1", libraryId="lib1", mediaType="podcast",
+        media=LibraryItemMedia(metadata={"title": "My Show"}),
+    )
+    chapters = [Chapter(id=0, start=0.0, end=100.0, title="Whole episode")]
+    episode = PodcastEpisode(
+        id="ep1", libraryItemId="show1", title="Episode One", chapters=chapters
+    )
+    window._current_podcast_show = show
+    window._server_url = "http://abs.test"
+    window._token = "tok"
+
+    window._podcast_detail_screen.item_activated.emit(episode)
+
+    assert window._player_screen._chapters == chapters
+
+
+def test_podcast_continue_progress_single_chapter_sets_player_chapters(window):
+    """Same as test_podcast_episode_activated_single_chapter_sets_player_chapters,
+    but for the Continue Listening direct-play path (final whole-plan
+    review, Fix 6)."""
+    from sixpack.api.models import (
+        Chapter,
+        LibraryItem,
+        LibraryItemMedia,
+        MediaProgress,
+        PodcastEpisode,
+    )
+
+    show = LibraryItem(
+        id="show1", libraryId="lib1", mediaType="podcast",
+        media=LibraryItemMedia(metadata={"title": "My Show"}),
+    )
+    chapters = [Chapter(id=0, start=0.0, end=100.0, title="Whole episode")]
+    episode = PodcastEpisode(
+        id="ep1", libraryItemId="show1", title="Episode One", chapters=chapters
+    )
+    window._server_url = "http://abs.test"
+    window._token = "tok"
+
+    progress = MediaProgress(libraryItemId="show1", episodeId="ep1", currentTime=0.0)
+    window._on_result("podcast_continue_progress", (show, episode, progress))
+
+    assert window._player_screen._chapters == chapters
+
+
+def test_async_fetch_podcast_detail_reuses_one_client(window, monkeypatch):
+    """The item-detail fetch and the per-episode progress fan-out must
+    share a single ABSClient (matching _async_get_browse_book's equivalent
+    pattern for books), instead of opening two separate `async with`
+    blocks back-to-back (final whole-plan review, Fix 8)."""
+    import asyncio
+
+    from sixpack.api.models import LibraryItem, LibraryItemMedia, PodcastEpisode
+    from sixpack.ui import app as app_module
+
+    ep = PodcastEpisode(id="ep1", libraryItemId="show1", title="Episode One")
+    show = LibraryItem(
+        id="show1", libraryId="lib1", mediaType="podcast",
+        media=LibraryItemMedia(metadata={"title": "My Show"}),
+    )
+    full_show = LibraryItem(
+        id="show1", libraryId="lib1", mediaType="podcast",
+        media=LibraryItemMedia(metadata={"title": "My Show"}, episodes=[ep]),
+    )
+
+    instances = []
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            instances.append(self)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def get_library_item(self, item_id):
+            return full_show
+
+        async def get_progress(self, item_id, episode_id=None):
+            return None
+
+    monkeypatch.setattr(app_module, "ABSClient", FakeClient)
+    window._server_url = "http://abs.test"
+    window._token = "tok"
+
+    full, progress = asyncio.run(window._async_fetch_podcast_detail(show))
+
+    assert full is full_show
+    assert len(instances) == 1
 
 
 def test_on_progress_update_via_real_signal_forwards_episode_id(window, monkeypatch):

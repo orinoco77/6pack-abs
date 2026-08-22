@@ -44,8 +44,16 @@ class PodcastDetailScreen(DetailGridScreen):
         return "podcast"
 
     def show_loading(self, show: LibraryItem, server_url: str = "", token: str = "") -> None:
+        # Browse-row items carry no episodes (Task 6) — this always
+        # populates an empty grid, for as long as the real item-detail
+        # fetch takes. The title already shows correctly (_populate sets
+        # it unconditionally), but with zero episodes there is otherwise
+        # no visual sign anything is happening — add the same "Loading…"
+        # affordance browse.py's own full-pane loading state uses.
         self._show = show
         self._populate(show.title, show.media.episodes, {}, server_url, token)
+        if not show.media.episodes:
+            self._hero_backdrop.set_subtitle("Loading…")
 
     def load(
         self,
