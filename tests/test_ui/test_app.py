@@ -710,6 +710,45 @@ def test_podcast_episode_selected_from_continue_listening_sets_browse_back_targe
     assert window._player_back_target == "browse"
 
 
+def test_on_result_podcast_continue_progress_multi_chapter_sets_chapter_back_target(window):
+    """Row 4 of Task 6's back-target trace table: a Continue-Listening entry
+    (no intermediate podcast_detail screen was ever shown) whose episode has
+    multiple chapters. The "podcast_continue_progress" branch in _on_result
+    must set _player_back_target = "chapter" (so Back from the player lands
+    on the chapter screen) while leaving _chapter_back_target = "browse" (so
+    Back from the chapter screen skips the never-shown detail screen and
+    lands directly on Browse) -- these two back-targets deliberately diverge
+    inside this one branch, which is exactly the kind of state-machine
+    subtlety this task exists to guard against. Previously uncovered: no
+    test drove _on_result("podcast_continue_progress", ...) at all."""
+    from sixpack.api.models import Chapter, LibraryItem, LibraryItemMedia, MediaProgress, PodcastEpisode
+
+    show = LibraryItem(
+        id="show1", libraryId="lib1", mediaType="podcast",
+        media=LibraryItemMedia(metadata={"title": "My Show"}),
+    )
+    chapters = [
+        Chapter(id=0, start=0.0, end=100.0, title="Part 1"),
+        Chapter(id=1, start=100.0, end=200.0, title="Part 2"),
+    ]
+    episode = PodcastEpisode(id="ep1", libraryItemId="show1", title="Episode One", chapters=chapters)
+    window._current_podcast_show = show
+    window._pending_podcast_episode = episode
+    window._server_url = "http://abs.test"
+    window._token = "tok"
+    # Mirrors _on_podcast_episode_selected's eager assignment, which always
+    # runs (and completes) before this worker result comes back.
+    window._chapter_back_target = "browse"
+    window._player_back_target = "browse"
+
+    progress = MediaProgress(libraryItemId="show1", episodeId="ep1", currentTime=42.0)
+    window._on_result("podcast_continue_progress", progress)
+
+    assert window._stack.currentWidget() is window._chapter_screen
+    assert window._chapter_back_target == "browse"
+    assert window._player_back_target == "chapter"
+
+
 def test_on_player_back_podcast_detail_target_shows_podcast_detail(window):
     window._player_back_target = "podcast_detail"
     window._on_player_back()
@@ -738,6 +777,32 @@ def test_on_progress_update_forwards_episode_id(window, monkeypatch):
     # real current code (read it in Step 1 below before finalizing this
     # test); the key behavior under test is that "ep1" reaches
     # _async_update_progress as the episode_id argument.
+    assert calls
+    assert "ep1" in calls[0][0] or calls[0][1].get("episode_id") == "ep1"
+
+
+def test_on_progress_update_via_real_signal_forwards_episode_id(window, monkeypatch):
+    """Task 5 closed a bug where PlayerScreen.progress_update (5 args) was
+    connected to a 4-arg @pyqtSlot -- PyQt's signal/slot marshalling layer
+    silently truncated the trailing arg, which is a different failure mode
+    than plain Python argument passing and not something a direct method
+    call can catch. test_on_progress_update_forwards_episode_id above calls
+    window._on_progress_update(...) directly, which would keep passing even
+    if the signal were widened again without updating the @pyqtSlot(...)
+    decorator's type list. This test instead emits the REAL signal through
+    the REAL connection app.py wires (_player_screen.progress_update ->
+    _on_progress_update), so a reintroduction of that specific regression
+    would be caught here."""
+    calls = []
+    monkeypatch.setattr(
+        window, "_async_update_progress",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or _noop_coro(),
+    )
+    window._server_url = "http://abs.test"
+    window._token = "tok"
+
+    window._player_screen.progress_update.emit("show1", 100.0, 1000.0, False, "ep1")
+
     assert calls
     assert "ep1" in calls[0][0] or calls[0][1].get("episode_id") == "ep1"
 
