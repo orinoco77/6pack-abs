@@ -14,6 +14,7 @@ from sixpack.api.models import Library, LibraryItem, Series, SeriesBook, MediaPr
 from sixpack.config import AppConfig, ServerConfig
 from sixpack.player.player import AudioPlayer, PlayerError
 from sixpack.ui import theme
+from sixpack.ui.browse_cache import BrowseCache
 from sixpack.ui.cover_cache import CoverCache
 from sixpack.ui.screens.browse import BrowseScreen, RowType
 from sixpack.ui.screens.login import LoginScreen
@@ -121,6 +122,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self._stack)
 
         self._cover_cache = CoverCache(parent=self)
+        self._browse_cache = BrowseCache()
 
         self._splash_screen = SplashScreen()
         self._login_screen = LoginScreen()
@@ -274,13 +276,43 @@ class MainWindow(QMainWindow):
             )
         )
         self._config.save()
+        self._prime_browse_from_cache()
         self._worker.run("libraries", self._async_get_libraries())
 
     def _do_connect_with_token(self, url: str, token: str) -> None:
         self._server_url = url
         self._token = token
         self._client = ABSClient(url, token=token)
+        self._prime_browse_from_cache()
         self._worker.run("autologin", self._async_get_libraries())
+
+    def _prime_browse_from_cache(self) -> None:
+        """Show cached library/browse content instantly, before the real
+        network fetch (kicked off separately, right after this) resolves.
+        Stale-while-revalidate: this is a first paint, never the final
+        word — the caller always still fetches fresh data afterward.
+
+        Deliberately reads from disk only and never dispatches a network
+        request itself — the "libraries"/"autologin" result that follows
+        right behind this always does that via
+        _populate_browse_from_libraries()/_fetch_browse_content(). Calling
+        _fetch_browse_content() from here too would fetch the initial
+        library's content over the network twice on every cache-primed
+        load, once from this priming pass and once from the real result.
+        """
+        cached_libraries = self._browse_cache.load_libraries(self._server_url)
+        if not cached_libraries:
+            return
+        self._libraries = cached_libraries
+        self._browse_screen.load_libraries(cached_libraries, self._server_url, self._token)
+        initial_lib = self._resolve_initial_library(cached_libraries)
+        self._current_library = initial_lib
+        cached_rows = self._browse_cache.load_browse_content(self._server_url, initial_lib.id)
+        if cached_rows:
+            for row_type, items in cached_rows.items():
+                self._browse_screen.set_row_items(row_type, items)
+            self._browse_screen.show_content()
+        self._show_browse()
 
     async def _async_get_libraries(self):
         sem = asyncio.Semaphore(10)
@@ -314,7 +346,29 @@ class MainWindow(QMainWindow):
             self._config.save()
         self._fetch_browse_content(library.id)
 
+    def _resolve_initial_library(self, libraries: list[Library]) -> Library:
+        server = self._config.active_server
+        last_id = server.last_library_id if server else ""
+        return next((lib for lib in libraries if lib.id == last_id), None) or libraries[0]
+
+    def _populate_browse_from_libraries(self, libraries: list[Library]) -> None:
+        """Populate the sidebar from `libraries` and kick off loading the
+        initial (last-viewed, or first) library's content over the
+        network. Used for the real network result only — cache-priming
+        uses _prime_browse_from_cache() instead, which does not dispatch
+        a network fetch (see its docstring for why)."""
+        self._libraries = libraries
+        self._browse_screen.load_libraries(libraries, self._server_url, self._token)
+        initial_lib = self._resolve_initial_library(libraries)
+        self._current_library = initial_lib
+        self._fetch_browse_content(initial_lib.id)
+
     def _fetch_browse_content(self, library_id: str) -> None:
+        cached = self._browse_cache.load_browse_content(self._server_url, library_id)
+        if cached:
+            for row_type, items in cached.items():
+                self._browse_screen.set_row_items(row_type, items)
+            self._browse_screen.show_content()
         self._worker.run("browse_content", self._async_get_browse_content(library_id))
 
     async def _async_get_browse_content(self, library_id: str) -> tuple:
@@ -621,19 +675,12 @@ class MainWindow(QMainWindow):
 
         elif tag in ("libraries", "autologin"):
             self._login_screen.stop_pairing()
-            self._libraries = result
             if not result:
+                self._libraries = result
                 self._show_browse()
                 return
-            self._browse_screen.load_libraries(result, self._server_url, self._token)
-            server = self._config.active_server
-            last_id = server.last_library_id if server else ""
-            initial_lib = (
-                next((lib for lib in result if lib.id == last_id), None)
-                or result[0]
-            )
-            self._current_library = initial_lib
-            self._fetch_browse_content(initial_lib.id)
+            self._browse_cache.save_libraries(self._server_url, result)
+            self._populate_browse_from_libraries(result)
             self._show_browse()
 
         elif tag == "browse_content":
@@ -641,6 +688,7 @@ class MainWindow(QMainWindow):
             current_lib = getattr(self, "_current_library", None)
             if current_lib and result_lib_id != current_lib.id:
                 return  # stale result from a previously selected library
+            self._browse_cache.save_browse_content(self._server_url, result_lib_id, rows)
             for row_type, items in rows.items():
                 self._browse_screen.set_row_items(row_type, items)
             self._browse_screen.show_content()

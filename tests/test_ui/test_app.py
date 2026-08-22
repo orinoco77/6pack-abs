@@ -156,6 +156,132 @@ async def test_async_get_libraries_keeps_library_on_stats_fetch_failure(window):
     assert [lib.id for lib in result] == ["lib-flaky"]
 
 
+# ---- browse cache: instant first paint + save-after-fetch ----
+
+def test_prime_browse_from_cache_shows_browse_before_network_result(window, tmp_path):
+    """A cached library list must show up immediately — before any worker
+    result arrives — so a returning user isn't stuck waiting on the
+    network just to see their library sidebar again."""
+    from sixpack.api.models import Library
+    from sixpack.ui.browse_cache import BrowseCache
+
+    window._browse_cache = BrowseCache(cache_dir=tmp_path)
+    window._server_url = "http://abs.test"
+    window._token = "tok"
+    window._browse_cache.save_libraries(
+        "http://abs.test", [Library(id="lib1", name="Cached Lib", mediaType="book")]
+    )
+
+    window._prime_browse_from_cache()
+
+    assert window._stack.currentWidget() is window._browse_screen
+    assert window._current_library.id == "lib1"
+    assert [lib.id for lib in window._browse_screen._libraries] == ["lib1"]
+
+
+def test_prime_browse_from_cache_does_not_dispatch_a_network_fetch(window, tmp_path, monkeypatch):
+    """Regression test: priming from cache must be a pure disk read. If it
+    also called _fetch_browse_content() (which always dispatches a real
+    network fetch, by design, so normal library switches stay fresh),
+    the initial library's browse content would be fetched over the
+    network TWICE on every cache-primed load — once from priming, once
+    from the real "libraries"/"autologin" result that follows right
+    after. Observed live: duplicate items/personalized/series/playlists
+    requests in the network log on startup."""
+    from sixpack.api.models import Library, LibraryItem, LibraryItemMedia
+    from sixpack.ui.browse_cache import BrowseCache
+    from sixpack.ui.screens.browse import RowType
+
+    window._browse_cache = BrowseCache(cache_dir=tmp_path)
+    window._server_url = "http://abs.test"
+    window._token = "tok"
+    window._browse_cache.save_libraries(
+        "http://abs.test", [Library(id="lib1", name="Cached Lib", mediaType="book")]
+    )
+    item = LibraryItem(
+        id="i1", libraryId="lib1", mediaType="book",
+        media=LibraryItemMedia(metadata={"title": "Cached Book"}),
+    )
+    window._browse_cache.save_browse_content(
+        "http://abs.test", "lib1", {RowType.RECENTLY_ADDED: [item]}
+    )
+    dispatched = []
+    monkeypatch.setattr(window._worker, "run", lambda tag, coro: dispatched.append(tag))
+
+    window._prime_browse_from_cache()
+
+    assert dispatched == []
+    idx = window._browse_screen._row_types.index(RowType.RECENTLY_ADDED)
+    assert [i.title for i in window._browse_screen._row_items[idx]] == ["Cached Book"]
+
+
+def test_prime_browse_from_cache_is_noop_when_no_cache(window, tmp_path):
+    from sixpack.ui.browse_cache import BrowseCache
+
+    window._browse_cache = BrowseCache(cache_dir=tmp_path)
+    window._server_url = "http://abs.test"
+
+    window._prime_browse_from_cache()
+
+    assert window._stack.currentWidget() is not window._browse_screen
+
+
+def test_libraries_result_saves_to_cache(window, tmp_path):
+    from sixpack.api.models import Library
+    from sixpack.ui.browse_cache import BrowseCache
+
+    window._browse_cache = BrowseCache(cache_dir=tmp_path)
+    window._server_url = "http://abs.test"
+    window._token = "tok"
+
+    window._on_result("libraries", [Library(id="lib1", name="Fresh Lib", mediaType="book")])
+
+    cached = window._browse_cache.load_libraries("http://abs.test")
+    assert [lib.id for lib in cached] == ["lib1"]
+
+
+def test_fetch_browse_content_primes_rows_from_cache(window, tmp_path):
+    from sixpack.api.models import LibraryItem, LibraryItemMedia
+    from sixpack.ui.browse_cache import BrowseCache
+    from sixpack.ui.screens.browse import RowType
+
+    window._browse_cache = BrowseCache(cache_dir=tmp_path)
+    window._server_url = "http://abs.test"
+    window._token = "tok"
+    item = LibraryItem(
+        id="i1", libraryId="lib1", mediaType="book",
+        media=LibraryItemMedia(metadata={"title": "Cached Book"}),
+    )
+    window._browse_cache.save_browse_content(
+        "http://abs.test", "lib1", {RowType.RECENTLY_ADDED: [item]}
+    )
+
+    window._fetch_browse_content("lib1")
+
+    idx = window._browse_screen._row_types.index(RowType.RECENTLY_ADDED)
+    assert [i.title for i in window._browse_screen._row_items[idx]] == ["Cached Book"]
+
+
+def test_browse_content_result_saves_to_cache(window, tmp_path):
+    from sixpack.api.models import Library, LibraryItem, LibraryItemMedia
+    from sixpack.ui.browse_cache import BrowseCache
+    from sixpack.ui.screens.browse import RowType
+
+    window._browse_cache = BrowseCache(cache_dir=tmp_path)
+    window._server_url = "http://abs.test"
+    window._token = "tok"
+    window._current_library = Library(id="lib1", name="Lib", mediaType="book")
+    item = LibraryItem(
+        id="i1", libraryId="lib1", mediaType="book",
+        media=LibraryItemMedia(metadata={"title": "Fresh Book"}),
+    )
+
+    window._on_result("browse_content", ("lib1", {RowType.RECENTLY_ADDED: [item]}))
+
+    cached = window._browse_cache.load_browse_content("http://abs.test", "lib1")
+    assert [i.title for i in cached[RowType.RECENTLY_ADDED]] == ["Fresh Book"]
+
+
 def test_on_track_ended_navigates_to_series_detail_with_next_focused(window, qtbot):
     """Automatic end-of-track must NOT auto-play the next book — it shows
     an up-next message, then lands on the series detail screen with the
