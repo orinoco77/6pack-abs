@@ -98,7 +98,7 @@ def test_on_track_ended_navigates_to_series_detail_with_next_focused(window, qtb
     """Automatic end-of-track must NOT auto-play the next book — it shows
     an up-next message, then lands on the series detail screen with the
     next book pre-focused, per this plan's end-of-book behavior change."""
-    from sixpack.api.models import Series, SeriesBook, LibraryItemMedia
+    from sixpack.api.models import LibraryItemMedia, Series, SeriesBook
 
     media1 = LibraryItemMedia(metadata={"title": "Book 1"}, duration=100.0)
     media2 = LibraryItemMedia(metadata={"title": "Book 2"}, duration=100.0)
@@ -121,6 +121,13 @@ def test_on_track_ended_navigates_to_series_detail_with_next_focused(window, qtb
     # setVisible(True) — a hidden ancestor keeps isVisible() False even
     # after the child's own explicit visibility flag is set.
     window._stack.setCurrentWidget(window._player_screen)
+
+    # Shrink the up-next delay so this test doesn't have to sleep out the
+    # real 3000ms production value — this is what was making test_app.py's
+    # suite slow and its ~200ms margin race real timer delivery under
+    # system load. The behavior under test (navigation happens after SOME
+    # delay) is unaffected by the delay's actual duration.
+    window._UP_NEXT_DELAY_MS = 50
 
     window._on_track_ended()
     # up-next message shown synchronously; navigation happens after a timer
@@ -171,7 +178,165 @@ def test_on_track_ended_standalone_item_returns_to_browse(window, qtbot):
     window._player_screen._series_books = []
     window._player_screen._playlist_items = []
 
+    # See the matching comment in
+    # test_on_track_ended_navigates_to_series_detail_with_next_focused —
+    # shrink the delay to avoid a real ~3s sleep per test.
+    window._UP_NEXT_DELAY_MS = 50
+
     window._on_track_ended()
     qtbot.wait(window._UP_NEXT_DELAY_MS + 200)
 
     assert window._stack.currentWidget() is window._browse_screen
+
+
+# ----------------------------------------------------------------------
+# Up-next timer race (final whole-plan review, Fix 2)
+#
+# _on_track_ended arms a QTimer.singleShot with no handle and no way to
+# invalidate it. If the user takes a manual action (next/prev/back) during
+# the delay window, the stale timer must not still fire later and act.
+# ----------------------------------------------------------------------
+
+
+def test_on_next_item_invalidates_up_next_generation(window):
+    window._up_next_generation = 5
+    window._current_series = None  # early-return after the invalidation
+    window._on_next_item()
+    assert window._up_next_generation == 6
+
+
+def test_on_prev_item_invalidates_up_next_generation(window):
+    window._up_next_generation = 5
+    window._current_series = None  # early-return after the invalidation
+    window._on_prev_item()
+    assert window._up_next_generation == 6
+
+
+def test_on_player_back_invalidates_up_next_generation(window):
+    window._up_next_generation = 5
+    window._player_back_target = "browse"
+    window._on_player_back()
+    assert window._up_next_generation == 6
+
+
+def test_manual_next_hides_up_next_label(window):
+    """_on_next_item must hide the (now-stale) "Up next: ..." label
+    immediately, so it doesn't stay visibly painted over the newly-started
+    playback during the remainder of the old delay window."""
+    # The player screen must actually be on-screen for its child
+    # _up_next_label's isVisible() to reflect setVisible(True) — see the
+    # matching comment in test_on_track_ended_navigates_to_series_detail_
+    # with_next_focused.
+    window._stack.setCurrentWidget(window._player_screen)
+    window._current_series = None  # early-return after the hide
+    window._player_screen.show_up_next("Up next: Something")
+    assert window._player_screen._up_next_label.isVisible()
+    window._on_next_item()
+    assert not window._player_screen._up_next_label.isVisible()
+
+
+def test_stale_up_next_timer_does_not_refire_after_manual_back(window, qtbot):
+    """End-to-end regression for Fix 2: track ends -> up-next timer armed
+    -> user immediately presses Back (a manual action reachable during the
+    delay window) -> the stale timer must NOT fire later and navigate
+    again, yanking the user off whatever screen the manual Back landed
+    them on."""
+    from sixpack.api.models import LibraryItemMedia, Series, SeriesBook
+
+    media1 = LibraryItemMedia(metadata={"title": "Book 1"}, duration=100.0)
+    media2 = LibraryItemMedia(metadata={"title": "Book 2"}, duration=100.0)
+    b1 = SeriesBook(id="b1", libraryId="lib1", media=media1, sequence="1")
+    b2 = SeriesBook(id="b2", libraryId="lib1", media=media2, sequence="2")
+    series = Series(id="s1", name="A Series", books=[b1, b2])
+
+    window._current_series = series
+    window._player_screen._current_book = b1
+    window._player_screen._series_books = [b1, b2]
+    window._player_screen._current_index = 0
+    window._detail_screen.show_loading(series)
+    window._stack.setCurrentWidget(window._player_screen)
+    window._UP_NEXT_DELAY_MS = 50
+
+    window._on_track_ended()  # arms the up-next timer for the current generation
+    assert window._player_screen._up_next_label.isVisible()
+
+    # Manual Back immediately after — reachable in real usage while
+    # "Up next" is showing.
+    window._player_back_target = "browse"
+    window._on_player_back()
+    assert window._stack.currentWidget() is window._browse_screen
+
+    # Wait past the stale timer's original delay. Without Fix 2, the stale
+    # timer fires here and calls _advance_after_up_next, navigating AGAIN
+    # (to series detail) and away from Browse.
+    qtbot.wait(window._UP_NEXT_DELAY_MS + 200)
+
+    assert window._stack.currentWidget() is window._browse_screen
+
+
+# ----------------------------------------------------------------------
+# Chapter-forwarding connection ordering (final whole-plan review, Fix 5)
+#
+# The chapters-forwarding connection must run AFTER the matching
+# _on_*_play_requested connection on the same signal, since the play_*
+# handler resets PlayerScreen._chapters before the forwarder sets the real
+# value. This exercises that dependency through the REAL signal (not by
+# calling the handlers directly), which round-2's fix-round tests never
+# covered for the multi-chapter path.
+# ----------------------------------------------------------------------
+
+
+def test_play_requested_forwards_chapters_to_player_in_order(window):
+    from sixpack.api.models import Chapter, LibraryItemMedia, Series, SeriesBook
+
+    media = LibraryItemMedia(metadata={"title": "Book 1"}, duration=100.0)
+    book = SeriesBook(id="b1", libraryId="lib1", media=media, sequence="1")
+    series = Series(id="s1", name="A Series", books=[book])
+    window._current_series = series
+
+    chapters = [
+        Chapter(id=0, start=0.0, end=50.0, title="Ch1"),
+        Chapter(id=1, start=50.0, end=100.0, title="Ch2"),
+    ]
+    window._chapter_screen._chapters = chapters
+
+    window._chapter_screen.play_requested.emit(book, 0.0)
+
+    assert window._player_screen._chapters == chapters
+
+
+def test_library_item_play_requested_forwards_chapters_to_player_in_order(window):
+    from sixpack.api.models import Chapter, LibraryItem, LibraryItemMedia
+
+    media = LibraryItemMedia(metadata={"title": "Item 1", "authorName": "Author"})
+    item = LibraryItem(id="i1", libraryId="lib1", media=media)
+
+    chapters = [
+        Chapter(id=0, start=0.0, end=50.0, title="Ch1"),
+        Chapter(id=1, start=50.0, end=100.0, title="Ch2"),
+    ]
+    window._chapter_screen._chapters = chapters
+
+    window._chapter_screen.library_item_play_requested.emit(item, 0.0)
+
+    assert window._player_screen._chapters == chapters
+
+
+def test_playlist_item_play_requested_forwards_chapters_to_player_in_order(window):
+    from sixpack.api.models import Chapter, LibraryItem, LibraryItemMedia, Playlist, PlaylistItem
+
+    media = LibraryItemMedia(metadata={"title": "Item 1", "authorName": "Author"})
+    library_item = LibraryItem(id="i1", libraryId="lib1", media=media)
+    item = PlaylistItem(library_item_id="i1", library_item=library_item)
+    playlist = Playlist(id="p1", name="My Playlist", items=[item])
+    window._current_playlist = playlist
+
+    chapters = [
+        Chapter(id=0, start=0.0, end=50.0, title="Ch1"),
+        Chapter(id=1, start=50.0, end=100.0, title="Ch2"),
+    ]
+    window._chapter_screen._chapters = chapters
+
+    window._chapter_screen.playlist_item_play_requested.emit(item, 0.0)
+
+    assert window._player_screen._chapters == chapters

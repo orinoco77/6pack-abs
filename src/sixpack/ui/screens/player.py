@@ -283,6 +283,27 @@ class PlayerScreen(QWidget):
     # Public API
     # ------------------------------------------------------------------
 
+    def _reset_per_item_state(self) -> None:
+        """Clear every piece of per-item state before a play_* method sets
+        its own. PlayerScreen is a process-lifetime singleton — constructed
+        once in app.py and reused for every item played for the app's whole
+        life — so anything set for one item that isn't explicitly cleared
+        here can leak into the next item played on this same instance
+        (wrong-book chapter overlay, wrong-mode "up next" navigation
+        target, etc.). This has been the root cause of every per-item-state
+        bug found across this plan's fix rounds. Any FUTURE per-item state
+        this screen grows must be reset here too — this is its one home.
+        """
+        self._chapters = []
+        self._chapter_overlay.hide()
+        self._chapter_overlay.clear()
+        self._current_book = None
+        self._series = None
+        self._series_books = []
+        self._current_playlist_item = None
+        self._playlist = None
+        self._playlist_items = []
+
     def play_book(
         self,
         book: SeriesBook,
@@ -292,16 +313,10 @@ class PlayerScreen(QWidget):
         server_url: str,
         token: str,
     ) -> None:
-        # Reset any chapters carried over from a previous item. app.py's
-        # next/prev-item navigation (_on_next_item/_on_prev_item) calls this
-        # method directly without going through either of set_chapters()'s
-        # two delivery paths, so without this the in-player chapter overlay
-        # would otherwise show a stale, wrong-book chapter list after
-        # manual next/prev navigation. _toggle_chapter_overlay() no-ops when
-        # self._chapters is empty, so this yields "no overlay" rather than
-        # "wrong overlay" until/unless a future change re-fetches chapters
-        # for the new item on next/prev navigation too.
-        self._chapters = []
+        # Reset all per-item state (chapters, chapter overlay, and the
+        # OTHER mode's book/series vs. playlist fields) before setting this
+        # item's own fields below. See _reset_per_item_state's docstring.
+        self._reset_per_item_state()
         self._current_book = book
         self._series = series
         self._series_books = books
@@ -343,16 +358,9 @@ class PlayerScreen(QWidget):
         token: str,
     ) -> None:
         """Play a standalone library item (from the browse screen, no series context)."""
-        # See the matching comment in play_book() — reset stale chapters
-        # from a previous item so the in-player chapter overlay doesn't
-        # show the wrong book's chapters after next/prev navigation.
-        self._chapters = []
-        self._current_book = None
-        self._series = None
-        self._series_books = []
-        self._current_playlist_item = None
-        self._playlist = None
-        self._playlist_items = []
+        # See _reset_per_item_state's docstring — reset all per-item state
+        # before setting this item's own fields below.
+        self._reset_per_item_state()
         self._current_index = 0
         self._item_id = item.id
 
@@ -386,10 +394,10 @@ class PlayerScreen(QWidget):
         token: str,
     ) -> None:
         """Play an item from a playlist (similar to play_book but for playlists)."""
-        # See the matching comment in play_book() — reset stale chapters
-        # from a previous item so the in-player chapter overlay doesn't
-        # show the wrong book's chapters after next/prev navigation.
-        self._chapters = []
+        # See _reset_per_item_state's docstring — reset all per-item state
+        # (including the book/series fields) before setting this item's own
+        # fields below.
+        self._reset_per_item_state()
         self._current_playlist_item = item
         self._playlist = playlist
         self._playlist_items = items
@@ -560,8 +568,17 @@ class PlayerScreen(QWidget):
         return max(0, len(self._chapters) - 1)
 
     def _on_overlay_chapter_activated(self, item: QListWidgetItem) -> None:
+        # Seek by TIME, not by index — `row` is an index into
+        # self._chapters (Audiobookshelf's own item-level chapter
+        # metadata), which is a different data source than mpv's own
+        # internally-derived chapter list that AudioPlayer.seek_to_chapter
+        # indexes into (different length/ordering possible for multi-file
+        # items, transcoded streams, or zero embedded chapters mpv can
+        # detect). Every other chapter jump in this app (chapter_select.py)
+        # seeks by time the same way — see chapter.start usage there.
         row = self._chapter_overlay.row(item)
-        self._player.seek_to_chapter(row)
+        if 0 <= row < len(self._chapters):
+            self._player.seek_absolute(self._chapters[row].start)
         self._chapter_overlay.hide()
 
     # ------------------------------------------------------------------

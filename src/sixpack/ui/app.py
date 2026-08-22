@@ -80,6 +80,12 @@ class MainWindow(QMainWindow):
         self._chapter_back_target = "detail"
         # Back-navigation context: "detail" | "chapter" | "browse" | "playlist_detail"
         self._player_back_target = "detail"
+        # Generation counter guarding the pending "up next" QTimer.singleShot
+        # scheduled by _on_track_ended — see _on_track_ended/
+        # _advance_after_up_next for why (an uncancellable stale timer can
+        # otherwise fire after a manual next/prev/back action has already
+        # started something else, and yank the user away from it).
+        self._up_next_generation = 0
 
         self._init_player()
         self._init_worker()
@@ -162,19 +168,13 @@ class MainWindow(QMainWindow):
         # still holds the exact chapters that were loaded for this book/item
         # at the moment one of its play_requested-family signals fires, so
         # these connections just forward that list — they don't change
-        # _on_play_requested/etc.'s own signature or meaning.
-        self._chapter_screen.play_requested.connect(
-            lambda book, st: self._player_screen
-            and self._player_screen.set_chapters(self._chapter_screen._chapters)
-        )
-        self._chapter_screen.playlist_item_play_requested.connect(
-            lambda item, st: self._player_screen
-            and self._player_screen.set_chapters(self._chapter_screen._chapters)
-        )
-        self._chapter_screen.library_item_play_requested.connect(
-            lambda item, st: self._player_screen
-            and self._player_screen.set_chapters(self._chapter_screen._chapters)
-        )
+        # _on_play_requested/etc.'s own signature or meaning. Each is
+        # connected AFTER the matching _on_*_play_requested connection
+        # above, on the same signal — see _forward_chapters_to_player's
+        # docstring for why that ordering is load-bearing.
+        self._chapter_screen.play_requested.connect(self._forward_chapters_to_player)
+        self._chapter_screen.playlist_item_play_requested.connect(self._forward_chapters_to_player)
+        self._chapter_screen.library_item_play_requested.connect(self._forward_chapters_to_player)
 
         self._setup_quit_shortcut()
         self._show_splash()
@@ -207,6 +207,10 @@ class MainWindow(QMainWindow):
         self._stack.setCurrentWidget(self._playlist_detail_screen)
 
     def _on_player_back(self) -> None:
+        # Invalidate any in-flight "up next" timer — a manual Back
+        # supersedes whatever the automatic end-of-track flow had pending.
+        # See _on_track_ended/_advance_after_up_next.
+        self._up_next_generation += 1
         target = self._player_back_target
         if target == "chapter":
             self._stack.setCurrentWidget(self._chapter_screen)
@@ -225,6 +229,20 @@ class MainWindow(QMainWindow):
             self._show_playlist_detail()
         else:
             self._show_detail()
+
+    def _forward_chapters_to_player(self, *_args) -> None:
+        """Connected AFTER _on_play_requested/_on_browse_item_play_requested/
+        _on_playlist_item_play_requested on the same ChapterSelectScreen
+        signals — must run second, since those handlers call into
+        PlayerScreen's play_* methods, which reset PlayerScreen._chapters
+        (via _reset_per_item_state) before this forwards the real value.
+        Qt fires directly-connected slots in connection order, so this
+        ordering is load-bearing: reversing it would have this forward the
+        real chapter list, then have it immediately wiped by the play_*
+        handler's reset, silently disabling the in-player chapter overlay.
+        """
+        if self._player_screen:
+            self._player_screen.set_chapters(self._chapter_screen._chapters)
 
     # ------------------------------------------------------------------
     # Login / auth
@@ -452,6 +470,12 @@ class MainWindow(QMainWindow):
             return await client.start_playback_session(item_id, start_time)
 
     def _on_next_item(self) -> None:
+        # Invalidate any in-flight "up next" timer and hide its label — a
+        # manual skip supersedes whatever the automatic end-of-track flow
+        # had pending. See _on_track_ended/_advance_after_up_next.
+        self._up_next_generation += 1
+        if self._player_screen:
+            self._player_screen.hide_up_next()
         if self._current_series is None:
             return
         books = self._current_series.sorted_books
@@ -461,6 +485,10 @@ class MainWindow(QMainWindow):
             self._on_play_requested(books[next_idx], 0.0)
 
     def _on_prev_item(self) -> None:
+        # See _on_next_item — same invalidation for manual skip-back.
+        self._up_next_generation += 1
+        if self._player_screen:
+            self._player_screen.hide_up_next()
         if self._current_series is None:
             return
         books = self._current_series.sorted_books
@@ -500,9 +528,21 @@ class MainWindow(QMainWindow):
 
         if message:
             self._player_screen.show_up_next(message)
-        QTimer.singleShot(self._UP_NEXT_DELAY_MS, lambda: self._advance_after_up_next(target))
+        # Capture and invalidate the current generation, so this scheduled
+        # call owns exactly this generation. Any manual action that races
+        # this delay (_on_next_item/_on_prev_item/_on_player_back) bumps
+        # self._up_next_generation again, which makes the check in
+        # _advance_after_up_next below a no-op for this now-stale timer.
+        self._up_next_generation += 1
+        generation = self._up_next_generation
+        QTimer.singleShot(
+            self._UP_NEXT_DELAY_MS,
+            lambda: self._advance_after_up_next(target, generation),
+        )
 
-    def _advance_after_up_next(self, target: tuple[str, str | None]) -> None:
+    def _advance_after_up_next(self, target: tuple[str, str | None], generation: int) -> None:
+        if generation != self._up_next_generation:
+            return  # a newer action (manual skip, back, another track ending) superseded this one
         self._player_screen.hide_up_next()
         kind, key = target
         if kind == "series":
