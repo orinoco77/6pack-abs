@@ -218,8 +218,16 @@ class ChapterSelectScreen(QWidget):
     def _build_ui(self) -> None:
         self._hero_backdrop = HeroBackdrop(self)
 
-        # All focus/selection rendering is done by ChapterItem.set_focused().
+        # This screen (not the list) owns real keyboard focus, matching
+        # FocusGrid's pattern: QListWidget's own default Key_Return handling
+        # doesn't reliably fire itemActivated in this app's configuration, so
+        # if the list held focus, Enter/Back would be silently swallowed by
+        # it before ever reaching keyPressEvent below. All focus/selection
+        # rendering is done by ChapterItem.set_focused(); navigation and
+        # activation are handled entirely in keyPressEvent.
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._list = QListWidget()
+        self._list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._list.setSpacing(2)
         # QListWidget inherits from QAbstractScrollArea, so — like every
         # other scroll container sitting in front of a Backdrop in this
@@ -363,7 +371,7 @@ class ChapterSelectScreen(QWidget):
             idx = self._find_resume_index(current_time, is_finished)
             self._list.setCurrentRow(idx)
             self._on_row_changed(idx)
-            self._list.setFocus()
+            self.setFocus()
 
         # ONE cover for the whole screen (the book's own) — fetched and
         # shown once here, NOT re-fetched as focus moves between chapter
@@ -434,7 +442,7 @@ class ChapterSelectScreen(QWidget):
     def showEvent(self, event) -> None:
         super().showEvent(event)
         if self._list.count():
-            self._list.setFocus()
+            self.setFocus()
 
     def keyPressEvent(self, event) -> None:
         from sixpack.input.keyboard import key_to_action
@@ -447,5 +455,13 @@ class ChapterSelectScreen(QWidget):
             current = self._list.currentItem()
             if current:
                 self._on_item_activated(current)
+        elif action == InputAction.DOWN:
+            row = self._list.currentRow()
+            if row + 1 < self._list.count():
+                self._list.setCurrentRow(row + 1)
+        elif action == InputAction.UP:
+            row = self._list.currentRow()
+            if row - 1 >= 0:
+                self._list.setCurrentRow(row - 1)
         else:
             super().keyPressEvent(event)

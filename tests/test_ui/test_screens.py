@@ -426,6 +426,54 @@ def test_chapter_screen_play_signal(qtbot):
     assert signals[0][1] == 1500.0
 
 
+def test_chapter_screen_enter_on_real_focus_target_activates_chapter(qtbot):
+    """Regression: QListWidget's own default Key_Return handling doesn't
+    reliably fire itemActivated in this app's configuration, so if the list
+    (rather than the screen) held real keyboard focus, pressing Enter on a
+    real TV remote was silently swallowed — nothing happened, and the user
+    never reached the player. This sends Enter to whatever Qt says actually
+    has focus after the screen is shown (not directly to the screen or the
+    list, which would bypass the real routing this bug lived in), exactly
+    matching how a real key event is delivered."""
+    from sixpack.ui.screens.chapter_select import ChapterSelectScreen
+    screen = ChapterSelectScreen()
+    qtbot.addWidget(screen)
+    book = _make_box_set_book()
+    screen.load(book, _make_chapters(), None)
+    screen.show()
+    qtbot.waitExposed(screen)
+
+    # screen.focusWidget() (the locally-focused descendant within this
+    # widget's own window) rather than QApplication.focusWidget() (the
+    # OS-level active window's focus target) — the latter is flaky in a
+    # test session sharing one QApplication across hundreds of tests, but
+    # in the real single-window app the two are equivalent, so this is
+    # still a faithful reproduction of real key delivery.
+    focus_target = screen.focusWidget()
+    assert focus_target is screen  # the screen itself owns focus, not _list
+
+    with qtbot.waitSignal(screen.play_requested, timeout=1000) as blocker:
+        qtbot.keyClick(focus_target, Qt.Key.Key_Return)
+
+    assert blocker.args[0] is book
+    assert blocker.args[1] == 0.0  # first chapter, starts at 0.0
+
+
+def test_chapter_screen_down_arrow_moves_current_row(qtbot):
+    from sixpack.ui.screens.chapter_select import ChapterSelectScreen
+    screen = ChapterSelectScreen()
+    qtbot.addWidget(screen)
+    screen.load(_make_box_set_book(), _make_chapters(), None)
+    screen.show()
+    qtbot.waitExposed(screen)
+
+    assert screen._list.currentRow() == 0
+    qtbot.keyClick(screen, Qt.Key.Key_Down)
+    assert screen._list.currentRow() == 1
+    qtbot.keyClick(screen, Qt.Key.Key_Up)
+    assert screen._list.currentRow() == 0
+
+
 def test_chapter_screen_back_signal(qtbot):
     from sixpack.ui.screens.chapter_select import ChapterSelectScreen
     screen = ChapterSelectScreen()
