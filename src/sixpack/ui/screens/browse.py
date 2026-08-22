@@ -671,7 +671,16 @@ class BrowseScreen(QWidget):
         for i, rw in enumerate(self._row_widgets):
             rw.set_row_focused(in_rows and i == self._focused_row)
         if in_rows and self._row_widgets:
-            self._rows_scroll.ensureWidgetVisible(self._row_widgets[self._focused_row])
+            if self._focused_row == 0:
+                # ensureWidgetVisible()'s default margin only guarantees the
+                # row is visible with SOME breathing room, not scroll==0 —
+                # row 0's title sits at the very top of the scrollable
+                # content (nothing above it but the hero's reserved
+                # clearance), so any nonzero residual scroll pushes that
+                # title up underneath the hero overlay. Force it flush.
+                self._rows_scroll.verticalScrollBar().setValue(0)
+            else:
+                self._rows_scroll.ensureWidgetVisible(self._row_widgets[self._focused_row])
 
     # ------------------------------------------------------------------
     # Key handling

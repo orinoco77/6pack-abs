@@ -506,6 +506,32 @@ def test_rows_up_clamps_at_zero(qtbot):
     assert screen._focused_row == 0
 
 
+def test_row_zero_scroll_resets_to_top_when_navigating_back_up(qtbot):
+    """Regression test: QScrollArea.ensureWidgetVisible()'s default 50px
+    margin only guarantees the target row is visible WITH some breathing
+    room — it doesn't guarantee scroll=0 when the target is row 0. Row 0's
+    title bar sits at the very top of the scrollable content (rows_layout's
+    top margin reserves clearance for the hero overlay above it, nothing
+    else does), so any nonzero residual scroll pushes that title up
+    underneath the hero band. Reported live: after scrolling down several
+    rows (e.g. picking a series, playing a book, coming back) and
+    navigating back up to row 0, its title vanished under the hero."""
+    screen = _make_screen_with_items(qtbot)
+    screen.resize(1920, 700)  # short enough that all 4 rows don't fit at once
+    screen.setFocus()
+
+    for _ in range(3):
+        _press(qtbot, screen, Qt.Key.Key_Down)  # row 0 -> 1 -> 2 -> 3
+    assert screen._focused_row == 3
+    assert screen._rows_scroll.verticalScrollBar().value() > 0
+
+    for _ in range(3):
+        _press(qtbot, screen, Qt.Key.Key_Up)  # row 3 -> 2 -> 1 -> 0
+    assert screen._focused_row == 0
+
+    assert screen._rows_scroll.verticalScrollBar().value() == 0
+
+
 def test_rows_up_from_second_row(qtbot):
     screen = _make_screen_with_items(qtbot)
     screen._focused_row = 2
