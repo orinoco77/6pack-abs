@@ -8,6 +8,21 @@ import pytest
 
 # ---- Mock mpv module ----
 
+class _MockEndFileData:
+    """Mirrors mpv.MpvEventEndFile's shape: a `.reason` int code."""
+
+    def __init__(self, reason: int) -> None:
+        self.reason = reason
+
+
+class _MockEvent:
+    """Mirrors mpv.MpvEvent's shape: event.data holds the typed payload,
+    not a dict — see the real MpvEvent.data property in python-mpv."""
+
+    def __init__(self, data) -> None:
+        self.data = data
+
+
 class MockMPV:
     """Minimal mock of the mpv.MPV class."""
 
@@ -63,7 +78,7 @@ class MockMPV:
 
     def _fire_event(self, event, data=None):
         if event in self._event_callbacks:
-            self._event_callbacks[event](data or {})
+            self._event_callbacks[event](_MockEvent(data))
 
 
 _mock_mpv_module = MagicMock()
@@ -81,6 +96,14 @@ def patch_mpv():
     """Replace the mpv module with our mock before each test."""
     mock_module = MagicMock()
     mock_module.MPV.side_effect = _make_mock_mpv
+    # Real reason codes from mpv.MpvEventEndFile — player.py compares
+    # event.data.reason against these, not against a string.
+    mock_module.MpvEventEndFile.EOF = 0
+    mock_module.MpvEventEndFile.RESTARTED = 1
+    mock_module.MpvEventEndFile.ABORTED = 2
+    mock_module.MpvEventEndFile.QUIT = 3
+    mock_module.MpvEventEndFile.ERROR = 4
+    mock_module.MpvEventEndFile.REDIRECT = 5
     with patch.dict("sys.modules", {"mpv": mock_module}):
         # Re-import player to pick up patched mpv
         if "sixpack.player.player" in sys.modules:
@@ -310,14 +333,14 @@ def test_state_callback_resume(player):
 def test_eof_callback(player):
     received = []
     player.on_end_of_track(lambda: received.append(True))
-    _mock_mpv_instance._fire_event("end-file", {"reason": "eof"})
+    _mock_mpv_instance._fire_event("end-file", _MockEndFileData(reason=0))  # EOF
     assert received == [True]
 
 
 def test_eof_callback_not_fired_for_stop(player):
     received = []
     player.on_end_of_track(lambda: received.append(True))
-    _mock_mpv_instance._fire_event("end-file", {"reason": "stop"})
+    _mock_mpv_instance._fire_event("end-file", _MockEndFileData(reason=3))  # QUIT
     assert received == []
 
 
