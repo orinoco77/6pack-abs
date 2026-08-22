@@ -45,7 +45,7 @@ class SeriesDetailScreen(DetailGridScreen):
         return item.cover_url(server_url, token)
 
     def show_loading(self, series: Series, server_url: str = "", token: str = "") -> None:
-        self._populate(series.name, series.sorted_books, {}, server_url, token, loading=True)
+        self._populate(series.name, series.sorted_books, {}, server_url, token)
 
     def load(
         self,

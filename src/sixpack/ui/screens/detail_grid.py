@@ -15,6 +15,7 @@ from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QVBoxLayout, QWidget
 
+from sixpack.ui import theme
 from sixpack.ui.cover_cache import CoverCache, dominant_color
 from sixpack.ui.widgets.focus_grid import FocusGrid
 from sixpack.ui.widgets.hero_backdrop import HeroBackdrop
@@ -50,8 +51,12 @@ class DetailGridScreen(QWidget):
         self._grid.focus_changed.connect(self._on_grid_focus_changed)
 
         layout = QVBoxLayout(self)
-        # Top margin pushes the grid below the hero band (matches browse.py's
-        # rows_layout treatment) so the first row of cards doesn't start
+        # Top margin pushes the grid below the hero band, applied here to
+        # the outer QVBoxLayout directly (not inside a scroll area) so
+        # content is clipped at the hero's bottom edge rather than scrolling
+        # under it — unlike browse.py's rows_layout, which applies its
+        # margin INSIDE a scroll area so content scrolls under a translucent
+        # hero as the user scrolls — so the first row of cards doesn't start
         # already overlapping the hero's title/subtitle text.
         layout.setContentsMargins(0, HeroBackdrop.HERO_H, 0, 0)
         layout.setSpacing(0)
@@ -94,7 +99,6 @@ class DetailGridScreen(QWidget):
         progress: dict,
         server_url: str,
         token: str,
-        loading: bool = False,  # noqa: ARG002 — reserved for a future loading indicator; unused for now
     ) -> None:
         self._items = items
         self._progress = progress
@@ -109,6 +113,13 @@ class DetailGridScreen(QWidget):
         if self._grid.item_count:
             idx = self._find_resume_index()
             self._grid.focus_item(idx)
+        else:
+            # No items — clear whatever subtitle/backdrop a previously
+            # populated (and now stale) series/playlist left behind on this
+            # reused screen instance, rather than leaving it visible under
+            # the new (correct) hero title.
+            self._hero_backdrop.set_subtitle("")
+            self._hero_backdrop.backdrop.show_color(QColor(theme.SURFACE))
 
     def _refresh_progress(self, progress: dict) -> None:
         self._progress = progress

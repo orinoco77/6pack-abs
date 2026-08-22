@@ -504,6 +504,51 @@ def test_chapter_screen_backdrop_fetched_once_not_per_focus_change(qtbot):
     assert len(fake_cache.fetch_backdrop_calls) == 1
 
 
+def test_chapter_screen_stale_color_callback_is_dropped(qtbot):
+    """_color_cb's dominant-color fetch is async and has no key check of its
+    own (unlike _backdrop_cb, which passes key=k into Backdrop.show_image,
+    letting Backdrop's own set_expected_key guard drop it). If this screen
+    instance is reused for a second, different book before the first book's
+    color fetch resolves — a real race, since this screen is constructed
+    once and reused across load() calls — the stale callback must not paint
+    a color for a book that's no longer showing. Uses a fake CoverCache that
+    captures callbacks without invoking them, so both the stale and current
+    callback can be fired in a controlled order.
+    """
+    from PyQt6.QtGui import QPixmap
+
+    from sixpack.ui.screens.chapter_select import ChapterSelectScreen
+
+    fake_cache = _FakeCoverCache()
+    screen = ChapterSelectScreen(cover_cache=fake_cache)
+    qtbot.addWidget(screen)
+
+    book_a = _make_box_set_book()  # id="bx1"
+    screen.load(book_a, _make_chapters(), None, "http://localhost", "tok")
+    assert len(fake_cache.fetch_calls) == 1
+    stale_color_cb = fake_cache.fetch_calls[0][2]
+
+    media_b = LibraryItemMedia(
+        metadata={"title": "A Different Book"}, duration=1000.0, chapters=_make_chapters(),
+    )
+    book_b = SeriesBook(id="bx2", libraryId="lib1", media=media_b)
+    screen.load(book_b, _make_chapters(), None, "http://localhost", "tok")
+    assert len(fake_cache.fetch_calls) == 2
+    current_color_cb = fake_cache.fetch_calls[1][2]
+
+    calls = []
+    screen._hero_backdrop.backdrop.show_color = lambda color: calls.append(color)
+
+    # Stale callback (book_a) resolving after focus already moved to book_b
+    # must be dropped — not paint a color at all.
+    stale_color_cb(QPixmap())
+    assert calls == []
+
+    # The current book's callback must still apply normally.
+    current_color_cb(QPixmap())
+    assert len(calls) == 1
+
+
 # ---- Config ----
 
 def test_config_save_load(tmp_path, monkeypatch):

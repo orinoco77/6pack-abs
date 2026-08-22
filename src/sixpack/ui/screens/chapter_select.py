@@ -211,6 +211,7 @@ class ChapterSelectScreen(QWidget):
         self._library_item: LibraryItem | None = None
         self._chapters: list[Chapter] = []
         self._cover_cache = cover_cache
+        self._backdrop_key: str = ""
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -226,34 +227,38 @@ class ChapterSelectScreen(QWidget):
         # stylesheet set to a transparent background, or its opaque
         # QAbstractScrollArea viewport paints over the Backdrop and hides
         # it completely.
-        self._list.setStyleSheet(f"""
-            QListWidget {{
+        self._list.setStyleSheet("""
+            QListWidget {
                 background: transparent;
                 outline: none;
-            }}
-            QListWidget::item {{
+            }
+            QListWidget::item {
                 padding: 0;
                 margin: 2px 0;
                 background-color: transparent;
                 border: none;
-            }}
-            QListWidget::item:selected {{
+            }
+            QListWidget::item:selected {
                 background-color: transparent;
-            }}
-            QListWidget::item:focus {{
+            }
+            QListWidget::item:focus {
                 background-color: transparent;
                 outline: none;
-            }}
+            }
         """)
         self._list.viewport().setStyleSheet("background: transparent;")
         self._list.currentRowChanged.connect(self._on_row_changed)
         self._list.itemActivated.connect(self._on_item_activated)
 
         layout = QVBoxLayout(self)
-        # Top margin pushes the list below the hero band (matches browse.py's
-        # rows_layout treatment and detail_grid.py's identical fix) so the
-        # first chapter row doesn't start already overlapping the hero's
-        # title/subtitle text.
+        # Top margin pushes the list below the hero band (same fix as
+        # detail_grid.py's outer layout, applied here to the QVBoxLayout
+        # directly rather than inside a scroll area, so content is clipped
+        # at the hero's bottom edge instead of scrolling under it — unlike
+        # browse.py's rows_layout, which applies its margin INSIDE a scroll
+        # area so content scrolls under a translucent hero as the user
+        # scrolls) so the first chapter row doesn't start already
+        # overlapping the hero's title/subtitle text.
         layout.setContentsMargins(0, HeroBackdrop.HERO_H, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(self._list)
@@ -363,11 +368,21 @@ class ChapterSelectScreen(QWidget):
 
     def _load_backdrop(self, cover_url: str | None, token: str, key: str) -> None:
         self._hero_backdrop.backdrop.set_expected_key(key)
+        # Set synchronously, before either async fetch below kicks off, so a
+        # callback that resolves after this screen has since been reused for
+        # a different book (this screen instance is constructed once and
+        # reused across load()/load_from_library_item()/
+        # load_from_playlist_item() calls) can detect it's stale and drop
+        # itself — same key-guard pattern as Backdrop.set_expected_key,
+        # applied here at the screen level since it guards the dominant-
+        # color fetch below, which Backdrop.show_color itself doesn't key-
+        # check the way Backdrop.show_image does.
+        self._backdrop_key = key
         if not cover_url or self._cover_cache is None:
             return
 
         def _color_cb(pm: QPixmap) -> None:
-            if sip.isdeleted(self):
+            if sip.isdeleted(self) or self._backdrop_key != key:
                 return
             self._hero_backdrop.backdrop.show_color(dominant_color(pm))
 
