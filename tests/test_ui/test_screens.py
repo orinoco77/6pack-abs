@@ -211,6 +211,16 @@ def test_detail_screen_focus_item_by_key(qtbot):
     assert screen._grid._focused_index == 1
 
 
+def test_detail_screen_hero_subtitle_includes_episode_title(qtbot):
+    screen = SeriesDetailScreen()
+    qtbot.addWidget(screen)
+    series = _make_series()
+    screen.load(series, {}, "http://localhost", "tok")
+    sub = screen._hero_backdrop._hero_sub.text()
+    assert "1" in sub
+    assert "Episode 1" in sub
+
+
 # ---- ChapterSelectScreen ----
 
 def _make_chapters():
