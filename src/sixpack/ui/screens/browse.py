@@ -242,11 +242,13 @@ class BrowseScreen(QWidget):
       "grid"     — expanded full-pane grid for one row (sidebar stays visible)
     """
 
-    series_selected = pyqtSignal(object)    # Series
-    playlist_selected = pyqtSignal(object)  # Playlist
-    book_selected = pyqtSignal(object)      # LibraryItem
-    library_changed = pyqtSignal(object)    # Library — emitted whenever a new library is selected
-    see_all_requested = pyqtSignal(object)  # RowType — user wants the full uncapped dataset
+    series_selected = pyqtSignal(object)                  # Series
+    playlist_selected = pyqtSignal(object)                # Playlist
+    book_selected = pyqtSignal(object)                    # LibraryItem
+    podcast_selected = pyqtSignal(object)                 # LibraryItem (a podcast show)
+    podcast_episode_selected = pyqtSignal(object, object) # (LibraryItem show, PodcastEpisode)
+    library_changed = pyqtSignal(object)                  # Library — emitted whenever a new library is selected
+    see_all_requested = pyqtSignal(object)                # RowType — user wants the full uncapped dataset
 
     def __init__(
         self,
@@ -988,5 +990,10 @@ class BrowseScreen(QWidget):
             self.series_selected.emit(item)
         elif row_type == RowType.PLAYLISTS:
             self.playlist_selected.emit(item)
+        elif getattr(item, "media_type", "") == "podcast":
+            if item.recent_episode is not None:
+                self.podcast_episode_selected.emit(item, item.recent_episode)
+            else:
+                self.podcast_selected.emit(item)
         else:
             self.book_selected.emit(item)
