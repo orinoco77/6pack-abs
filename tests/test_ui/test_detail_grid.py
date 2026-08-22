@@ -99,6 +99,21 @@ def test_detail_grid_refresh_progress_updates_in_place_without_rebuild(qtbot):
     assert screen._grid.item_count == 3
 
 
+def test_detail_grid_refresh_progress_sets_finished_badge(qtbot):
+    """_refresh_progress's card.set_finished(finished) call has an observable
+    effect: MediaCard.set_finished stores the flag on _finished (and shows
+    the finished badge), not just a no-op cosmetic call.
+    """
+    screen = _TestScreen()
+    qtbot.addWidget(screen)
+    screen._populate("My Series", _items(), {}, "http://s", "t")
+    card = screen._grid._items[0]
+    assert card._finished is False  # sanity: starts unfinished
+    screen._refresh_progress({"a": {"fraction": 1.0, "finished": True}})
+    assert card._finished is True
+    assert card._finished_badge.isVisibleTo(card._body)
+
+
 def test_detail_grid_focus_item_by_key(qtbot):
     screen = _TestScreen()
     qtbot.addWidget(screen)

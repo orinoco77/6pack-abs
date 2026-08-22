@@ -126,3 +126,25 @@ def test_playlist_detail_empty_playlist(qtbot):
     empty_playlist = Playlist(id="p1", name="Empty")
     screen.load(empty_playlist, {})
     assert screen._grid.item_count == 0
+
+
+def test_playlist_detail_screen_item_progress_fraction(qtbot):
+    """_item_progress computes current_time / duration, keyed by library_item_id."""
+    screen = PlaylistDetailScreen()
+    qtbot.addWidget(screen)
+    item = _make_item("li1", "Item 1", 1800.0)
+    prog = MediaProgress(libraryItemId="li1", currentTime=900.0, duration=1800.0, isFinished=False)
+    fraction, finished = screen._item_progress(item, {"li1": prog})
+    assert abs(fraction - 0.5) < 1e-6
+    assert finished is False
+
+
+def test_playlist_detail_screen_item_progress_finished_is_zero_fraction(qtbot):
+    """A finished item reports fraction 0.0 regardless of current_time."""
+    screen = PlaylistDetailScreen()
+    qtbot.addWidget(screen)
+    item = _make_item("li1", "Item 1", 1800.0)
+    prog = MediaProgress(libraryItemId="li1", currentTime=1800.0, duration=1800.0, isFinished=True)
+    fraction, finished = screen._item_progress(item, {"li1": prog})
+    assert fraction == 0.0
+    assert finished is True
