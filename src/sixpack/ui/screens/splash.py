@@ -22,14 +22,14 @@ class SplashScreen(QWidget):
         title = QLabel("SixPack")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet(
-            f"font-size: 52pt; font-weight: bold; color: {theme.TEXT_PRIMARY}; letter-spacing: 4px;"
+            f"font-size: {theme.FONT_HUGE}pt; font-weight: bold; color: {theme.ACCENT}; letter-spacing: 4px;"
         )
         layout.addWidget(title)
 
         subtitle = QLabel("Audiobookshelf")
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         subtitle.setStyleSheet(
-            f"font-size: 18pt; color: {theme.TEXT_SECONDARY};"
+            f"font-size: {theme.FONT_HEADING}pt; color: {theme.TEXT_SECONDARY};"
         )
         layout.addWidget(subtitle)
 
@@ -38,7 +38,7 @@ class SplashScreen(QWidget):
         self._status_label = QLabel("Connecting…")
         self._status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._status_label.setStyleSheet(
-            f"font-size: 13pt; color: {theme.TEXT_MUTED}; font-style: italic;"
+            f"font-size: {theme.FONT_META}pt; color: {theme.TEXT_MUTED}; font-style: italic;"
         )
         layout.addWidget(self._status_label)
 
