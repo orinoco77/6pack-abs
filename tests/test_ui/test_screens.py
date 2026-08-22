@@ -129,6 +129,165 @@ def test_login_button_disabled_during_connect(qtbot):
     assert screen._login_btn.isEnabled()
 
 
+# ---- LoginScreen: pairing flow + on-screen-keyboard fallback ----
+#
+# These tests never call screen.show(), so isVisible() would report False
+# for every widget regardless of state (a widget's effective visibility
+# requires its whole ancestor chain, including the top-level window, to
+# have been shown — see QWidget.isVisible() docs). isHidden() only reflects
+# the widget's OWN explicit hide()/setVisible(False) call, independent of
+# ancestor state, which is exactly this file's existing convention for
+# _error_label above — so these tests check isHidden() on the two view
+# CONTAINERS (_pairing_view / _keyboard_form), which are what
+# _use_keyboard_fallback()/start_pairing() actually toggle.
+
+def test_login_starts_on_pairing_view_by_default(qtbot):
+    screen = LoginScreen()
+    qtbot.addWidget(screen)
+    screen.start_pairing()
+    try:
+        assert not screen._pairing_view.isHidden()
+        assert screen._keyboard_form.isHidden()
+        assert screen._pairing_server is not None
+    finally:
+        screen.stop_pairing()
+
+
+def test_login_stop_pairing_tears_down_server(qtbot):
+    screen = LoginScreen()
+    qtbot.addWidget(screen)
+    screen.start_pairing()
+    server = screen._pairing_server
+    screen.stop_pairing()
+    assert screen._pairing_server is None
+    # The underlying HTTPServer must actually be torn down, not just
+    # dereferenced — confirm the port is no longer accepting connections.
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.5)
+        result = s.connect_ex(("127.0.0.1", server.port))
+        assert result != 0  # connection refused/failed — server is down
+
+
+def test_login_stop_pairing_idempotent_when_never_started(qtbot):
+    screen = LoginScreen()
+    qtbot.addWidget(screen)
+    screen.stop_pairing()  # must not raise
+    assert screen._pairing_server is None
+
+
+def test_login_pairing_success_emits_pairing_login_succeeded(qtbot):
+    screen = LoginScreen()
+    qtbot.addWidget(screen)
+    screen.start_pairing()
+    try:
+        with qtbot.waitSignal(screen.pairing_login_succeeded, timeout=2000) as blocker:
+            # Simulate the pairing server's background-thread callback
+            # exactly the way PairingServer itself would call it.
+            screen._pairing_server.on_success("http://abs.test", "alice", "tok123")
+        assert blocker.args == ["http://abs.test", "alice", "tok123"]
+    finally:
+        screen.stop_pairing()
+
+
+def test_login_use_remote_instead_switches_to_keyboard_form(qtbot):
+    screen = LoginScreen()
+    qtbot.addWidget(screen)
+    screen.start_pairing()
+    try:
+        screen._use_keyboard_fallback()
+        assert not screen._keyboard_form.isHidden()
+        assert screen._pairing_view.isHidden()
+    finally:
+        screen.stop_pairing()
+
+
+def test_login_keyboard_fallback_typing_and_submit_emits_login_requested(qtbot):
+    screen = LoginScreen()
+    qtbot.addWidget(screen)
+    screen.start_pairing()
+    try:
+        screen._use_keyboard_fallback()
+        screen._url_input.setText("http://abs.test:13378")
+        screen._user_input.setText("alice")
+        screen._pass_input.setText("hunter2")
+
+        signals = []
+        screen.login_requested.connect(lambda *a: signals.append(a))
+        screen._keyboard.done_pressed.emit()
+        assert signals == [("http://abs.test:13378", "alice", "hunter2")]
+    finally:
+        screen.stop_pairing()
+
+
+def test_login_keyboard_key_presses_type_into_active_field(qtbot):
+    """key_pressed/backspace_pressed append to / delete from whichever
+    field last received real Qt focus (the active-field mechanism)."""
+    screen = LoginScreen()
+    qtbot.addWidget(screen)
+    screen.show()
+    qtbot.waitExposed(screen)
+    screen.start_pairing()
+    try:
+        screen._use_keyboard_fallback()
+        # _use_keyboard_fallback() defaults the active field to the URL
+        # field (also gives it initial focus/active-field status).
+        for ch in "abs":
+            screen._keyboard.key_pressed.emit(ch)
+        assert screen._url_input.text() == "abs"
+        screen._keyboard.backspace_pressed.emit()
+        assert screen._url_input.text() == "ab"
+
+        # Switching real Qt focus to another field (simulating a
+        # click/Select on it) retargets subsequent keyboard input there.
+        screen._user_input.setFocus()
+        qtbot.waitUntil(lambda: screen._active_field is screen._user_input, timeout=1000)
+        screen._keyboard.key_pressed.emit("x")
+        assert screen._user_input.text() == "x"
+    finally:
+        screen.stop_pairing()
+
+
+def test_login_pairing_bind_failure_falls_back_to_keyboard(qtbot, monkeypatch):
+    """If PairingServer.start() can't bind a port, start_pairing() must not
+    show the (now broken) pairing view — it should fall back to the
+    keyboard view automatically with an inline note."""
+    from sixpack.pairing.server import PairingServer
+
+    def _raise_oserror(self):
+        raise OSError("bind failed")
+
+    monkeypatch.setattr(PairingServer, "start", _raise_oserror)
+
+    screen = LoginScreen()
+    qtbot.addWidget(screen)
+    screen.start_pairing()
+    try:
+        assert screen._pairing_server is None
+        assert not screen._keyboard_form.isHidden()
+        assert screen._pairing_view.isHidden()
+        assert not screen._pairing_unavailable_label.isHidden()
+        assert screen._pairing_unavailable_label.text()
+    finally:
+        screen.stop_pairing()
+
+
+def test_login_show_error_still_works_unchanged(qtbot):
+    screen = LoginScreen()
+    qtbot.addWidget(screen)
+    screen.show_error("Login failed: bad credentials")
+    assert not screen._error_label.isHidden()
+    assert "Login failed" in screen._error_label.text()
+
+
+def test_login_set_prefill_still_works_unchanged(qtbot):
+    screen = LoginScreen()
+    qtbot.addWidget(screen)
+    screen.set_prefill("http://abs.test", "alice")
+    assert screen._url_input.text() == "http://abs.test"
+    assert screen._user_input.text() == "alice"
+
+
 # ---- SeriesDetailScreen ----
 
 def _make_series() -> Series:
