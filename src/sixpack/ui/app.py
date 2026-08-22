@@ -150,6 +150,7 @@ class MainWindow(QMainWindow):
             self._player_screen.progress_update.connect(self._on_progress_update)
 
         self._login_screen.login_requested.connect(self._on_login_requested)
+        self._login_screen.pairing_login_succeeded.connect(self._on_pairing_login_succeeded)
         self._browse_screen.series_selected.connect(self._on_series_selected)
         self._browse_screen.playlist_selected.connect(self._on_playlist_selected)
         self._browse_screen.book_selected.connect(self._on_browse_book_selected)
@@ -195,6 +196,7 @@ class MainWindow(QMainWindow):
         self._stack.setCurrentWidget(self._splash_screen)
 
     def _show_login(self) -> None:
+        self._login_screen.start_pairing()
         self._stack.setCurrentWidget(self._login_screen)
 
     def _show_browse(self) -> None:
@@ -258,6 +260,21 @@ class MainWindow(QMainWindow):
             result = await client.login(username, password)
             self._client = ABSClient(self._server_url, token=result.user.token)
             return result
+
+    def _on_pairing_login_succeeded(self, url: str, username: str, token: str) -> None:
+        self._server_url = url
+        self._token = token
+        self._client = ABSClient(url, token=token)
+        self._config.add_or_update_server(
+            ServerConfig(
+                name=self._server_url,
+                url=self._server_url,
+                token=self._token,
+                username=username,
+            )
+        )
+        self._config.save()
+        self._worker.run("libraries", self._async_get_libraries())
 
     def _do_connect_with_token(self, url: str, token: str) -> None:
         self._server_url = url
@@ -587,6 +604,7 @@ class MainWindow(QMainWindow):
             self._worker.run("libraries", self._async_get_libraries())
 
         elif tag in ("libraries", "autologin"):
+            self._login_screen.stop_pairing()
             self._libraries = result
             if not result:
                 self._show_browse()
@@ -778,6 +796,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def closeEvent(self, event) -> None:
+        self._login_screen.stop_pairing()
         if self._player:
             self._player.shutdown()
         self._worker.stop_loop()

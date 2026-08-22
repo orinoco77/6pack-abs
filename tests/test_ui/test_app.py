@@ -139,6 +139,47 @@ def test_on_track_ended_navigates_to_series_detail_with_next_focused(window, qtb
     assert window._detail_screen._grid._focused_index == 1  # b2 pre-focused
 
 
+def test_pairing_login_succeeded_saves_token_and_proceeds(window, qtbot, monkeypatch):
+    """The pairing flow's success path must save the token via the same
+    AppConfig/ServerConfig mechanism manual login uses, and proceed to
+    fetch libraries / show browse — matching _on_login_requested's
+    existing successful-login behavior, not a parallel path."""
+    saved = []
+    monkeypatch.setattr(window._config, "add_or_update_server", lambda cfg: saved.append(cfg))
+    monkeypatch.setattr(window._config, "save", lambda: None)
+
+    window._login_screen.pairing_login_succeeded.emit("http://abs.test", "alice", "tok123")
+
+    assert len(saved) == 1
+    assert saved[0].url == "http://abs.test"
+    assert saved[0].token == "tok123"
+    assert saved[0].username == "alice"
+
+
+def test_show_login_starts_pairing_server(window):
+    calls = []
+    window._login_screen.start_pairing = lambda: calls.append(True)
+    window._show_login()
+    assert calls == [True]
+
+
+def test_leaving_login_screen_stops_pairing_server(window):
+    """The real transition-away-from-login point is inside _on_result's
+    "libraries"/"autologin" success branch, not _show_browse() itself
+    (which is also called from other, unrelated navigation paths)."""
+    calls = []
+    window._login_screen.stop_pairing = lambda: calls.append(True)
+    window._on_result("autologin", [])
+    assert calls == [True]
+
+
+def test_close_event_stops_pairing_server(window):
+    calls = []
+    window._login_screen.stop_pairing = lambda: calls.append(True)
+    window.close()
+    assert calls == [True]
+
+
 def test_on_result_book_chapters_single_chapter_sets_chapters_after_play(window):
     """Round-2 regression test (Task 6 fix): the single-chapter direct-play
     path in _on_result("book_chapters", ...) must call set_chapters() AFTER
