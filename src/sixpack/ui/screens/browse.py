@@ -245,8 +245,9 @@ class BrowseScreen(QWidget):
     series_selected = pyqtSignal(object)                  # Series
     playlist_selected = pyqtSignal(object)                # Playlist
     book_selected = pyqtSignal(object)                    # LibraryItem
-    podcast_selected = pyqtSignal(object)                 # LibraryItem (a podcast show)
-    podcast_episode_selected = pyqtSignal(object, object) # (LibraryItem show, PodcastEpisode)
+    podcast_selected = pyqtSignal(object)   # LibraryItem (a podcast show)
+    # (LibraryItem show, PodcastEpisode)
+    podcast_episode_selected = pyqtSignal(object, object)
     library_changed = pyqtSignal(object)                  # Library — emitted whenever a new library is selected
     see_all_requested = pyqtSignal(object)                # RowType — user wants the full uncapped dataset
 
