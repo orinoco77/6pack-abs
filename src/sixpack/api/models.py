@@ -241,6 +241,13 @@ class Library(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class LibraryStats(BaseModel):
+    total_duration: float = Field(0.0, alias="totalDuration")
+    num_audio_tracks: int = Field(0, alias="numAudioTracks")
+
+    model_config = {"populate_by_name": True, "extra": "ignore"}
+
+
 class MediaProgress(BaseModel):
     id: str | None = None
     user_id: str | None = Field(None, alias="userId")

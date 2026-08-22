@@ -172,6 +172,36 @@ async def test_get_libraries_empty(server_url, auth_token):
     assert libs == []
 
 
+@pytest.mark.asyncio
+async def test_get_library_stats(server_url, auth_token):
+    async with respx.mock(base_url=server_url) as mock:
+        mock.get("/api/libraries/lib1/stats").mock(
+            return_value=httpx.Response(
+                200,
+                json={"totalItems": 42, "totalDuration": 123456.0, "numAudioTracks": 42},
+            )
+        )
+        async with ABSClient(server_url, token=auth_token) as client:
+            stats = await client.get_library_stats("lib1")
+    assert stats.total_duration == 123456.0
+    assert stats.num_audio_tracks == 42
+
+
+@pytest.mark.asyncio
+async def test_get_library_stats_no_audio(server_url, auth_token):
+    async with respx.mock(base_url=server_url) as mock:
+        mock.get("/api/libraries/lib-ebooks/stats").mock(
+            return_value=httpx.Response(
+                200,
+                json={"totalItems": 1712, "totalDuration": 0, "numAudioTracks": 0},
+            )
+        )
+        async with ABSClient(server_url, token=auth_token) as client:
+            stats = await client.get_library_stats("lib-ebooks")
+    assert stats.total_duration == 0
+    assert stats.num_audio_tracks == 0
+
+
 # ---- Series ----
 
 @pytest.mark.asyncio
