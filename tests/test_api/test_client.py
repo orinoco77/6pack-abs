@@ -374,6 +374,51 @@ async def test_close_playback_session_404_ignored(server_url, auth_token):
             await client.close_playback_session("sess1")  # should not raise
 
 
+@pytest.mark.asyncio
+async def test_get_progress_with_episode_id(server_url, auth_token):
+    async with respx.mock(base_url=server_url) as mock:
+        mock.get("/api/me/progress/show1/ep1").mock(
+            return_value=httpx.Response(200, json=_progress_payload())
+        )
+        async with ABSClient(server_url, token=auth_token) as client:
+            prog = await client.get_progress("show1", episode_id="ep1")
+    assert prog is not None
+
+
+@pytest.mark.asyncio
+async def test_update_progress_with_episode_id(server_url, auth_token):
+    async with respx.mock(base_url=server_url) as mock:
+        route = mock.patch("/api/me/progress/show1/ep1").mock(
+            return_value=httpx.Response(200, json={})
+        )
+        async with ABSClient(server_url, token=auth_token) as client:
+            await client.update_progress("show1", 300.0, 1800.0, False, episode_id="ep1")
+    assert route.called
+
+
+@pytest.mark.asyncio
+async def test_start_playback_session_with_episode_id(server_url, auth_token):
+    async with respx.mock(base_url=server_url) as mock:
+        mock.post("/api/items/show1/play/ep1").mock(
+            return_value=httpx.Response(200, json=_session_payload())
+        )
+        async with ABSClient(server_url, token=auth_token) as client:
+            session = await client.start_playback_session("show1", episode_id="ep1")
+    assert session.id == "sess1"
+
+
+@pytest.mark.asyncio
+async def test_start_playback_session_without_episode_id_unchanged(server_url, auth_token):
+    """Regression guard: books must keep hitting the plain /play path."""
+    async with respx.mock(base_url=server_url) as mock:
+        route = mock.post("/api/items/b1/play").mock(
+            return_value=httpx.Response(200, json=_session_payload())
+        )
+        async with ABSClient(server_url, token=auth_token) as client:
+            await client.start_playback_session("b1")
+    assert route.called
+
+
 # ---- stream_url ----
 
 def test_stream_url_relative(server_url):
