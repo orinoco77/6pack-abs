@@ -3,21 +3,24 @@ from __future__ import annotations
 
 import math
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal
 from PyQt6.QtGui import QPixmap, QKeyEvent
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
+    QListWidget,
+    QListWidgetItem,
     QProgressBar,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
-from sixpack.api.models import LibraryItem, MediaProgress, Series, SeriesBook, Playlist, PlaylistItem
+from sixpack.api.models import Chapter, LibraryItem, MediaProgress, Series, SeriesBook, Playlist, PlaylistItem
 from sixpack.player.player import AudioPlayer
 from sixpack.ui import theme
 from sixpack.ui.cover_cache import CoverCache
+from sixpack.ui.screens.chapter_select import ChapterItem, _chapter_status, _chapter_fraction
 from sixpack.ui.widgets.backdrop import Backdrop
 
 
@@ -68,6 +71,7 @@ class PlayerScreen(QWidget):
         self._position = 0.0
         self._item_id = ""
         self._speed_index = 0
+        self._chapters: list[Chapter] = []
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._build_ui()
@@ -241,8 +245,32 @@ class PlayerScreen(QWidget):
 
         root.addStretch(1)
 
+        # In-player chapter access overlay — hidden modal list over the
+        # player, opened/closed via InputAction.MENU. Not part of `root`'s
+        # layout flow (it floats above everything else, like a modal), so
+        # it's constructed as a plain child of `self` and positioned
+        # explicitly in resizeEvent, mirroring chapter_select.py's own
+        # QListWidget construction/styling.
+        self._chapter_overlay = QListWidget(self)
+        self._chapter_overlay.setSpacing(2)
+        self._chapter_overlay.setStyleSheet(f"""
+            QListWidget {{
+                background: {theme.SURFACE};
+                border: 2px solid {theme.ACCENT};
+                border-radius: 8px;
+                outline: none;
+            }}
+            QListWidget::item {{ padding: 0; margin: 2px 0; border: none; }}
+            QListWidget::item:selected {{ background-color: transparent; }}
+        """)
+        self._chapter_overlay.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._chapter_overlay.itemActivated.connect(self._on_overlay_chapter_activated)
+        self._chapter_overlay.hide()
+
     def resizeEvent(self, event) -> None:
         self._backdrop.setGeometry(self.rect())
+        w, h = int(self.width() * 0.6), int(self.height() * 0.7)
+        self._chapter_overlay.setGeometry((self.width() - w) // 2, (self.height() - h) // 2, w, h)
         super().resizeEvent(event)
 
     def _connect_player(self) -> None:
@@ -371,6 +399,15 @@ class PlayerScreen(QWidget):
         self._token = token
         self._sync_timer.start()
 
+    def set_chapters(self, chapters: list[Chapter]) -> None:
+        """Give this screen the current item's chapter list, for the
+        in-player chapter access overlay (InputAction.MENU). Called by
+        app.py separately from play_book/play_library_item/
+        play_playlist_item — see those methods' docstrings/callers in
+        app.py for the two paths chapters arrive by (direct single-chapter
+        play vs. via ChapterSelectScreen)."""
+        self._chapters = chapters
+
     def set_audio_tracks(self, content_url: str, start_time: float, token: str) -> None:
         self._player.play(content_url, start_time=start_time, auth_token=token)
         self._play_btn.setText("⏸")
@@ -476,6 +513,40 @@ class PlayerScreen(QWidget):
         self._speed_label.setText(f"{speed}x")
 
     # ------------------------------------------------------------------
+    # Chapter access overlay
+    # ------------------------------------------------------------------
+
+    def _toggle_chapter_overlay(self) -> None:
+        if self._chapter_overlay.isVisible():
+            self._chapter_overlay.hide()
+            return
+        if not self._chapters:
+            return
+        self._chapter_overlay.clear()
+        current_time = self._position
+        for i, chapter in enumerate(self._chapters):
+            status = _chapter_status(chapter, current_time, is_finished=False)
+            fraction = _chapter_fraction(chapter, current_time, status)
+            widget = ChapterItem(i, chapter, status, fraction)
+            item = QListWidgetItem()
+            item.setSizeHint(QSize(0, 68))
+            self._chapter_overlay.addItem(item)
+            self._chapter_overlay.setItemWidget(item, widget)
+        self._chapter_overlay.setCurrentRow(self._current_chapter_index())
+        self._chapter_overlay.show()
+
+    def _current_chapter_index(self) -> int:
+        for i, chapter in enumerate(self._chapters):
+            if self._position < chapter.end:
+                return i
+        return max(0, len(self._chapters) - 1)
+
+    def _on_overlay_chapter_activated(self, item: QListWidgetItem) -> None:
+        row = self._chapter_overlay.row(item)
+        self._player.seek_to_chapter(row)
+        self._chapter_overlay.hide()
+
+    # ------------------------------------------------------------------
     # Keyboard / gamepad
     # ------------------------------------------------------------------
 
@@ -488,7 +559,42 @@ class PlayerScreen(QWidget):
         from sixpack.input.actions import InputAction
 
         action = key_to_action(event.key(), player_mode=True)
-        if action == InputAction.BACK:
+
+        if self._chapter_overlay.isVisible():
+            # While the overlay is open, it owns SELECT/UP/DOWN/BACK/MENU —
+            # none of these should also fall through to the normal
+            # player-mode bindings below (e.g. SELECT must not also seek).
+            #
+            # Note: in player_mode, key_to_action's keyboard map never
+            # produces InputAction.SELECT for Key_Return (it maps to MENU,
+            # matching Kodi's "Enter = show OSD" convention) — SELECT only
+            # ever arrives from a gamepad's A button (see gamepad.py). So
+            # both SELECT *and* MENU are treated as "activate the
+            # highlighted chapter" here, which is what lets a keyboard user
+            # open the overlay (MENU when closed) and then confirm a
+            # highlighted chapter (MENU again, now open) with the same key.
+            # BACK is the only way to dismiss the overlay without seeking.
+            if action == InputAction.BACK:
+                self._chapter_overlay.hide()
+            elif action in (InputAction.SELECT, InputAction.MENU):
+                current = self._chapter_overlay.currentItem()
+                if current:
+                    self._on_overlay_chapter_activated(current)
+                else:
+                    self._chapter_overlay.hide()
+            elif action == InputAction.UP:
+                row = self._chapter_overlay.currentRow()
+                if row > 0:
+                    self._chapter_overlay.setCurrentRow(row - 1)
+            elif action == InputAction.DOWN:
+                row = self._chapter_overlay.currentRow()
+                if row + 1 < self._chapter_overlay.count():
+                    self._chapter_overlay.setCurrentRow(row + 1)
+            return
+
+        if action == InputAction.MENU:
+            self._toggle_chapter_overlay()
+        elif action == InputAction.BACK:
             self.back_requested.emit()
         elif action == InputAction.PLAY_PAUSE:
             self._player.toggle_pause()

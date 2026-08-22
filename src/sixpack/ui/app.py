@@ -157,6 +157,24 @@ class MainWindow(QMainWindow):
         self._chapter_screen.playlist_item_play_requested.connect(self._on_playlist_item_play_requested)
         self._chapter_screen.library_item_play_requested.connect(self._on_browse_item_play_requested)
         self._chapter_screen.back_requested.connect(self._on_chapter_back)
+        # Thread the chapter list the user just picked from through to
+        # PlayerScreen's in-player chapter overlay. self._chapter_screen
+        # still holds the exact chapters that were loaded for this book/item
+        # at the moment one of its play_requested-family signals fires, so
+        # these connections just forward that list — they don't change
+        # _on_play_requested/etc.'s own signature or meaning.
+        self._chapter_screen.play_requested.connect(
+            lambda book, st: self._player_screen
+            and self._player_screen.set_chapters(self._chapter_screen._chapters)
+        )
+        self._chapter_screen.playlist_item_play_requested.connect(
+            lambda item, st: self._player_screen
+            and self._player_screen.set_chapters(self._chapter_screen._chapters)
+        )
+        self._chapter_screen.library_item_play_requested.connect(
+            lambda item, st: self._player_screen
+            and self._player_screen.set_chapters(self._chapter_screen._chapters)
+        )
 
         self._setup_quit_shortcut()
         self._show_splash()
@@ -572,6 +590,8 @@ class MainWindow(QMainWindow):
             else:
                 start_time = progress.current_time if progress and not progress.is_finished else 0.0
                 self._player_back_target = "browse"
+                if self._player_screen:
+                    self._player_screen.set_chapters(chapters)
                 self._on_browse_item_play_requested(item, start_time)
 
         elif tag == "playlist_detail":
@@ -602,6 +622,8 @@ class MainWindow(QMainWindow):
                 prog = self._detail_screen._progress.get(book.id)
                 start_time = prog.current_time if prog and not prog.is_finished else 0.0
                 self._player_back_target = "detail"
+                if self._player_screen:
+                    self._player_screen.set_chapters(chapters)
                 self._on_play_requested(book, start_time)
 
         elif tag == "playlist_item_chapters":
@@ -617,6 +639,8 @@ class MainWindow(QMainWindow):
             else:
                 prog = self._playlist_detail_screen._progress.get(item.library_item_id)
                 start_time = prog.current_time if prog and not prog.is_finished else 0.0
+                if self._player_screen:
+                    self._player_screen.set_chapters(chapters)
                 self._on_playlist_item_play_requested(item, start_time)
 
         elif tag == "start_session":
