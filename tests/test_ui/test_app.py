@@ -132,6 +132,34 @@ def test_on_track_ended_navigates_to_series_detail_with_next_focused(window, qtb
     assert window._detail_screen._grid._focused_index == 1  # b2 pre-focused
 
 
+def test_on_result_book_chapters_single_chapter_sets_chapters_after_play(window):
+    """Round-2 regression test (Task 6 fix): the single-chapter direct-play
+    path in _on_result("book_chapters", ...) must call set_chapters() AFTER
+    the play-handler (_on_play_requested -> PlayerScreen.play_book), not
+    before. play_book() resets PlayerScreen._chapters = [] at entry (round-1
+    fix for a different bug: stale chapters surviving next/prev navigation),
+    so calling set_chapters() before play_book() would have it immediately
+    wiped, silently disabling the in-player chapter overlay for every
+    single-chapter item (the common case for standalone audiobooks).
+    """
+    from sixpack.api.models import Chapter, LibraryItem, LibraryItemMedia, Series, SeriesBook
+
+    media = LibraryItemMedia(metadata={"title": "Book 1"}, duration=100.0)
+    book = SeriesBook(id="b1", libraryId="lib1", media=media, sequence="1")
+    series = Series(id="s1", name="A Series", books=[book])
+
+    window._current_series = series
+    window._pending_book = book
+
+    chapters = [Chapter(id=0, start=0.0, end=100.0, title="Ch1")]
+    result_media = LibraryItemMedia(metadata={"title": "Book 1"}, duration=100.0, chapters=chapters)
+    result_item = LibraryItem(id="b1", libraryId="lib1", media=result_media)
+
+    window._on_result("book_chapters", result_item)
+
+    assert window._player_screen._chapters == chapters
+
+
 def test_on_track_ended_standalone_item_returns_to_browse(window, qtbot):
     """A library item played with no series/playlist context has no 'next'
     grid to return to — lands on Browse, per the spec's explicitly-flagged
