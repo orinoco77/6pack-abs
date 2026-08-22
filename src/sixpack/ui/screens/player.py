@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from sixpack.api.models import Chapter, LibraryItem, MediaProgress, Series, SeriesBook, Playlist, PlaylistItem
+from sixpack.api.models import Chapter, LibraryItem, MediaProgress, PodcastEpisode, Series, SeriesBook, Playlist, PlaylistItem
 from sixpack.player.player import AudioPlayer
 from sixpack.ui import theme
 from sixpack.ui.cover_cache import CoverCache
@@ -47,14 +47,14 @@ class PlayerScreen(QWidget):
       next_item       — manual skip to next episode (button/remote)
       prev_item       — manual skip to previous episode (button/remote)
       track_ended     — current track finished playing on its own
-      progress_update — (item_id, current_time, duration, is_finished)
+      progress_update — (item_id, current_time, duration, is_finished, episode_id)
     """
 
     back_requested = pyqtSignal()
     next_item = pyqtSignal()
     prev_item = pyqtSignal()
     track_ended = pyqtSignal()
-    progress_update = pyqtSignal(str, float, float, bool)
+    progress_update = pyqtSignal(str, float, float, bool, str)  # item_id, current_time, duration, is_finished, episode_id
 
     def __init__(self, player: AudioPlayer, cover_cache: CoverCache | None = None, parent=None) -> None:
         super().__init__(parent)
@@ -70,6 +70,7 @@ class PlayerScreen(QWidget):
         self._duration = 0.0
         self._position = 0.0
         self._item_id = ""
+        self._episode_id = ""
         self._speed_index = 0
         self._chapters: list[Chapter] = []
 
@@ -303,6 +304,7 @@ class PlayerScreen(QWidget):
         self._current_playlist_item = None
         self._playlist = None
         self._playlist_items = []
+        self._episode_id = ""
 
     def play_book(
         self,
@@ -425,6 +427,39 @@ class PlayerScreen(QWidget):
         self._token = token
         self._sync_timer.start()
 
+    def play_podcast_episode(
+        self,
+        episode: PodcastEpisode,
+        show: LibraryItem,
+        start_time: float,
+        server_url: str,
+        token: str,
+    ) -> None:
+        """Play a podcast episode. Cover/backdrop use the show's own art
+        (episodes have none of their own); progress/session calls need the
+        episode id too, tracked separately from _item_id."""
+        self._reset_per_item_state()
+        self._current_index = 0
+        self._item_id = show.id
+        self._episode_id = episode.id
+
+        self._title_label.setText(episode.title)
+        self._series_label.setText(show.title)
+        self._episode_label.setText("")
+
+        cover_url = show.cover_url(server_url, token)
+        if self._cover_cache is not None:
+            self._cover_cache.fetch(cover_url, token, self._set_cover_pixmap)
+            self._backdrop.set_expected_key(self._item_id)
+            self._cover_cache.fetch_backdrop(
+                cover_url, token,
+                lambda pix, key=self._item_id: self._set_backdrop_pixmap(pix, key),
+            )
+
+        self._server_url = server_url
+        self._token = token
+        self._sync_timer.start()
+
     def set_chapters(self, chapters: list[Chapter]) -> None:
         """Give this screen the current item's chapter list, for the
         in-player chapter access overlay (InputAction.MENU). Called by
@@ -529,7 +564,7 @@ class PlayerScreen(QWidget):
         if self._item_id and self._duration > 0:
             is_finished = (self._duration - self._position) < 10
             self.progress_update.emit(
-                self._item_id, self._position, self._duration, is_finished
+                self._item_id, self._position, self._duration, is_finished, self._episode_id
             )
 
     def _cycle_speed(self) -> None:

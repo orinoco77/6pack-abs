@@ -553,6 +553,69 @@ def test_play_library_item_clears_both_sides(qtbot):
     assert s._playlist_items == []
 
 
+def test_play_podcast_episode_sets_item_and_episode_ids(qtbot):
+    from sixpack.api.models import PodcastEpisode
+
+    s = PlayerScreen(player=_FakePlayer())
+    qtbot.addWidget(s)
+
+    show = LibraryItem(
+        id="show1", library_id="lib1", media_type="podcast",
+        media=LibraryItemMedia(metadata={"title": "My Show"}),
+    )
+    episode = PodcastEpisode(id="ep1", library_item_id="show1", title="Episode One")
+
+    s.play_podcast_episode(episode, show, 0.0, "http://abs.test", "tok")
+
+    assert s._item_id == "show1"
+    assert s._episode_id == "ep1"
+    assert s._title_label.text() == "Episode One"
+    assert s._series_label.text() == "My Show"
+
+
+def test_progress_update_carries_podcast_episode_id(qtbot):
+    from sixpack.api.models import PodcastEpisode
+
+    s = PlayerScreen(player=_FakePlayer())
+    qtbot.addWidget(s)
+
+    show = LibraryItem(
+        id="show1", library_id="lib1", media_type="podcast",
+        media=LibraryItemMedia(metadata={"title": "My Show"}),
+    )
+    episode = PodcastEpisode(id="ep1", library_item_id="show1", title="Episode One")
+    s.play_podcast_episode(episode, show, 0.0, "http://abs.test", "tok")
+    s._duration = 1000.0
+    s._position = 100.0
+
+    received = []
+    s.progress_update.connect(lambda *args: received.append(args))
+    s._sync_progress()
+
+    assert len(received) == 1
+    assert received[0][0] == "show1"
+    assert received[0][4] == "ep1"
+
+
+def test_progress_update_episode_id_empty_for_library_item_playback(qtbot):
+    """Regression guard: play_library_item (a book, not a podcast) must
+    emit an empty episode id — _reset_per_item_state clearing _episode_id
+    is what keeps book/playlist progress updates unaffected by this task."""
+    s = PlayerScreen(player=_FakePlayer())
+    qtbot.addWidget(s)
+
+    s.play_library_item(_library_item(item_id="book1"), 0.0, "http://abs.test", "tok")
+    s._duration = 1000.0
+    s._position = 100.0
+
+    received = []
+    s.progress_update.connect(lambda *args: received.append(args))
+    s._sync_progress()
+
+    assert len(received) == 1
+    assert received[0][4] == ""
+
+
 def test_play_book_hides_and_clears_open_chapter_overlay(qtbot):
     """Regression for Fix 3: if the chapter overlay is left open (still
     visible+populated with the PREVIOUS item's rows) when a new item starts

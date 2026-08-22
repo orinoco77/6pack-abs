@@ -896,11 +896,12 @@ def test_player_screen_sync_progress(qtbot):
     with qtbot.waitSignal(screen.progress_update, timeout=1000) as blocker:
         screen._sync_progress()
 
-    item_id, current_time, duration, is_finished = blocker.args
+    item_id, current_time, duration, is_finished, episode_id = blocker.args
     assert item_id == "b1"
     assert current_time == 900.0
     assert duration == 1800.0
     assert is_finished is False
+    assert episode_id == ""
 
 
 def test_player_screen_sync_progress_finished(qtbot):
@@ -915,7 +916,7 @@ def test_player_screen_sync_progress_finished(qtbot):
     with qtbot.waitSignal(screen.progress_update, timeout=1000) as blocker:
         screen._sync_progress()
 
-    _, _, _, is_finished = blocker.args
+    _, _, _, is_finished, _ = blocker.args
     assert is_finished is True
 
 
