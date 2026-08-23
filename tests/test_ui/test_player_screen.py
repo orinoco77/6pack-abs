@@ -746,14 +746,14 @@ def test_description_switches_between_items(qtbot):
 def test_description_truncated_at_word_boundary_with_ellipsis(qtbot):
     s = PlayerScreen(player=_FakePlayer())
     qtbot.addWidget(s)
-    long_text = "word " * 100  # far beyond the 280-char cap
+    long_text = "word " * 200  # far beyond the 600-char cap
     book = SeriesBook(
         id="b1", media=LibraryItemMedia(metadata={"title": "T", "description": long_text}),
     )
     s.play_book(book, 0.0, _series([book]), [book], "http://server", "tok")
     shown = s._description_label.text()
     assert shown.endswith("…")
-    assert len(shown) <= 281  # 280 chars + the ellipsis character
+    assert len(shown) <= 601  # 600 chars + the ellipsis character
     assert not shown[:-1].endswith(" ")  # truncated at a word boundary, not mid-word
 
 
