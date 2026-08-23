@@ -588,6 +588,40 @@ def test_playlist_item_play_requested_forwards_chapters_to_player_in_order(windo
     assert window._player_screen._chapters == chapters
 
 
+def test_on_result_playlist_single_chapter_sets_playlist_detail_back_target(window):
+    """Single-chapter playlist items bypass the chapter screen entirely --
+    the "playlist_item_chapters" result handler calls
+    _on_playlist_item_play_requested directly. Back from the player must
+    therefore land on playlist_detail, not on the never-shown chapter
+    screen. Previously _on_playlist_item_activated eagerly set
+    _player_back_target="chapter" regardless of chapter count, and
+    _on_playlist_item_play_requested's ternary re-derivation always
+    evaluated to "chapter" for any playlist item since
+    _chapter_back_target is unconditionally "playlist_detail" after
+    activation -- sending single-chapter playback to a blank chapter
+    screen on Back."""
+    from sixpack.api.models import LibraryItem, LibraryItemMedia, Playlist, PlaylistItem
+
+    media = LibraryItemMedia(metadata={"title": "Item 1", "authorName": "Author"})
+    library_item = LibraryItem(id="i1", libraryId="lib1", media=media)
+    item = PlaylistItem(library_item_id="i1", library_item=library_item)
+    playlist = Playlist(id="p1", name="My Playlist", items=[item])
+    window._current_playlist = playlist
+    window._server_url = "http://abs.test"
+    window._token = "tok"
+
+    # Mirrors _on_playlist_item_activated's eager assignment.
+    window._pending_playlist_item = item
+    window._chapter_back_target = "playlist_detail"
+    window._player_back_target = "playlist_detail"
+
+    full_item = LibraryItem(id="i1", libraryId="lib1", media=media)  # no chapters
+    window._on_result("playlist_item_chapters", full_item)
+
+    assert window._stack.currentWidget() is window._player_screen
+    assert window._player_back_target == "playlist_detail"
+
+
 # ---- Podcast playback wiring ----
 
 def test_podcast_selected_shows_detail_screen(window):
