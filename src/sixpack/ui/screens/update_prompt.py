@@ -86,6 +86,10 @@ class UpdatePromptScreen(QWidget):
 
         self._reflect_focus()
 
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self.setFocus()
+
     # ------------------------------------------------------------------
     # State entry points
     # ------------------------------------------------------------------

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QLabel, QStackedWidget
 
 from sixpack.ui.screens.update_prompt import UpdatePromptScreen
 
@@ -16,6 +17,35 @@ def _make_screen(qtbot):
     screen.activateWindow()
     QTest.qWaitForWindowActive(screen)
     return screen
+
+
+def test_gains_real_focus_when_switched_to_in_a_stack(qtbot):
+    """Regression: the screen never actually worked with a keyboard/remote
+    in the real app. _make_screen()'s isolated show()+activateWindow()
+    happens to auto-focus a lone top-level StrongFocus widget, masking
+    the bug -- every other screen test in this suite uses the same
+    pattern for the same reason. But app.py never shows this screen
+    standalone; it's one page of MainWindow's QStackedWidget, switched to
+    via setCurrentWidget(), which does NOT hand a newly-current page real
+    Qt focus by itself. Every other screen handles this with a showEvent
+    override that calls self.setFocus() -- this screen was missing one.
+    This test embeds the screen in a QStackedWidget exactly like app.py
+    does, as a non-initial page, to catch that class of bug for real."""
+    stack = QStackedWidget()
+    qtbot.addWidget(stack)
+    placeholder = QLabel("placeholder")
+    stack.addWidget(placeholder)
+    screen = UpdatePromptScreen()
+    stack.addWidget(screen)
+    screen.show_prompt("0.2.0", "0.3.0")
+
+    stack.show()
+    qtbot.waitExposed(stack)
+    stack.activateWindow()
+    QTest.qWaitForWindowActive(stack)
+    stack.setCurrentWidget(screen)  # exactly what app.py's dispatch does
+
+    assert screen.hasFocus()
 
 
 def test_show_prompt_displays_both_versions(qtbot):
