@@ -223,9 +223,10 @@ def test_browse_screen_load_libraries(qtbot):
     qtbot.addWidget(screen)
     libs = [_lib("l1", "Audiobooks"), _lib("l2", "Big Finish")]
     screen.load_libraries(libs, "http://server", "token")
-    assert len(screen._sidebar_items) == 2
-    assert screen._sidebar_items[0]._label.text() == "Audiobooks"
-    assert screen._sidebar_items[1]._label.text() == "Big Finish"
+    assert len(screen._sidebar_items) == 3  # Exit + 2 libraries
+    assert screen._sidebar_items[0]._label.text() == "Exit"
+    assert screen._sidebar_items[1]._label.text() == "Audiobooks"
+    assert screen._sidebar_items[2]._label.text() == "Big Finish"
 
 
 def test_browse_screen_load_libraries_resets_state(qtbot):
@@ -233,7 +234,7 @@ def test_browse_screen_load_libraries_resets_state(qtbot):
     qtbot.addWidget(screen)
     libs = [_lib("l1", "Audiobooks")]
     screen.load_libraries(libs, "http://s", "tok")
-    assert screen._sidebar_idx == 0
+    assert screen._sidebar_idx == 1  # defaults to the first library, not Exit (index 0)
     assert screen._loaded_library is None
 
 
@@ -245,7 +246,7 @@ def test_sidebar_layout_ends_with_trailing_stretch(qtbot):
     qtbot.addWidget(screen)
     screen.load_libraries([_lib("l1", "A"), _lib("l2", "B")], "http://s", "tok")
     layout = screen._sidebar_items_layout
-    assert layout.count() == 3  # 2 sidebar items + 1 trailing stretch
+    assert layout.count() == 4  # Exit + 2 library items + 1 trailing stretch
     last_item = layout.itemAt(layout.count() - 1)
     assert last_item.widget() is None  # a stretch/spacer, not a sidebar item
 
@@ -256,7 +257,7 @@ def test_sidebar_layout_stretch_not_duplicated_on_reload(qtbot):
     screen.load_libraries([_lib("l1", "A")], "http://s", "tok")
     screen.load_libraries([_lib("l1", "A"), _lib("l2", "B")], "http://s", "tok")
     layout = screen._sidebar_items_layout
-    assert layout.count() == 3  # 2 items + exactly one trailing stretch
+    assert layout.count() == 4  # Exit + 2 library items + exactly one trailing stretch
 
 
 # ---------------------------------------------------------------------------
@@ -291,9 +292,18 @@ def test_sidebar_down_moves_selection(qtbot):
     qtbot.addWidget(screen)
     screen.load_libraries([_lib("l1", "A"), _lib("l2", "B")], "http://s", "tok")
     screen.show()
-    assert screen._sidebar_idx == 0
+    assert screen._sidebar_idx == 1  # defaults to the first library
     _press(qtbot, screen, Qt.Key.Key_Down)
-    assert screen._sidebar_idx == 1
+    assert screen._sidebar_idx == 2
+
+
+def test_sidebar_up_from_first_library_reaches_exit(qtbot):
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    screen.load_libraries([_lib("l1", "A"), _lib("l2", "B")], "http://s", "tok")
+    screen.show()
+    _press(qtbot, screen, Qt.Key.Key_Up)
+    assert screen._sidebar_idx == 0  # Exit
 
 
 def test_sidebar_up_does_not_go_negative(qtbot):
@@ -301,6 +311,7 @@ def test_sidebar_up_does_not_go_negative(qtbot):
     qtbot.addWidget(screen)
     screen.load_libraries([_lib("l1", "A"), _lib("l2", "B")], "http://s", "tok")
     screen.show()
+    _press(qtbot, screen, Qt.Key.Key_Up)  # already at Exit (0) after one Up
     _press(qtbot, screen, Qt.Key.Key_Up)
     assert screen._sidebar_idx == 0
 
@@ -311,7 +322,7 @@ def test_sidebar_down_clamps_at_end(qtbot):
     screen.load_libraries([_lib("l1", "A")], "http://s", "tok")
     screen.show()
     _press(qtbot, screen, Qt.Key.Key_Down)
-    assert screen._sidebar_idx == 0  # still 0 (only 1 library)
+    assert screen._sidebar_idx == 1  # still 1 (Exit + only 1 library)
 
 
 def test_sidebar_right_enters_rows(qtbot):
@@ -333,11 +344,165 @@ def test_sidebar_select_enters_rows(qtbot):
 
 
 def test_sidebar_right_no_libraries_stays_in_sidebar(qtbot):
+    """With zero libraries loaded, _sidebar_idx defaults to 0 (Exit, which
+    is always present) — Right/Select reaches Exit's confirmation rather
+    than doing nothing, so the app can still be quit even if the library
+    list never populates. _zone itself never changes for this (see the
+    Exit-confirm tests below for why)."""
     screen = BrowseScreen()
     qtbot.addWidget(screen)
     screen.show()
     _press(qtbot, screen, Qt.Key.Key_Right)
     assert screen._zone == "sidebar"
+    assert screen._exit_overlay.isVisible()
+
+
+# ---------------------------------------------------------------------------
+# BrowseScreen — Exit sidebar item + confirmation
+# ---------------------------------------------------------------------------
+
+def test_exit_is_first_sidebar_item_before_any_libraries_loaded(qtbot):
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    assert len(screen._sidebar_items) == 1
+    assert screen._sidebar_items[0]._label.text() == "Exit"
+    assert screen._sidebar_idx == 0
+
+
+def test_selecting_exit_shows_confirmation_overlay(qtbot):
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    screen.load_libraries([_lib("l1", "A")], "http://s", "tok")
+    screen.show()
+    _press(qtbot, screen, Qt.Key.Key_Up)  # from the default first library to Exit
+    assert screen._sidebar_idx == 0
+
+    _press(qtbot, screen, Qt.Key.Key_Right)
+
+    assert screen._exit_overlay.isVisible()
+    assert screen._zone == "sidebar"  # unchanged — the overlay just floats on top
+
+
+def test_select_on_exit_does_not_trigger_a_library_load(qtbot):
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    screen.load_libraries([_lib("l1", "A")], "http://s", "tok")
+    screen.show()
+    signals = []
+    screen.library_changed.connect(lambda lib: signals.append(lib))
+
+    _press(qtbot, screen, Qt.Key.Key_Up)  # Exit
+    _press(qtbot, screen, Qt.Key.Key_Right)  # opens confirmation
+
+    assert signals == []
+
+
+def test_exit_confirm_defaults_focus_to_no(qtbot):
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    screen.load_libraries([_lib("l1", "A")], "http://s", "tok")
+    screen.show()
+    _press(qtbot, screen, Qt.Key.Key_Up)
+    _press(qtbot, screen, Qt.Key.Key_Right)
+    assert screen._exit_confirm_idx == 1  # No
+
+
+def test_exit_confirm_left_right_toggles_yes_no(qtbot):
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    screen.load_libraries([_lib("l1", "A")], "http://s", "tok")
+    screen.show()
+    _press(qtbot, screen, Qt.Key.Key_Up)
+    _press(qtbot, screen, Qt.Key.Key_Right)
+
+    _press(qtbot, screen, Qt.Key.Key_Left)
+    assert screen._exit_confirm_idx == 0  # Yes
+
+    _press(qtbot, screen, Qt.Key.Key_Left)
+    assert screen._exit_confirm_idx == 0  # doesn't go past Yes
+
+    _press(qtbot, screen, Qt.Key.Key_Right)
+    assert screen._exit_confirm_idx == 1  # No
+
+    _press(qtbot, screen, Qt.Key.Key_Right)
+    assert screen._exit_confirm_idx == 1  # doesn't go past No
+
+
+def test_exit_confirm_select_no_dismisses_without_exit_requested(qtbot):
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    screen.load_libraries([_lib("l1", "A")], "http://s", "tok")
+    screen.show()
+    signals = []
+    screen.exit_requested.connect(lambda: signals.append(True))
+
+    _press(qtbot, screen, Qt.Key.Key_Up)
+    _press(qtbot, screen, Qt.Key.Key_Right)  # opens, defaults to No
+    _press(qtbot, screen, Qt.Key.Key_Return)  # selects No
+
+    assert not screen._exit_overlay.isVisible()
+    assert signals == []
+
+
+def test_exit_confirm_select_yes_emits_exit_requested(qtbot):
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    screen.load_libraries([_lib("l1", "A")], "http://s", "tok")
+    screen.show()
+    signals = []
+    screen.exit_requested.connect(lambda: signals.append(True))
+
+    _press(qtbot, screen, Qt.Key.Key_Up)
+    _press(qtbot, screen, Qt.Key.Key_Right)  # opens, defaults to No
+    _press(qtbot, screen, Qt.Key.Key_Left)  # move to Yes
+    _press(qtbot, screen, Qt.Key.Key_Return)
+
+    assert not screen._exit_overlay.isVisible()
+    assert signals == [True]
+
+
+def test_exit_confirm_back_cancels(qtbot):
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    screen.load_libraries([_lib("l1", "A")], "http://s", "tok")
+    screen.show()
+    signals = []
+    screen.exit_requested.connect(lambda: signals.append(True))
+
+    _press(qtbot, screen, Qt.Key.Key_Up)
+    _press(qtbot, screen, Qt.Key.Key_Right)
+    _press(qtbot, screen, Qt.Key.Key_Left)  # move to Yes, to prove Back overrides it
+    _press(qtbot, screen, Qt.Key.Key_Backspace)  # Back
+
+    assert not screen._exit_overlay.isVisible()
+    assert signals == []
+
+
+def test_exit_confirm_reopens_defaulting_to_no_each_time(qtbot):
+    """A cancelled confirmation must not leave the next one pre-focused on
+    Yes — each opening defaults fresh to No."""
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    screen.load_libraries([_lib("l1", "A")], "http://s", "tok")
+    screen.show()
+
+    _press(qtbot, screen, Qt.Key.Key_Up)
+    _press(qtbot, screen, Qt.Key.Key_Right)
+    _press(qtbot, screen, Qt.Key.Key_Left)  # move to Yes
+    _press(qtbot, screen, Qt.Key.Key_Backspace)  # cancel
+
+    _press(qtbot, screen, Qt.Key.Key_Right)  # reopen
+    assert screen._exit_confirm_idx == 1  # No, not still on Yes
+
+
+def test_reflect_library_blank_when_exit_focused(qtbot):
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    screen.load_libraries([_lib("l1", "Audiobooks")], "http://s", "tok")
+    screen.show()
+    _press(qtbot, screen, Qt.Key.Key_Up)  # Exit
+    assert screen._hero_title.text() == ""
+    assert screen._hero_sub.text() == ""
 
 
 # ---------------------------------------------------------------------------

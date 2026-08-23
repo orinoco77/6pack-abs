@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QScrollArea,
     QStackedWidget,
     QVBoxLayout,
@@ -48,7 +49,7 @@ DEFAULT_ROW_TYPES: list[RowType] = [
 # Sidebar item
 # ---------------------------------------------------------------------------
 
-_LIB_ICONS = {"book": "📚", "podcast": "🎙", "ebook": "📖"}
+_LIB_ICONS = {"book": "📚", "podcast": "🎙", "ebook": "📖", "exit": "⏻"}
 
 
 class _SidebarItem(QWidget):
@@ -250,6 +251,7 @@ class BrowseScreen(QWidget):
     podcast_episode_selected = pyqtSignal(object, object)
     library_changed = pyqtSignal(object)                  # Library — emitted whenever a new library is selected
     see_all_requested = pyqtSignal(object)                # RowType — user wants the full uncapped dataset
+    exit_requested = pyqtSignal()                         # user confirmed Exit in the sidebar
 
     def __init__(
         self,
@@ -302,11 +304,14 @@ class BrowseScreen(QWidget):
         root.addWidget(self._build_sidebar())
         root.addWidget(self._build_content(), stretch=1)
         self._build_hero()  # overlay child on the content pane
+        self._build_exit_confirm()  # overlay child, hidden until Exit is selected
 
     def resizeEvent(self, event) -> None:
         self._backdrop.setGeometry(self.rect())
         if hasattr(self, "_hero"):
             self._hero.setGeometry(self._hero_geometry())
+        if hasattr(self, "_exit_overlay"):
+            self._exit_overlay.setGeometry(self._exit_confirm_geometry())
         super().resizeEvent(event)
 
     def _build_hero(self) -> None:
@@ -363,6 +368,14 @@ class BrowseScreen(QWidget):
         self._sidebar_items_layout.setContentsMargins(8, 0, 8, 0)
         self._sidebar_items_layout.setSpacing(2)
 
+        # Exit is a permanent sidebar entry, always present at index 0 —
+        # unlike library entries (added/rebuilt in _rebuild_sidebar()), it
+        # exists even before any libraries have loaded, so there's always a
+        # way to quit even if the library list never populates.
+        self._exit_item = _SidebarItem("Exit", media_type="exit")
+        self._sidebar_items.append(self._exit_item)
+        self._sidebar_items_layout.addWidget(self._exit_item)
+
         sidebar_scroll = QScrollArea()
         sidebar_scroll.setWidget(self._sidebar_items_container)
         sidebar_scroll.setWidgetResizable(True)
@@ -374,6 +387,51 @@ class BrowseScreen(QWidget):
         layout.addWidget(sidebar_scroll)
 
         return sidebar
+
+    def _build_exit_confirm(self) -> None:
+        """Small centered confirmation shown when the sidebar's Exit item is
+        selected. Floats above everything else like a modal — same pattern
+        as PlayerScreen's in-player chapter overlay: a plain hidden child of
+        `self`, positioned explicitly in resizeEvent, shown/raised on demand.
+        """
+        self._exit_overlay = QWidget(self)
+        self._exit_overlay.setStyleSheet(
+            f"background: {theme.SURFACE}; border: 2px solid {theme.ACCENT}; "
+            f"border-radius: 8px;"
+        )
+        lay = QVBoxLayout(self._exit_overlay)
+        lay.setContentsMargins(24, 20, 24, 20)
+        lay.setSpacing(16)
+
+        title = QLabel("Exit SixPack?")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet(
+            f"font-size: {theme.FONT_HEADING}pt; font-weight: bold; "
+            f"color: {theme.TEXT_PRIMARY}; background: transparent; border: none;"
+        )
+        lay.addWidget(title)
+
+        btn_row = QWidget()
+        btn_row.setStyleSheet("background: transparent; border: none;")
+        btn_layout = QHBoxLayout(btn_row)
+        btn_layout.setSpacing(16)
+        self._exit_yes_btn = QPushButton("Yes")
+        self._exit_yes_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._exit_yes_btn.clicked.connect(lambda: self._activate_exit_confirm(0))
+        self._exit_no_btn = QPushButton("No")
+        self._exit_no_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._exit_no_btn.clicked.connect(lambda: self._activate_exit_confirm(1))
+        btn_layout.addWidget(self._exit_yes_btn)
+        btn_layout.addWidget(self._exit_no_btn)
+        lay.addWidget(btn_row)
+        self._exit_confirm_buttons = [self._exit_yes_btn, self._exit_no_btn]
+
+        self._exit_confirm_idx = 1  # default to No
+        self._exit_overlay.hide()
+
+    def _exit_confirm_geometry(self) -> QRect:
+        w, h = int(self.width() * 0.3), 140
+        return QRect((self.width() - w) // 2, (self.height() - h) // 2, w, h)
 
     def _build_content(self) -> QWidget:
         self._content_stack = QStackedWidget()
@@ -505,7 +563,9 @@ class BrowseScreen(QWidget):
         self._server_url = server_url
         self._token = token
         self._rebuild_sidebar()
-        self._sidebar_idx = 0
+        # Index 0 is the permanent Exit entry — default to the first real
+        # library (index 1) so a fresh load doesn't land the user on Exit.
+        self._sidebar_idx = 1 if libraries else 0
         self._loaded_library = None
         self._update_sidebar_styles()
         self._reset_rows()  # show Loading… immediately
@@ -553,14 +613,17 @@ class BrowseScreen(QWidget):
         self._populate_row(idx)
 
     def _rebuild_sidebar(self) -> None:
-        for w in self._sidebar_items:
+        # Index 0 (Exit) is permanent — only library-derived items get
+        # torn down and rebuilt here.
+        for w in self._sidebar_items[1:]:
             w.deleteLater()
-        self._sidebar_items.clear()
+        self._sidebar_items = [self._exit_item]
         # Drop any leftover layout items (e.g. the addStretch() below, or
         # entries left behind by the widgets deleteLater()'d above) so a
         # second load_libraries() call doesn't accumulate stray stretches.
         while self._sidebar_items_layout.count():
             self._sidebar_items_layout.takeAt(0)
+        self._sidebar_items_layout.addWidget(self._exit_item)
         for lib in self._libraries:
             item = _SidebarItem(lib.name, media_type=getattr(lib, "media_type", "book"))
             self._sidebar_items.append(item)
@@ -670,8 +733,13 @@ class BrowseScreen(QWidget):
     def _reflect_library(self) -> None:
         """Sidebar zone: nothing in the content area is selected yet, so
         the hero shows the current library's name instead of previewing
-        an arbitrary item from its rows."""
-        lib = self._libraries[self._sidebar_idx] if self._libraries else None
+        an arbitrary item from its rows. Index 0 (Exit) has no library to
+        show — falls through to the same blank state as "no libraries"."""
+        lib = (
+            self._libraries[self._sidebar_idx - 1]
+            if self._libraries and self._sidebar_idx > 0
+            else None
+        )
         self._hero_title.setText(lib.name if lib else "")
         self._hero_sub.setText("")
         self._backdrop.set_expected_key("")
@@ -715,6 +783,9 @@ class BrowseScreen(QWidget):
         if action is None:
             super().keyPressEvent(event)
             return
+        if self._exit_overlay.isVisible():
+            self._handle_exit_confirm(action)
+            return
         if self._zone == "sidebar":
             self._handle_sidebar(action)
         elif self._zone == "rows":
@@ -735,20 +806,70 @@ class BrowseScreen(QWidget):
 
         if moved:
             self._update_sidebar_styles()
-            self._start_loading_selected_library()
-        elif action in (InputAction.RIGHT, InputAction.SELECT) and self._libraries:
-            self._enter_rows()
+            if self._sidebar_idx == 0:
+                # Landed on Exit — nothing to load, just reflect the blank
+                # hero state (_start_loading_selected_library() is what
+                # normally reflects a real library, but it never fires here).
+                self._reflect_current()
+            else:
+                self._start_loading_selected_library()
+        elif action in (InputAction.RIGHT, InputAction.SELECT):
+            if self._sidebar_idx == 0:
+                self._show_exit_confirm()
+            elif self._libraries:
+                self._enter_rows()
 
     def _start_loading_selected_library(self) -> None:
         """Eagerly trigger a content fetch for the currently highlighted library."""
-        if not self._libraries:
+        if not self._libraries or self._sidebar_idx == 0:
             return
-        lib = self._libraries[self._sidebar_idx]
+        lib = self._libraries[self._sidebar_idx - 1]
         if lib is self._loaded_library:
             return
         self._loaded_library = lib
         self._reset_rows()
         self.library_changed.emit(lib)
+
+    # ------------------------------------------------------------------
+    # Exit confirmation
+    # ------------------------------------------------------------------
+
+    def _show_exit_confirm(self) -> None:
+        self._exit_confirm_idx = 1  # default to No every time it's opened
+        self._reflect_exit_confirm_focus()
+        self._exit_overlay.setGeometry(self._exit_confirm_geometry())
+        self._exit_overlay.show()
+        self._exit_overlay.raise_()
+
+    def _reflect_exit_confirm_focus(self) -> None:
+        for i, btn in enumerate(self._exit_confirm_buttons):
+            active = i == self._exit_confirm_idx
+            border = theme.ACCENT if active else "transparent"
+            btn.setStyleSheet(
+                f"background: {theme.SURFACE_HIGH}; color: {theme.TEXT_PRIMARY}; "
+                f"border: 2px solid {border}; border-radius: 6px; padding: 8px 20px; "
+                f"font-size: {theme.FONT_BODY}pt;"
+            )
+
+    def _handle_exit_confirm(self, action: InputAction) -> None:
+        if action == InputAction.LEFT and self._exit_confirm_idx > 0:
+            self._exit_confirm_idx -= 1
+            self._reflect_exit_confirm_focus()
+        elif (
+            action == InputAction.RIGHT
+            and self._exit_confirm_idx < len(self._exit_confirm_buttons) - 1
+        ):
+            self._exit_confirm_idx += 1
+            self._reflect_exit_confirm_focus()
+        elif action == InputAction.SELECT:
+            self._activate_exit_confirm(self._exit_confirm_idx)
+        elif action == InputAction.BACK:
+            self._exit_overlay.hide()
+
+    def _activate_exit_confirm(self, idx: int) -> None:
+        self._exit_overlay.hide()
+        if idx == 0:
+            self.exit_requested.emit()
 
     def _handle_rows(self, action: InputAction) -> None:
         # When "See all" is focused, only a subset of actions are meaningful
@@ -868,8 +989,8 @@ class BrowseScreen(QWidget):
     def _enter_rows(self) -> None:
         # Trigger a content load if this library hasn't been loaded yet
         # (handles the case where user goes Right without having moved Up/Down)
-        if self._libraries:
-            lib = self._libraries[self._sidebar_idx]
+        if self._libraries and self._sidebar_idx > 0:
+            lib = self._libraries[self._sidebar_idx - 1]
             if lib is not self._loaded_library:
                 self._loaded_library = lib
                 self._reset_rows()

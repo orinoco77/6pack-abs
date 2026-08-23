@@ -1266,3 +1266,37 @@ def test_splash_shows_update_check_status_on_startup(qtbot, monkeypatch):
         assert win._splash_screen._status_label.text() == "Checking for updates…"
     finally:
         win.close()
+
+
+# ---- Sidebar Exit wiring ----
+
+def test_browse_exit_requested_calls_close(qtbot, monkeypatch):
+    """BrowseScreen.exit_requested must be wired straight to MainWindow's
+    own close() -- the same method the old Q/Ctrl+Q shortcut used to call
+    -- so all existing shutdown cleanup (pairing server, audio player,
+    worker thread) still runs unchanged. Constructs its own MainWindow (not
+    the shared `window` fixture) because close must be patched at the
+    class level BEFORE _build_ui() connects the signal -- connecting to
+    self.close captures that bound method at connect time, so patching
+    the instance afterward wouldn't affect an already-established
+    connection."""
+    from sixpack.config import AppConfig
+    from sixpack.ui import app as app_module
+
+    monkeypatch.setattr(app_module, "AudioPlayer", _FakeAudioPlayer)
+    monkeypatch.setattr(app_module.AsyncWorker, "run", lambda self, tag, coro: None)
+    close_calls = []
+    monkeypatch.setattr(app_module.MainWindow, "close", lambda self: close_calls.append(True))
+
+    win = app_module.MainWindow(AppConfig())
+    qtbot.addWidget(win)
+    try:
+        win._browse_screen.exit_requested.emit()
+        assert close_calls == [True]
+    finally:
+        # close() is patched to a no-op above, so the real closeEvent
+        # (which would normally stop this thread) never ran -- stop it
+        # directly so it doesn't leak into the rest of the test session.
+        win._worker.stop_loop()
+        win._thread.quit()
+        win._thread.wait(2000)
