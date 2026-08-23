@@ -1,8 +1,8 @@
 """Focusable media card widget for grid browsing."""
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal, QSize, QVariantAnimation, QEvent
-from PyQt6.QtGui import QBrush, QPixmap, QPainter, QColor, QFont, QRadialGradient
+from PyQt6.QtCore import Qt, pyqtSignal, QSize, QEvent
+from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont
 from PyQt6.QtWidgets import (
     QFrame, QLabel, QVBoxLayout, QWidget,
 )
@@ -65,66 +65,6 @@ class _Scrim(QWidget):
                 return
             painter = QPainter(self)
             painter.fillRect(self.rect(), self._color)
-            painter.end()
-        except RuntimeError:
-            # Widget was deleted on the C++ side during teardown; skip painting.
-            pass
-
-
-class _Glow(QWidget):
-    """A non-interactive accent-tinted overlay used to make MediaCard's
-    focus glow actually visible.
-
-    The card is fixed-size with essentially no spare margin around its own
-    body (``self`` is only ``2 * theme.FOCUS_BORDER`` larger than
-    ``self._body`` — 3px per side), so there is no room to bleed a soft
-    halo *outward* past the card's own bounds the way a drop-shadow
-    normally would. Instead this paints an inward vignette — transparent at
-    the body's center, brightening toward its edges — directly over the
-    body/art area, the same way ``_Scrim`` paints its dim overlay. Strength
-    is driven by ``MediaCard._glow_strength`` (0.0 unfocused .. 1.0 fully
-    focused).
-
-    Deliberately paint-level, not a ``QGraphicsEffect`` — see
-    ``docs/qt-graphics-effect-crash.md``.
-    """
-
-    _MAX_ALPHA = 150  # alpha (0..255) at the body's edge when strength == 1.0
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
-        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self._strength = 0.0
-
-    def set_strength(self, strength: float) -> None:
-        strength = max(0.0, min(1.0, strength))
-        if strength == self._strength:
-            return
-        self._strength = strength
-        self.update()
-
-    def paintEvent(self, event) -> None:  # noqa: ARG002
-        try:
-            if self._strength <= 0.0:
-                return
-            rect = self.rect()
-            if rect.isEmpty():
-                return
-            painter = QPainter(self)
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-            center = rect.center()
-            radius = max(rect.width(), rect.height()) * 0.75
-            gradient = QRadialGradient(center.x(), center.y(), radius)
-            accent = QColor(theme.ACCENT_GLOW)
-            inner = QColor(accent)
-            inner.setAlpha(0)
-            outer = QColor(accent)
-            outer.setAlpha(int(self._MAX_ALPHA * self._strength))
-            gradient.setColorAt(0.0, inner)
-            gradient.setColorAt(1.0, outer)
-            painter.fillRect(rect, QBrush(gradient))
             painter.end()
         except RuntimeError:
             # Widget was deleted on the C++ side during teardown; skip painting.
@@ -199,23 +139,6 @@ class MediaCard(QFrame):
         self._media_type = media_type
         self._pixmap: QPixmap | None = None
         self._focused = False
-        # Paint-level focus glow: a small strength value (0.0..1.0) animated
-        # via QVariantAnimation and rendered by `self._glow` (a `_Glow`
-        # overlay sitting on top of `self._body`, see its docstring for why
-        # it has to be an overlay rather than a halo bled outward past the
-        # card's own bounds). No QGraphicsEffect involved — see
-        # docs/qt-graphics-effect-crash.md. `self.graphicsEffect()` must be
-        # `None` at all times.
-        self._glow_strength: float = 0.0
-        # One long-lived QVariantAnimation, reused (stopped/reconfigured/
-        # restarted) on every focus change rather than recreated per call.
-        # Recreating one on every set_focused() call leaks a live QObject
-        # child each time (200 focus changes -> 200 live QVariantAnimation
-        # children) since dropping the Python reference doesn't delete the
-        # underlying C++ object while `self` still parents it.
-        self._glow_anim = QVariantAnimation(self)
-        self._glow_anim.setDuration(theme.FOCUS_ANIM_MS)
-        self._glow_anim.valueChanged.connect(self._on_glow_value)
 
         self._build_ui()
 
@@ -232,16 +155,6 @@ class MediaCard(QFrame):
         self._scrim.raise_()
         self._scrim.show()
 
-        # Focus glow overlay — see `_Glow` docstring. Sits above the scrim;
-        # in practice the two never need to be simultaneously visible at
-        # partial strength (the scrim's color/visibility flips immediately
-        # in `set_focused`, only the glow strength animates), but raising it
-        # last keeps the stacking order well-defined regardless.
-        self._glow = _Glow(self._body)
-        self._glow.setGeometry(self._body.rect())
-        self._glow.raise_()
-        self._glow.show()
-
         # Finished-state badge — a small checkmark overlay in the top-right
         # corner of the art, shown only when set_finished(True) is called.
         # Paint-level, not a QGraphicsEffect (see docs/qt-graphics-effect-crash.md).
@@ -251,7 +164,7 @@ class MediaCard(QFrame):
         self._finished_badge.raise_()
         self._finished_badge.hide()
 
-        # Keep the scrim/glow/badge exactly positioned as layout resizes the body.
+        # Keep the scrim/badge exactly positioned as layout resizes the body.
         self._body.installEventFilter(self)
 
     def eventFilter(self, obj, event) -> bool:
@@ -261,8 +174,6 @@ class MediaCard(QFrame):
         ):
             self._scrim.setGeometry(self._body.rect())
             self._scrim.raise_()
-            self._glow.setGeometry(self._body.rect())
-            self._glow.raise_()
             self._position_finished_badge()
             self._finished_badge.raise_()
         return super().eventFilter(obj, event)
@@ -386,15 +297,6 @@ class MediaCard(QFrame):
             f"border: {theme.FOCUS_BORDER}px solid {border}; }}"
         )
 
-        # Glow strength animates 0.0..1.0 and is rendered in paintEvent —
-        # never via a QGraphicsEffect (see comment in __init__). Reuses the
-        # single persistent `self._glow_anim` created in __init__ rather
-        # than constructing a new QVariantAnimation per call.
-        self._glow_anim.stop()
-        self._glow_anim.setStartValue(self._glow_strength)
-        self._glow_anim.setEndValue(1.0 if focused else 0.0)
-        self._glow_anim.start()
-
         # Dim is the paint-level scrim overlaying `self._body`. Applied
         # unconditionally on every call, regardless of prior focus state —
         # this is what fixes the sibling-dimming spec gap. No QGraphicsEffect
@@ -403,10 +305,6 @@ class MediaCard(QFrame):
             _Scrim.color_for_opacity(1.0 if focused else theme.UNFOCUSED_OPACITY)
         )
         self._scrim.setVisible(not focused)
-
-    def _on_glow_value(self, value) -> None:
-        self._glow_strength = float(value)
-        self._glow.set_strength(self._glow_strength)
 
     def keyPressEvent(self, event) -> None:
         from sixpack.input.keyboard import key_to_action

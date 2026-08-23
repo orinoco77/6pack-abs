@@ -36,7 +36,6 @@ BACKDROP_SCRIM_TOP = "#00000000"     # transparent
 BACKDROP_SCRIM_BOTTOM = "#e6000000"  # near-opaque black at the bottom
 
 # Focus feedback
-FOCUS_ANIM_MS = 130
 UNFOCUSED_OPACITY = 0.55
 
 # Subtle top→bottom window gradient (used as the base background)
