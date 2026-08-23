@@ -71,6 +71,15 @@ def test_left_does_not_move_before_install(qtbot):
     assert screen._focus_index == 0
 
 
+def test_right_then_left_returns_focus_to_install(qtbot):
+    screen = _make_screen(qtbot)
+    screen.show_prompt("0.2.0", "0.3.0")
+    qtbot.keyClick(screen, Qt.Key.Key_Right)
+    assert screen._focus_index == 1
+    qtbot.keyClick(screen, Qt.Key.Key_Left)
+    assert screen._focus_index == 0
+
+
 def test_show_installing_hides_buttons_and_shows_status(qtbot):
     screen = _make_screen(qtbot)
     screen.show_prompt("0.2.0", "0.3.0")
