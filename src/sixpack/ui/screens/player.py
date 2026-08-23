@@ -35,11 +35,11 @@ from sixpack.ui.widgets.backdrop import Backdrop
 
 _SPEED_STEPS = [1.0, 1.25, 1.5, 1.75, 2.0]
 
-# Roughly 3 lines' worth of text for the description panel -- no scrolling,
-# no expand interaction, just a preview. Truncated at a word boundary
-# rather than measuring actual font metrics (good enough for a preview;
-# doesn't need to be pixel-exact).
-_DESCRIPTION_MAX_CHARS = 280
+# Roughly 6-7 lines' worth of text for the description panel -- no
+# scrolling, no expand interaction, just a preview. Truncated at a word
+# boundary rather than measuring actual font metrics (good enough for a
+# preview; doesn't need to be pixel-exact).
+_DESCRIPTION_MAX_CHARS = 600
 
 
 def _truncate_description(text: str) -> str:
