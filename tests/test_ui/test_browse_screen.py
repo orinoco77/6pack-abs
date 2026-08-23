@@ -409,6 +409,36 @@ def test_reset_rows_shows_loading_page(qtbot):
     assert screen._content_stack.currentIndex() == 2
 
 
+def test_reset_rows_resets_scroll_position(qtbot):
+    """Regression test: switching libraries in the sidebar must reset the
+    rows page's scroll position, not just the focused-row index. A user
+    scrolled deep into one library's rows (e.g. its last, densely-populated
+    row) who then switches to a smaller library must not land on a
+    scrolled-down view of the NEW library's rows that may be entirely
+    empty — _reset_rows() already resets _focused_row to 0, but the
+    scroll-to-0 side effect lives only in _update_row_styles(), which
+    _reset_rows() never calls."""
+    screen = BrowseScreen()
+    screen.resize(1920, 700)  # short enough that scrolling is meaningful
+    qtbot.addWidget(screen)
+    screen.load_libraries([_lib("l1", "A")], "http://s", "tok")
+    screen.set_row_items(RowType.CONTINUE_LISTENING, [_li("i1", "CL1")])
+    screen.set_row_items(RowType.RECENTLY_ADDED, [_li("i2", "RA1")])
+    screen.set_row_items(RowType.SERIES, [_series("s1", "S1")])
+    screen.set_row_items(RowType.PLAYLISTS, [_playlist("p1", "PL1")])
+    screen.show_content()
+    screen.setFocus()
+    screen._enter_rows()
+
+    for _ in range(3):
+        _press(qtbot, screen, Qt.Key.Key_Down)  # scroll deep into the rows
+    assert screen._rows_scroll.verticalScrollBar().value() > 0
+
+    screen._reset_rows()  # simulates switching to a new library
+
+    assert screen._rows_scroll.verticalScrollBar().value() == 0
+
+
 def test_show_content_switches_to_rows_page(qtbot):
     screen = BrowseScreen()
     qtbot.addWidget(screen)

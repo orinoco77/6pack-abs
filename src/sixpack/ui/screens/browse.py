@@ -519,6 +519,14 @@ class BrowseScreen(QWidget):
         self._focused_row = 0
         self._loading = True
         self._content_stack.setCurrentIndex(2)
+        # _focused_row is reset to 0 above, but the scroll position doesn't
+        # follow it automatically — that side effect normally lives in
+        # _update_row_styles() (called on user-driven navigation), which
+        # this method never calls. Without resetting it here too, switching
+        # to a new library while scrolled deep into the previous one's rows
+        # leaves the new library's rows view scrolled to the same position,
+        # which can be entirely empty for a smaller library.
+        self._rows_scroll.verticalScrollBar().setValue(0)
         # Discarding row data can leave the hero reflecting an item that no
         # longer belongs to the now-selected library (e.g. switching
         # libraries in the sidebar) — keep it in sync with the (now empty)
