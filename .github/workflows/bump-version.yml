@@ -45,6 +45,15 @@ jobs:
           # eventual push would be rejected as non-fast-forward.
           ref: main
           fetch-depth: 1
+          # main requires a PR for everyone except the repository admin
+          # (by role, in the ruleset's bypass list) — the default
+          # GITHUB_TOKEN pushes as the generic "github-actions[bot]"
+          # identity, which doesn't hold that role and would be rejected.
+          # A fine-grained PAT belonging to the admin's own account makes
+          # this push authenticate as the admin instead, so it bypasses
+          # correctly without adding a role (which would also bypass the
+          # rule for any future collaborator granted that same role).
+          token: ${{ secrets.RELEASE_BUMP_PAT }}
 
       - name: Bump patch version and push
         run: |
