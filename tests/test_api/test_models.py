@@ -313,3 +313,53 @@ def test_library_item_recent_episode_defaults_none():
         "media": {"metadata": {"title": "A Book"}},
     })
     assert item.recent_episode is None
+
+
+# ---- description ----
+
+def test_library_item_media_description_from_metadata():
+    media = LibraryItemMedia(metadata={"title": "A Book", "description": "A tale of two cities."})
+    assert media.description == "A tale of two cities."
+
+
+def test_library_item_media_description_missing_defaults_empty():
+    media = LibraryItemMedia(metadata={"title": "A Book"})
+    assert media.description == ""
+
+
+def test_library_item_media_description_strips_html():
+    media = LibraryItemMedia(metadata={
+        "title": "A Book",
+        "description": "<p>A tale of <b>two</b> cities.</p>",
+    })
+    assert media.description == "A tale of two cities."
+
+
+def test_library_item_description_delegates_to_media():
+    media = LibraryItemMedia(metadata={"title": "A Book", "description": "Plot summary."})
+    item = LibraryItem(id="item1", libraryId="lib1", media=media)
+    assert item.description == "Plot summary."
+
+
+def test_series_book_description_delegates_to_media():
+    media = LibraryItemMedia(metadata={"title": "A Book", "description": "Plot summary."})
+    book = SeriesBook(id="b1", media=media)
+    assert book.description == "Plot summary."
+
+
+def test_podcast_episode_description_from_raw_field():
+    ep = PodcastEpisode.model_validate({**_episode_payload(), "description": "Show notes here."})
+    assert ep.description == "Show notes here."
+
+
+def test_podcast_episode_description_missing_defaults_empty():
+    ep = PodcastEpisode.model_validate(_episode_payload())
+    assert ep.description == ""
+
+
+def test_podcast_episode_description_strips_html():
+    ep = PodcastEpisode.model_validate({
+        **_episode_payload(),
+        "description": "<p>Show notes <i>here</i>.</p>",
+    })
+    assert ep.description == "Show notes here."

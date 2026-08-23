@@ -1,8 +1,18 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _strip_html(text: str) -> str:
+    """Audiobookshelf descriptions are sometimes plain text, sometimes basic
+    HTML (e.g. Audible-sourced metadata) -- strip tags so callers always get
+    plain text, regardless of which the server sent."""
+    return _HTML_TAG_RE.sub("", text).strip()
 
 
 class Chapter(BaseModel):
@@ -27,6 +37,12 @@ class PodcastEpisode(BaseModel):
     id: str
     library_item_id: str = Field("", alias="libraryItemId")
     title: str = ""
+    # Raw field name deliberately differs from the exposed `description`
+    # property below (stripped of HTML) -- keeps the accessor uniform with
+    # LibraryItemMedia.description/etc., which are computed properties too,
+    # so PlayerScreen can read `<item>.description` the same way regardless
+    # of which item type it's playing.
+    raw_description: str | None = Field(None, alias="description")
     audio_file: dict[str, Any] = Field(default_factory=dict, alias="audioFile")
     chapters: list[Chapter] = Field(default_factory=list)
 
@@ -35,6 +51,10 @@ class PodcastEpisode(BaseModel):
     @property
     def duration(self) -> float:
         return float(self.audio_file.get("duration", 0.0) or 0.0)
+
+    @property
+    def description(self) -> str:
+        return _strip_html(self.raw_description or "")
 
 
 class LibraryItemMedia(BaseModel):
@@ -54,6 +74,10 @@ class LibraryItemMedia(BaseModel):
     @property
     def author(self) -> str:
         return str(self.metadata.get("authorName", ""))
+
+    @property
+    def description(self) -> str:
+        return _strip_html(str(self.metadata.get("description") or ""))
 
     @property
     def series_name(self) -> str:
@@ -92,6 +116,10 @@ class LibraryItem(BaseModel):
     def duration(self) -> float:
         return self.media.duration or 0.0
 
+    @property
+    def description(self) -> str:
+        return self.media.description
+
     def cover_url(self, server_url: str, token: str) -> str:
         return f"{server_url}/api/items/{self.id}/cover?token={token}"
 
@@ -114,6 +142,10 @@ class SeriesBook(BaseModel):
     @property
     def duration(self) -> float:
         return self.media.duration or 0.0
+
+    @property
+    def description(self) -> str:
+        return self.media.description
 
     def cover_url(self, server_url: str, token: str) -> str:
         return f"{server_url}/api/items/{self.id}/cover?token={token}"
@@ -190,6 +222,10 @@ class PlaylistItem(BaseModel):
     @property
     def duration(self) -> float:
         return self.media.duration or 0.0
+
+    @property
+    def description(self) -> str:
+        return self.media.description
 
     def cover_url(self, server_url: str, token: str) -> str:
         return f"{server_url}/api/items/{self.library_item_id}/cover?token={token}"
