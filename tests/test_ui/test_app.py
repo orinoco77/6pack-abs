@@ -65,7 +65,10 @@ class _FakeAudioPlayer:
 @pytest.fixture
 def window(qtbot, monkeypatch):
     """Fully-constructed MainWindow with a fake AudioPlayer (see
-    _FakeAudioPlayer docstring for why the real one can't be used in tests).
+    _FakeAudioPlayer docstring for why the real one can't be used in tests)
+    and a stubbed update check (so tests never hit the real GitHub API --
+    mirrors the AudioPlayer stub for the same "no real external resources
+    in tests" reason).
     """
     from sixpack.config import AppConfig
     from sixpack.ui import app as app_module
@@ -74,8 +77,20 @@ def window(qtbot, monkeypatch):
     # process (see _FakeAudioPlayer docstring).
     monkeypatch.setattr(app_module, "AudioPlayer", _FakeAudioPlayer)
 
+    async def _fake_fetch_latest_release():
+        return None
+
+    monkeypatch.setattr(app_module, "fetch_latest_release", _fake_fetch_latest_release)
+
     win = app_module.MainWindow(AppConfig())
     qtbot.addWidget(win)
+    # _try_autologin() no longer runs synchronously inside __init__ -- it
+    # now only runs once the (stubbed, but still genuinely asynchronous,
+    # real-background-thread) check_update round-trip completes. Wait for
+    # that to settle before handing the window to a test, so every
+    # existing assumption about post-construction state (previously true
+    # synchronously) still holds.
+    qtbot.waitUntil(lambda: win._stack.currentWidget() is not win._splash_screen, timeout=2000)
 
     yield win
 
@@ -1100,3 +1115,132 @@ def test_on_progress_update_via_real_signal_forwards_episode_id(window, monkeypa
 
 async def _noop_coro():
     return None
+
+
+# ---- Auto-update wiring ----
+
+def test_main_window_fires_check_update_on_startup(qtbot, monkeypatch):
+    """Verifies the real dispatch wiring exists -- constructs its own
+    MainWindow (not the shared `window` fixture, which stubs the check
+    entirely) with AsyncWorker.run patched at the class level so no real
+    coroutine executes."""
+    from sixpack.config import AppConfig
+    from sixpack.ui import app as app_module
+
+    monkeypatch.setattr(app_module, "AudioPlayer", _FakeAudioPlayer)
+    dispatched = []
+    monkeypatch.setattr(
+        app_module.AsyncWorker, "run", lambda self, tag, coro: dispatched.append(tag)
+    )
+
+    win = app_module.MainWindow(AppConfig())
+    qtbot.addWidget(win)
+    try:
+        assert dispatched == ["check_update"]
+    finally:
+        win.close()
+
+
+def test_on_result_check_update_shows_prompt_when_newer_release_available(window, monkeypatch):
+    from sixpack.ui import app as app_module
+    from sixpack.updater import ReleaseInfo
+
+    monkeypatch.setattr(app_module, "CURRENT_VERSION", "0.1.0")
+    release = ReleaseInfo(version="0.2.0", zipball_url="http://example.com/z.zip")
+
+    window._on_result("check_update", release)
+
+    assert window._stack.currentWidget() is window._update_prompt_screen
+    assert window._pending_release is release
+
+
+def test_on_result_check_update_proceeds_to_login_when_release_not_newer(window, monkeypatch):
+    from sixpack.ui import app as app_module
+    from sixpack.updater import ReleaseInfo
+
+    monkeypatch.setattr(app_module, "CURRENT_VERSION", "9.9.9")
+    release = ReleaseInfo(version="0.2.0", zipball_url="http://example.com/z.zip")
+
+    window._on_result("check_update", release)
+
+    assert window._stack.currentWidget() is window._login_screen
+
+
+def test_on_result_check_update_proceeds_to_login_when_no_release(window):
+    window._on_result("check_update", None)
+    assert window._stack.currentWidget() is window._login_screen
+
+
+def test_on_error_check_update_proceeds_to_login(window):
+    """Defensive backstop -- fetch_latest_release() fails soft internally
+    and should never actually raise, but _on_error must still degrade
+    gracefully if it somehow did."""
+    window._on_error("check_update", "boom")
+    assert window._stack.currentWidget() is window._login_screen
+
+
+def test_update_prompt_later_proceeds_to_login(window):
+    from sixpack.updater import ReleaseInfo
+
+    window._pending_release = ReleaseInfo(version="0.2.0", zipball_url="http://example.com/z.zip")
+    window._update_prompt_screen.show_prompt("0.1.0", "0.2.0")
+    window._stack.setCurrentWidget(window._update_prompt_screen)
+
+    window._update_prompt_screen.later_requested.emit()
+
+    assert window._stack.currentWidget() is window._login_screen
+
+
+def test_on_update_install_requested_fires_apply_update_job(window, monkeypatch):
+    from sixpack.updater import ReleaseInfo
+
+    window._pending_release = ReleaseInfo(version="0.2.0", zipball_url="http://example.com/z.zip")
+    dispatched = []
+    monkeypatch.setattr(window._worker, "run", lambda tag, coro: dispatched.append(tag))
+
+    window._on_update_install_requested()
+
+    assert dispatched == ["apply_update"]
+    assert not window._update_prompt_screen._button_row.isVisible()
+
+
+def test_on_update_install_requested_is_noop_without_pending_release(window, monkeypatch):
+    window._pending_release = None
+    dispatched = []
+    monkeypatch.setattr(window._worker, "run", lambda tag, coro: dispatched.append(tag))
+
+    window._on_update_install_requested()
+
+    assert dispatched == []
+
+
+def test_on_result_apply_update_relaunches_and_quits(window, monkeypatch):
+    """CRITICAL: must monkeypatch both relaunch and QApplication.quit --
+    see this plan's Global Constraints. Calling the real .quit() would
+    tear down the shared test-session QApplication."""
+    from PyQt6.QtWidgets import QApplication
+
+    from sixpack.ui import app as app_module
+
+    relaunch_calls = []
+    monkeypatch.setattr(app_module, "relaunch", lambda: relaunch_calls.append(True))
+    quit_calls = []
+    monkeypatch.setattr(QApplication, "quit", lambda self: quit_calls.append(True))
+
+    window._on_result("apply_update", None)
+
+    assert relaunch_calls == [True]
+    assert quit_calls == [True]
+
+
+def test_on_error_apply_update_shows_error_state(window):
+    window._on_error("apply_update", "Download failed: connection refused")
+    assert window._stack.currentWidget() is window._update_prompt_screen
+    assert "connection refused" in window._update_prompt_screen._status_label.text()
+    assert window._update_prompt_screen._continue_btn.isVisible()
+
+
+def test_update_prompt_continue_after_error_proceeds_to_login(window):
+    window._on_error("apply_update", "boom")
+    window._update_prompt_screen.continue_requested.emit()
+    assert window._stack.currentWidget() is window._login_screen

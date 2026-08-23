@@ -33,6 +33,15 @@ from sixpack.ui.screens.chapter_select import ChapterSelectScreen
 from sixpack.ui.screens.series_detail import SeriesDetailScreen
 from sixpack.ui.screens.player import PlayerScreen
 from sixpack.ui.screens.splash import SplashScreen
+from sixpack.ui.screens.update_prompt import UpdatePromptScreen
+from sixpack.updater import (
+    CURRENT_VERSION,
+    ReleaseInfo,
+    apply_update,
+    fetch_latest_release,
+    is_newer,
+    relaunch,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +97,7 @@ class MainWindow(QMainWindow):
         self._pending_browse_item: LibraryItem | None = None
         self._current_podcast_show: LibraryItem | None = None
         self._pending_podcast_episode: PodcastEpisode | None = None
+        self._pending_release: ReleaseInfo | None = None
         self._libraries: list[Library] = []
         # Back-navigation context: "detail" | "browse" | "playlist_detail" | "podcast_detail"
         self._chapter_back_target = "detail"
@@ -104,7 +114,6 @@ class MainWindow(QMainWindow):
         self._init_player()
         self._init_worker()
         self._build_ui()
-        self._try_autologin()
 
     # ------------------------------------------------------------------
     # Setup
@@ -200,8 +209,15 @@ class MainWindow(QMainWindow):
         self._chapter_screen.library_item_play_requested.connect(self._forward_chapters_to_player)
         self._chapter_screen.podcast_episode_play_requested.connect(self._forward_chapters_to_player)
 
+        self._update_prompt_screen = UpdatePromptScreen()
+        self._stack.addWidget(self._update_prompt_screen)
+        self._update_prompt_screen.install_requested.connect(self._on_update_install_requested)
+        self._update_prompt_screen.later_requested.connect(self._try_autologin)
+        self._update_prompt_screen.continue_requested.connect(self._try_autologin)
+
         self._setup_quit_shortcut()
         self._show_splash()
+        self._worker.run("check_update", fetch_latest_release())
 
     def _try_autologin(self) -> None:
         server = self._config.active_server
@@ -210,6 +226,12 @@ class MainWindow(QMainWindow):
             self._do_connect_with_token(server.url, server.token)
         else:
             self._show_login()
+
+    def _on_update_install_requested(self) -> None:
+        if self._pending_release is None:
+            return
+        self._update_prompt_screen.show_installing()
+        self._worker.run("apply_update", apply_update(self._pending_release.zipball_url))
 
     # ------------------------------------------------------------------
     # Screen navigation
@@ -978,6 +1000,19 @@ class MainWindow(QMainWindow):
         elif tag == "progress":
             pass  # fire-and-forget
 
+        elif tag == "check_update":
+            release = result
+            if release is not None and is_newer(release.version, CURRENT_VERSION):
+                self._pending_release = release
+                self._update_prompt_screen.show_prompt(CURRENT_VERSION, release.version)
+                self._stack.setCurrentWidget(self._update_prompt_screen)
+            else:
+                self._try_autologin()
+
+        elif tag == "apply_update":
+            relaunch()
+            QApplication.instance().quit()
+
     @pyqtSlot(str, str)
     def _on_error(self, tag: str, message: str) -> None:
         logger.error("Async error [%s]: %s", tag, message)
@@ -1027,6 +1062,14 @@ class MainWindow(QMainWindow):
             # will stay empty forever, so don't leave the user stranded on
             # it — bounce back to Browse instead.
             self._show_browse()
+        elif tag == "check_update":
+            # fetch_latest_release() fails soft internally and should
+            # never actually raise -- this is a defensive backstop, not
+            # an expected path.
+            self._try_autologin()
+        elif tag == "apply_update":
+            self._update_prompt_screen.show_error(message)
+            self._stack.setCurrentWidget(self._update_prompt_screen)
 
     # ------------------------------------------------------------------
     # Quit
