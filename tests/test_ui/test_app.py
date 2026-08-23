@@ -1244,3 +1244,25 @@ def test_update_prompt_continue_after_error_proceeds_to_login(window):
     window._on_error("apply_update", "boom")
     window._update_prompt_screen.continue_requested.emit()
     assert window._stack.currentWidget() is window._login_screen
+
+
+def test_splash_shows_update_check_status_on_startup(qtbot, monkeypatch):
+    """Regression test: verify the splash screen displays accurate status
+    while the update check is in progress. Constructs its own MainWindow
+    (not the shared `window` fixture) with AsyncWorker.run patched to a
+    no-op so the check never completes and the window stays on the splash
+    screen where we can observe the status label text."""
+    from sixpack.config import AppConfig
+    from sixpack.ui import app as app_module
+
+    monkeypatch.setattr(app_module, "AudioPlayer", _FakeAudioPlayer)
+    monkeypatch.setattr(
+        app_module.AsyncWorker, "run", lambda self, tag, coro: None
+    )
+
+    win = app_module.MainWindow(AppConfig())
+    qtbot.addWidget(win)
+    try:
+        assert win._splash_screen._status_label.text() == "Checking for updates…"
+    finally:
+        win.close()

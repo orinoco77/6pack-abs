@@ -217,6 +217,7 @@ class MainWindow(QMainWindow):
 
         self._setup_quit_shortcut()
         self._show_splash()
+        self._splash_screen.set_status("Checking for updates…")
         self._worker.run("check_update", fetch_latest_release())
 
     def _try_autologin(self) -> None:
