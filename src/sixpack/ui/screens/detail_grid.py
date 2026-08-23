@@ -41,6 +41,10 @@ class DetailGridScreen(QWidget):
         self._server_url = ""
         self._token = ""
         self._dom_colors: dict[str, QColor] = {}
+        # Index _populate() last auto-focused, so _refresh_progress() can
+        # tell whether the user has navigated away since -- see its
+        # docstring for why re-focusing unconditionally is a bug.
+        self._auto_focus_idx: int | None = None
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -117,24 +121,42 @@ class DetailGridScreen(QWidget):
         if self._grid.item_count:
             idx = self._find_resume_index()
             self._grid.focus_item(idx)
+            self._auto_focus_idx = idx
         else:
             # No items — clear whatever subtitle/backdrop a previously
             # populated (and now stale) series/playlist left behind on this
             # reused screen instance, rather than leaving it visible under
             # the new (correct) hero title.
+            self._auto_focus_idx = None
             self._hero_backdrop.set_subtitle("")
             self._hero_backdrop.backdrop.set_expected_key("")
             self._hero_backdrop.backdrop.show_color(QColor(theme.SURFACE))
 
     def _refresh_progress(self, progress: dict) -> None:
+        """Update progress bars/finished badges on the existing cards
+        in place (see test_detail_grid_refresh_progress_updates_in_place_
+        without_rebuild) without necessarily re-focusing.
+
+        This is called once real progress data lands shortly after a fast,
+        progress-less _populate() (e.g. show_loading() -> update_progress()
+        for series/playlist detail screens, per app.py's "series_detail"/
+        "playlist_detail" worker results). If the user has already
+        navigated away from the index _populate() auto-focused in that
+        gap, jumping back to the (now progress-aware) resume index would
+        silently undo their navigation -- the same bug fixed in
+        BrowseScreen.set_row_items() for its cache-then-network row
+        refresh. Only re-focus if focus is still exactly where we last
+        left it.
+        """
         self._progress = progress
         for item, card in zip(self._items, self._grid._items):
             fraction, finished = self._item_progress(item, progress)
             card.set_progress(fraction)
             card.set_finished(finished)
-        if self._grid.item_count:
+        if self._grid.item_count and self._grid.focused_index == self._auto_focus_idx:
             idx = self._find_resume_index()
             self._grid.focus_item(idx)
+            self._auto_focus_idx = idx
 
     def _find_resume_index(self) -> int:
         for i, item in enumerate(self._items):
