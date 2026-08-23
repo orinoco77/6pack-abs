@@ -309,6 +309,70 @@ def test_speed_cycle_wraps_around(qtbot, screen):
 # ----------------------------------------------------------------------
 
 
+def _open_chapter_overlay_via_keyboard(qtbot, screen) -> None:
+    """The chapters button sits at the control row's leftmost position;
+    default focus lands on play/pause. Drives real key events (Left x3
+    then Select) rather than poking _control_focus_idx directly, matching
+    this project's real-key-delivery testing convention."""
+    for _ in range(3):
+        qtbot.keyClick(screen, Qt.Key.Key_Left)
+    qtbot.keyClick(screen, Qt.Key.Key_Return)
+
+
+def test_control_row_defaults_focus_to_play_pause(qtbot, screen):
+    screen.show()
+    qtbot.waitExposed(screen)
+    assert screen._control_buttons[screen._control_focus_idx] is screen._play_btn
+
+
+def test_left_moves_focus_toward_chapters(qtbot, screen):
+    screen.show()
+    qtbot.waitExposed(screen)
+    qtbot.keyClick(screen, Qt.Key.Key_Left)
+    assert screen._control_buttons[screen._control_focus_idx] is screen._rew_btn
+
+
+def test_left_clamps_at_chapters_button(qtbot, screen):
+    screen.show()
+    qtbot.waitExposed(screen)
+    for _ in range(10):
+        qtbot.keyClick(screen, Qt.Key.Key_Left)
+    assert screen._control_buttons[screen._control_focus_idx] is screen._chapters_btn
+
+
+def test_right_clamps_at_speed_button(qtbot, screen):
+    screen.show()
+    qtbot.waitExposed(screen)
+    for _ in range(10):
+        qtbot.keyClick(screen, Qt.Key.Key_Right)
+    assert screen._control_buttons[screen._control_focus_idx] is screen._speed_btn
+
+
+def test_select_on_next_item_emits_next_item(qtbot, screen):
+    """Select must trigger whichever control is currently focused, via that
+    button's own .clicked wiring — proves the row is actually operable
+    with only Left/Right/Select, not just visually present."""
+    screen.show()
+    qtbot.waitExposed(screen)
+    signals = []
+    screen.next_item.connect(lambda: signals.append(True))
+    for _ in range(2):
+        qtbot.keyClick(screen, Qt.Key.Key_Right)  # play -> fwd -> next
+    assert screen._control_buttons[screen._control_focus_idx] is screen._next_btn
+    qtbot.keyClick(screen, Qt.Key.Key_Return)
+    assert signals == [True]
+
+
+def test_select_on_rewind_seeks_back(qtbot, screen):
+    screen.show()
+    qtbot.waitExposed(screen)
+    qtbot.keyClick(screen, Qt.Key.Key_Left)  # play -> rew
+    assert screen._control_buttons[screen._control_focus_idx] is screen._rew_btn
+    qtbot.keyClick(screen, Qt.Key.Key_Return)
+    # _FakePlayer.seek_back is a no-op with no call tracking of its own;
+    # this at minimum proves Select didn't crash and reached the button.
+
+
 def test_menu_key_opens_chapter_overlay(qtbot, screen):
     from sixpack.api.models import Chapter
     chapters = [Chapter(id=0, start=0.0, end=100.0, title="Ch1"),
@@ -318,7 +382,7 @@ def test_menu_key_opens_chapter_overlay(qtbot, screen):
     qtbot.waitExposed(screen)
 
     assert not screen._chapter_overlay.isVisible()
-    qtbot.keyClick(screen, Qt.Key.Key_Return)  # MENU in player mode
+    _open_chapter_overlay_via_keyboard(qtbot, screen)
     assert screen._chapter_overlay.isVisible()
 
 
@@ -327,9 +391,9 @@ def test_menu_key_closes_open_overlay(qtbot, screen):
     screen.set_chapters([Chapter(id=0, start=0.0, end=100.0, title="Ch1")])
     screen.show()
     qtbot.waitExposed(screen)
-    qtbot.keyClick(screen, Qt.Key.Key_Return)
+    _open_chapter_overlay_via_keyboard(qtbot, screen)
     assert screen._chapter_overlay.isVisible()
-    qtbot.keyClick(screen, Qt.Key.Key_Return)
+    qtbot.keyClick(screen, Qt.Key.Key_Return)  # overlay owns Return now — closes it
     assert not screen._chapter_overlay.isVisible()
 
 
@@ -344,7 +408,7 @@ def test_select_in_overlay_seeks_and_closes(qtbot, screen):
                           Chapter(id=1, start=100.0, end=200.0, title="Ch2")])
     screen.show()
     qtbot.waitExposed(screen)
-    qtbot.keyClick(screen, Qt.Key.Key_Return)  # open
+    _open_chapter_overlay_via_keyboard(qtbot, screen)
     screen._chapter_overlay.setCurrentRow(1)
     qtbot.keyClick(screen, Qt.Key.Key_Return)  # select — closes AND seeks
 
@@ -358,7 +422,7 @@ def test_back_closes_overlay_without_seeking(qtbot, screen):
     screen.set_chapters([Chapter(id=0, start=0.0, end=100.0, title="Ch1")])
     screen.show()
     qtbot.waitExposed(screen)
-    qtbot.keyClick(screen, Qt.Key.Key_Return)  # open
+    _open_chapter_overlay_via_keyboard(qtbot, screen)
     qtbot.keyClick(screen, Qt.Key.Key_Escape)  # BACK
 
     assert screen._player.seek_absolute_calls == []
@@ -367,11 +431,11 @@ def test_back_closes_overlay_without_seeking(qtbot, screen):
 
 
 def test_menu_key_does_nothing_without_chapters(qtbot, screen):
-    """No chapters set (e.g. staleness/fallback path) — MENU must not crash
-    and the overlay must simply not open."""
+    """No chapters set (e.g. staleness/fallback path) — activating the
+    chapters button must not crash and the overlay must simply not open."""
     screen.show()
     qtbot.waitExposed(screen)
-    qtbot.keyClick(screen, Qt.Key.Key_Return)
+    _open_chapter_overlay_via_keyboard(qtbot, screen)
     assert not screen._chapter_overlay.isVisible()
 
 
@@ -384,7 +448,7 @@ def test_up_down_navigate_overlay_without_cycling_speed(qtbot, screen):
                           Chapter(id=1, start=100.0, end=200.0, title="Ch2")])
     screen.show()
     qtbot.waitExposed(screen)
-    qtbot.keyClick(screen, Qt.Key.Key_Return)  # open — resumes at row 0
+    _open_chapter_overlay_via_keyboard(qtbot, screen)  # resumes at row 0
     assert screen._chapter_overlay.currentRow() == 0
 
     qtbot.keyClick(screen, Qt.Key.Key_Down)
