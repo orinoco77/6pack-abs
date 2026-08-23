@@ -6,7 +6,7 @@ import logging
 from typing import Any
 
 from PyQt6.QtCore import QEvent, QObject, QThread, QTimer, pyqtSignal, pyqtSlot, Qt
-from PyQt6.QtGui import QCursor, QKeyEvent, QKeySequence, QShortcut
+from PyQt6.QtGui import QCursor
 from PyQt6.QtWidgets import QMainWindow, QStackedWidget, QApplication
 
 from sixpack.api.client import ABSClient, AuthenticationError, APIError
@@ -184,6 +184,7 @@ class MainWindow(QMainWindow):
         self._browse_screen.see_all_requested.connect(self._on_see_all_requested)
         self._browse_screen.podcast_selected.connect(self._on_podcast_selected)
         self._browse_screen.podcast_episode_selected.connect(self._on_podcast_episode_selected)
+        self._browse_screen.exit_requested.connect(self.close)
         self._detail_screen.episode_activated.connect(self._on_episode_activated)
         self._detail_screen.back_requested.connect(self._show_browse)
         self._playlist_detail_screen.item_activated.connect(self._on_playlist_item_activated)
@@ -215,7 +216,6 @@ class MainWindow(QMainWindow):
         self._update_prompt_screen.later_requested.connect(self._try_autologin)
         self._update_prompt_screen.continue_requested.connect(self._try_autologin)
 
-        self._setup_quit_shortcut()
         self._show_splash()
         self._splash_screen.set_status("Checking for updates…")
         self._worker.run("check_update", fetch_latest_release())
@@ -1111,19 +1111,6 @@ class MainWindow(QMainWindow):
             self._cursor_timer.stop()
         return super().eventFilter(obj, event)
 
-    def _setup_quit_shortcut(self) -> None:
-        for seq in ("Ctrl+Q", "Q"):
-            sc = QShortcut(QKeySequence(seq), self)
-            sc.activated.connect(self.close)
-
-    def keyPressEvent(self, event: QKeyEvent) -> None:
-        if event.key() == Qt.Key.Key_Q or (
-            event.key() == Qt.Key.Key_Q
-            and event.modifiers() & Qt.KeyboardModifier.ControlModifier
-        ):
-            self.close()
-        else:
-            super().keyPressEvent(event)
 
     # ------------------------------------------------------------------
     # Cleanup
