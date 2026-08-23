@@ -18,6 +18,10 @@ ACCENT_DIM = "#2a6fcc"
 # focus glow (painted translucent over the card's own opaque ACCENT border)
 # indistinguishable from the border itself. See MediaCard's glow overlay.
 ACCENT_GLOW = "#a8d8ff"
+# Translucent accent, for a selection background that reads as a soft tint
+# rather than a solid fill — QSS supports rgba() directly. Same #4a9eff hue
+# as ACCENT, ~12% opacity.
+ACCENT_TINT = "rgba(74, 158, 255, 0.12)"
 TEXT_PRIMARY = "#ffffff"
 TEXT_SECONDARY = "#a0a0a0"
 TEXT_MUTED = "#606060"
@@ -74,6 +78,9 @@ ICON_REPLAY_30 = ""
 ICON_FORWARD_30 = ""
 ICON_MENU_BOOK = ""
 ICON_SPEED = ""
+ICON_PODCASTS = ""
+ICON_AUTO_STORIES = ""
+ICON_LOGOUT = ""
 
 
 def load_icon_font() -> str:

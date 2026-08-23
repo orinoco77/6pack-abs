@@ -246,7 +246,8 @@ def test_sidebar_layout_ends_with_trailing_stretch(qtbot):
     qtbot.addWidget(screen)
     screen.load_libraries([_lib("l1", "A"), _lib("l2", "B")], "http://s", "tok")
     layout = screen._sidebar_items_layout
-    assert layout.count() == 4  # Exit + 2 library items + 1 trailing stretch
+    # Exit + divider + 2 library items + 1 trailing stretch
+    assert layout.count() == 5
     last_item = layout.itemAt(layout.count() - 1)
     assert last_item.widget() is None  # a stretch/spacer, not a sidebar item
 
@@ -257,7 +258,8 @@ def test_sidebar_layout_stretch_not_duplicated_on_reload(qtbot):
     screen.load_libraries([_lib("l1", "A")], "http://s", "tok")
     screen.load_libraries([_lib("l1", "A"), _lib("l2", "B")], "http://s", "tok")
     layout = screen._sidebar_items_layout
-    assert layout.count() == 4  # Exit + 2 library items + exactly one trailing stretch
+    # Exit + divider + 2 library items + exactly one trailing stretch
+    assert layout.count() == 5
 
 
 # ---------------------------------------------------------------------------
@@ -520,18 +522,27 @@ def test_exit_confirm_geometry_never_shorter_than_its_own_content(qtbot):
     assert geometry.height() >= screen._exit_overlay.sizeHint().height()
 
 
-def test_exit_icon_is_a_standard_emoji_not_a_technical_symbol(qtbot):
-    """Regression: U+23FB (⏻, POWER SYMBOL) is in Unicode's Miscellaneous
-    Technical block, not the Emoji block the other sidebar icons (book,
-    podcast, ebook) use -- it isn't reliably covered by the emoji fonts
-    that make those render correctly, and fell back to a missing-glyph
-    box on a deployed (Linux) instance. The icon must come from the same
-    well-supported emoji range as the others."""
+def test_sidebar_icons_use_the_bundled_icon_font_not_raw_emoji(qtbot):
+    """Regression: sidebar icons used to be raw emoji (📚🎙📖🚪), which
+    don't share a consistent visual style across platforms and, per an
+    earlier real bug, aren't reliably covered by every system's emoji
+    font at all (U+23FB fell back to a missing-glyph box on a deployed
+    Linux instance). All sidebar icons -- including Exit -- now come
+    from the same bundled Material Icons Outlined font already used for
+    the player screen's transport controls, for a consistent look and a
+    single, already-verified-working rendering path."""
+    from sixpack.ui import theme
+
     screen = BrowseScreen()
     qtbot.addWidget(screen)
-    icon_char = screen._exit_item._icon.text()
-    assert icon_char != "⏻"
-    assert ord(icon_char[0]) >= 0x1F000  # supplementary-plane emoji range
+    screen.load_libraries([_lib("l1", "Audiobooks")], "http://s", "tok")
+
+    for item in (screen._exit_item, screen._sidebar_items[1]):
+        assert theme.ICON_FONT_FAMILY in item._icon.styleSheet()
+        assert item._icon.text() in (
+            theme.ICON_LOGOUT, theme.ICON_MENU_BOOK,
+            theme.ICON_PODCASTS, theme.ICON_AUTO_STORIES,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1370,9 +1381,12 @@ def test_sidebar_item_has_icon_and_active_state(qtbot):
 
     # Exercise all three states set_state() distinguishes and assert each
     # one actually produces a visually distinct style — not just "doesn't
-    # crash". selected+active is the filled accent pill; selected-but-
-    # inactive shows the accent as a hint without the fill; unselected has
-    # neither.
+    # crash". selected+active is an accent border + a soft translucent
+    # tint (not a solid fill — a restrained selection style, closer to
+    # Plex/YouTube TV's sidebar than a flat accent-block); selected-but-
+    # inactive drops the tint and dims the border, using accent-tinted
+    # text as the only hint that this is still the current library;
+    # unselected has neither.
     item.set_state(selected=True, zone_active=True)
     active_style = item.styleSheet()
     active_label_style = item._label.styleSheet()
@@ -1390,11 +1404,15 @@ def test_sidebar_item_has_icon_and_active_state(qtbot):
         {active_label_style, selected_inactive_label_style, unselected_label_style}
     ) == 3
 
-    assert theme.ACCENT in active_style  # filled accent background
-    assert theme.SURFACE_HIGH in selected_inactive_style  # muted bg, accent hint only
-    assert theme.ACCENT in selected_inactive_style
+    assert theme.ACCENT_TINT in active_style  # translucent tint, not a solid fill
+    assert theme.ACCENT in active_style  # accent border
+    assert theme.TEXT_PRIMARY in active_label_style  # bright text when actively focused
+    assert theme.ACCENT_DIM in selected_inactive_style  # dimmed border
+    assert "transparent" in selected_inactive_style  # no tint when not the active zone
+    assert theme.ACCENT in selected_inactive_label_style  # accent-tinted text hint
     assert "transparent" in unselected_style
     assert theme.ACCENT not in unselected_style
+    assert theme.ACCENT not in unselected_label_style
 
 
 # ---------------------------------------------------------------------------

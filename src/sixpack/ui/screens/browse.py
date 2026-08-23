@@ -49,7 +49,12 @@ DEFAULT_ROW_TYPES: list[RowType] = [
 # Sidebar item
 # ---------------------------------------------------------------------------
 
-_LIB_ICONS = {"book": "📚", "podcast": "🎙", "ebook": "📖", "exit": "🚪"}
+_LIB_ICONS = {
+    "book": theme.ICON_MENU_BOOK,
+    "podcast": theme.ICON_PODCASTS,
+    "ebook": theme.ICON_AUTO_STORIES,
+    "exit": theme.ICON_LOGOUT,
+}
 
 
 class _SidebarItem(QWidget):
@@ -61,8 +66,10 @@ class _SidebarItem(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(20, 12, 20, 12)
         layout.setSpacing(10)
-        self._icon = QLabel(_LIB_ICONS.get(media_type, "📚"))
-        self._icon.setStyleSheet("background: transparent;")
+        self._icon = QLabel(_LIB_ICONS.get(media_type, theme.ICON_MENU_BOOK))
+        self._icon.setStyleSheet(
+            f"font-family: '{theme.ICON_FONT_FAMILY}'; font-size: 18pt; background: transparent;"
+        )
         self._label = QLabel(text)
         self._label.setStyleSheet("background: transparent;")
         layout.addWidget(self._icon)
@@ -71,12 +78,29 @@ class _SidebarItem(QWidget):
         self.set_state(selected=False, zone_active=False)
 
     def set_state(self, *, selected: bool, zone_active: bool) -> None:
+        # Accent left-border + a soft translucent tint (not a solid fill)
+        # when the sidebar is the active zone -- a restrained selection
+        # style closer to Plex/YouTube TV's sidebar than the old flat
+        # accent-block fill. When the library is "current" but the user
+        # has moved on to the rows/grid zone, it fades to just a dim
+        # border hint rather than competing with wherever focus actually
+        # is now.
         if selected and zone_active:
-            bg, fg, bar = theme.ACCENT, theme.TEXT_PRIMARY, theme.ACCENT
+            bg, fg, bar, icon_color = (
+                theme.ACCENT_TINT, theme.TEXT_PRIMARY, theme.ACCENT, theme.ACCENT,
+            )
         elif selected:
-            bg, fg, bar = theme.SURFACE_HIGH, theme.ACCENT, theme.ACCENT
+            # Still the current library, just not where focus is right
+            # now -- accent-tinted text is enough of a hint on its own,
+            # without the full-strength border/background/icon treatment
+            # that would compete with wherever focus actually is.
+            bg, fg, bar, icon_color = (
+                "transparent", theme.ACCENT, theme.ACCENT_DIM, theme.ACCENT,
+            )
         else:
-            bg, fg, bar = "transparent", theme.TEXT_SECONDARY, "transparent"
+            bg, fg, bar, icon_color = (
+                "transparent", theme.TEXT_SECONDARY, "transparent", theme.TEXT_SECONDARY,
+            )
         self.setStyleSheet(
             f"QWidget {{ background-color: {bg}; border-radius: 4px; "
             f"border-left: 3px solid {bar}; }}"
@@ -84,7 +108,10 @@ class _SidebarItem(QWidget):
         self._label.setStyleSheet(
             f"color: {fg}; font-size: {theme.FONT_BODY}pt; background: transparent; border: none;"
         )
-        self._icon.setStyleSheet("background: transparent; border: none;")
+        self._icon.setStyleSheet(
+            f"font-family: '{theme.ICON_FONT_FAMILY}'; font-size: 18pt; "
+            f"color: {icon_color}; background: transparent; border: none;"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -376,6 +403,26 @@ class BrowseScreen(QWidget):
         self._sidebar_items.append(self._exit_item)
         self._sidebar_items_layout.addWidget(self._exit_item)
 
+        # Thin visual separator between Exit and the actual library list --
+        # Exit isn't a library, and sitting directly under the "LIBRARIES"
+        # header without any break made it read as a fourth library. Taller
+        # than the 1px line itself so it gets real breathing room rather
+        # than the layout's tight 2px inter-item spacing; the line is
+        # vertically centered inside via nested stretches. Persistent, like
+        # the Exit item itself, and re-added to the layout by
+        # _rebuild_sidebar() alongside it.
+        self._sidebar_divider = QWidget()
+        self._sidebar_divider.setFixedHeight(13)
+        divider_layout = QVBoxLayout(self._sidebar_divider)
+        divider_layout.setContentsMargins(12, 0, 12, 0)
+        divider_layout.addStretch()
+        divider_line = QWidget()
+        divider_line.setFixedHeight(1)
+        divider_line.setStyleSheet(f"background: {theme.SURFACE_HIGH};")
+        divider_layout.addWidget(divider_line)
+        divider_layout.addStretch()
+        self._sidebar_items_layout.addWidget(self._sidebar_divider)
+
         sidebar_scroll = QScrollArea()
         sidebar_scroll.setWidget(self._sidebar_items_container)
         sidebar_scroll.setWidgetResizable(True)
@@ -632,6 +679,7 @@ class BrowseScreen(QWidget):
         while self._sidebar_items_layout.count():
             self._sidebar_items_layout.takeAt(0)
         self._sidebar_items_layout.addWidget(self._exit_item)
+        self._sidebar_items_layout.addWidget(self._sidebar_divider)
         for lib in self._libraries:
             item = _SidebarItem(lib.name, media_type=getattr(lib, "media_type", "book"))
             self._sidebar_items.append(item)
