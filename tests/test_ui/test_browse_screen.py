@@ -505,6 +505,35 @@ def test_reflect_library_blank_when_exit_focused(qtbot):
     assert screen._hero_sub.text() == ""
 
 
+def test_exit_confirm_geometry_never_shorter_than_its_own_content(qtbot):
+    """Regression: the overlay's assigned height must come from its own
+    sizeHint(), not a hardcoded pixel constant. A hardcoded value chosen
+    against one machine's font rendering can end up shorter than what the
+    same point-sized font actually needs elsewhere, squeezing the button
+    row short enough to clip its own text vertically -- exactly what
+    happened on a deployed (4K) instance even though it wasn't visible in
+    this dev environment's own font rendering."""
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    screen.resize(1920, 1080)
+    geometry = screen._exit_confirm_geometry()
+    assert geometry.height() >= screen._exit_overlay.sizeHint().height()
+
+
+def test_exit_icon_is_a_standard_emoji_not_a_technical_symbol(qtbot):
+    """Regression: U+23FB (⏻, POWER SYMBOL) is in Unicode's Miscellaneous
+    Technical block, not the Emoji block the other sidebar icons (book,
+    podcast, ebook) use -- it isn't reliably covered by the emoji fonts
+    that make those render correctly, and fell back to a missing-glyph
+    box on a deployed (Linux) instance. The icon must come from the same
+    well-supported emoji range as the others."""
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    icon_char = screen._exit_item._icon.text()
+    assert icon_char != "⏻"
+    assert ord(icon_char[0]) >= 0x1F000  # supplementary-plane emoji range
+
+
 # ---------------------------------------------------------------------------
 # BrowseScreen — library_changed signal
 # ---------------------------------------------------------------------------
