@@ -157,6 +157,38 @@ def test_detail_grid_populate_empty_clears_stale_hero_subtitle_and_backdrop(qtbo
     assert screen._grid.item_count == 0
 
 
+def test_detail_grid_refresh_progress_preserves_navigated_focus(qtbot):
+    """Regression: series/playlist detail screens populate instantly
+    (show_loading(), no progress yet), then _refresh_progress() lands
+    shortly after with the real progress data (update_progress(), once the
+    async fetch resolves). If the user has already navigated away from the
+    auto-focused card by then, _refresh_progress() must not snap focus
+    back to the resume index."""
+    screen = _TestScreen()
+    qtbot.addWidget(screen)
+    screen._populate("My Series", _items(), {}, "http://s", "t")
+    assert screen._grid._focused_index == 0  # sanity: auto-focused item A
+
+    screen._grid.focus_item(2)  # user navigates to item C
+
+    screen._refresh_progress({"a": {"fraction": 1.0, "finished": True}})
+    assert screen._grid._focused_index == 2  # untouched, not reset to "b"
+
+
+def test_detail_grid_refresh_progress_still_focuses_resume_if_untouched(qtbot):
+    """If the user hasn't navigated since _populate()'s auto-focus, a
+    landing _refresh_progress() call should still jump to the
+    now-progress-aware resume index -- this is the existing, desired
+    behavior the fix above must not break."""
+    screen = _TestScreen()
+    qtbot.addWidget(screen)
+    screen._populate("My Series", _items(), {}, "http://s", "t")
+    assert screen._grid._focused_index == 0  # untouched since populate
+
+    screen._refresh_progress({"a": {"fraction": 1.0, "finished": True}})
+    assert screen._grid._focused_index == 1  # now resumes at item B
+
+
 def test_detail_grid_populate_fetches_backdrop_exactly_once(qtbot):
     """_populate() calls FocusGrid.focus_item(), which itself emits
     focus_changed -> _on_grid_focus_changed -> _reflect_focus(). A redundant

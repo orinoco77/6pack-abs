@@ -126,3 +126,7 @@ class FocusGrid(QWidget):
     @property
     def item_count(self) -> int:
         return len(self._items)
+
+    @property
+    def focused_index(self) -> int:
+        return self._focused_index
