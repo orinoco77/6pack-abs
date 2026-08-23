@@ -954,8 +954,20 @@ class BrowseScreen(QWidget):
 
     def _exit_grid(self) -> None:
         self._zone = "rows"
-        self._row_item_idxs[self._grid_row_idx] = self._grid_focus_idx
-        self._row_widgets[self._grid_row_idx].focus_card(self._grid_focus_idx)
+        # The grid's own item list isn't always the same list as the row's:
+        # entering via MENU shows the row's own (capped) items, but "See
+        # all" populates the grid from a separately-fetched, uncapped
+        # dataset that can be far longer than the row's strip. Writing
+        # _grid_focus_idx straight into _row_item_idxs without clamping to
+        # the row's own length leaves it permanently out of range —
+        # _RowWidget.focus_card() clamps the VISUAL focus to the last card
+        # every time, but the stored index doesn't return to range until
+        # LEFT is pressed enough times to walk it back down, which looks
+        # completely stuck.
+        row_len = len(self._row_items[self._grid_row_idx])
+        synced_idx = min(self._grid_focus_idx, row_len - 1) if row_len else 0
+        self._row_item_idxs[self._grid_row_idx] = synced_idx
+        self._row_widgets[self._grid_row_idx].focus_card(synced_idx)
         self._content_stack.setCurrentIndex(0)
         self._focused_row = self._grid_row_idx
         self._update_row_styles()

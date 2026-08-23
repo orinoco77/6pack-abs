@@ -820,6 +820,36 @@ def test_exit_grid_syncs_row_position(qtbot):
     assert screen._zone == "rows"
 
 
+def test_exit_grid_from_see_all_clamps_row_position_to_row_bounds(qtbot):
+    """Regression test: "See all" populates the grid from a separately-
+    fetched, uncapped dataset (e.g. up to 500 series), while the row itself
+    only ever holds its own capped list (e.g. 5 items shown in the strip).
+    Exiting the grid after focusing something beyond the row's own length
+    must clamp the synced row index to the row's actual bounds — writing
+    the raw grid index straight into _row_item_idxs leaves it permanently
+    out of range: _RowWidget.focus_card() visually clamps to the last card
+    every time, but the STORED index doesn't move into range until LEFT is
+    pressed enough times to walk it back down — looking completely stuck.
+    """
+    screen = _make_screen_with_items(qtbot)
+    small_row_items = [_series(f"s{i}", f"S{i}") for i in range(5)]
+    screen.set_row_items(RowType.SERIES, small_row_items)
+    screen._focused_row = 2  # SERIES row — _trigger_see_all() acts on this
+
+    screen._trigger_see_all()
+    large_see_all_items = [_series(f"s{i}", f"S{i}") for i in range(30)]
+    screen.populate_grid(large_see_all_items)
+    screen._set_grid_focus(25)  # beyond the row's own 5-item length
+
+    screen._exit_grid()
+
+    assert screen._row_item_idxs[2] == 4  # clamped to the row's last valid index
+    # The visible card focus and the stored index must now agree — LEFT
+    # should immediately move focus, not silently decrement a still-out-
+    # of-range number.
+    assert screen._row_widgets[2]._focused_idx == 4
+
+
 # ---------------------------------------------------------------------------
 # BrowseScreen — enter_grid with empty row does not switch zone
 # ---------------------------------------------------------------------------
