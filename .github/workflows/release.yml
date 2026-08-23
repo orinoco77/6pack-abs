@@ -1,0 +1,56 @@
+name: Create release
+
+# Manually-triggered: the actual, deliberate "ship this to users" moment.
+# main's version (see bump-version.yml) is always already correct by the
+# time you run this, so there's nothing to type or check by hand — just
+# click "Run workflow". Tags main's current tip as vX.Y.Z and publishes a
+# GitHub Release from it, which is what the app's own updater checks
+# against (GET /repos/{repo}/releases/latest) and downloads (the release's
+# auto-generated source zip).
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          # Full history so --generate-notes below can walk back to the
+          # previous tag for meaningful release notes.
+          fetch-depth: 0
+
+      - name: Read current version
+        id: version
+        run: |
+          set -euo pipefail
+          CURRENT=$(grep -m1 -E '^version = "' pyproject.toml | sed -E 's/version = "(.*)"/\1/')
+          if [[ ! "$CURRENT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::pyproject.toml version '$CURRENT' is not a plain X.Y.Z."
+            exit 1
+          fi
+          echo "version=$CURRENT" >> "$GITHUB_OUTPUT"
+
+      - name: Refuse to re-release an already-tagged version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if gh release view "v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
+            echo "::error::v${{ steps.version.outputs.version }} is already released. main's version bumps automatically on the next push — push something (even a trivial commit) first, then re-run this."
+            exit 1
+          fi
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "v${{ steps.version.outputs.version }}" \
+            --title "v${{ steps.version.outputs.version }}" \
+            --generate-notes

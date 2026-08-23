@@ -1,0 +1,78 @@
+name: Bump version
+
+# Runs after every push to main and bumps pyproject.toml's patch version by
+# one, committing the bump straight back to main. This is the only thing
+# that ever writes to that line, so there's nothing for a developer to
+# remember and nothing for two branches to conflict over. Cutting an actual
+# release (tagging + a GitHub Release) is a separate, deliberate step — see
+# release.yml — so "main's version is always fresh" never implies "every
+# push is automatically released."
+
+on:
+  push:
+    branches: [main]
+
+# Serialize runs instead of racing: if two pushes land close together, the
+# second run waits for the first to finish (and push) before it starts, so
+# it always bumps from the first run's already-bumped tip rather than a
+# stale one. cancel-in-progress stays false on purpose — cancelling a run
+# mid-commit-and-push could leave the bump half-applied.
+concurrency:
+  group: version-bump
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    # Belt-and-braces alongside GitHub's own native "[skip ci]" handling
+    # (which already prevents this workflow from being triggered by its own
+    # bump commit) — cheap insurance against a loop if that native handling
+    # ever doesn't apply to some trigger shape.
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          # Explicitly the branch, not the triggering commit's exact SHA —
+          # when a run has been queued behind another by the concurrency
+          # group above, main may have moved (the previous run's bump
+          # commit) by the time this run actually executes. Checking out
+          # the branch always gets the current tip; pinning to the
+          # triggering SHA would check out a now-stale commit and the
+          # eventual push would be rejected as non-fast-forward.
+          ref: main
+          fetch-depth: 1
+
+      - name: Bump patch version and push
+        run: |
+          set -euo pipefail
+
+          # Second loop guard (see the job-level `if:` above for the first).
+          if git log -1 --pretty=%B | grep -qF '[skip ci]'; then
+            echo "Tip commit is already a version bump — nothing to do."
+            exit 0
+          fi
+
+          CURRENT=$(grep -m1 -E '^version = "' pyproject.toml | sed -E 's/version = "(.*)"/\1/')
+          if [[ ! "$CURRENT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::pyproject.toml version '$CURRENT' is not a plain X.Y.Z — refusing to guess how to bump it. Fix it by hand and push again."
+            exit 1
+          fi
+
+          MAJOR=$(cut -d. -f1 <<<"$CURRENT")
+          MINOR=$(cut -d. -f2 <<<"$CURRENT")
+          PATCH=$(cut -d. -f3 <<<"$CURRENT")
+          NEW="$MAJOR.$MINOR.$((PATCH + 1))"
+
+          sed -i "s/^version = \"$CURRENT\"/version = \"$NEW\"/" pyproject.toml
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml
+          git commit -m "Bump version to $NEW [skip ci]"
+          git push origin HEAD:main
+
+          echo "Bumped $CURRENT -> $NEW"
