@@ -39,8 +39,8 @@ def test_nav_mode_unmapped_key():
     (Qt.Key.Key_Space, InputAction.PLAY_PAUSE),
     (Qt.Key.Key_P, InputAction.PLAY_PAUSE),
     (Qt.Key.Key_X, InputAction.STOP),
-    (Qt.Key.Key_Right, InputAction.SEEK_FORWARD),
-    (Qt.Key.Key_Left, InputAction.SEEK_BACK),
+    (Qt.Key.Key_Right, InputAction.RIGHT),
+    (Qt.Key.Key_Left, InputAction.LEFT),
     (Qt.Key.Key_F, InputAction.SEEK_FORWARD_LONG),
     (Qt.Key.Key_R, InputAction.SEEK_BACK_LONG),
     (Qt.Key.Key_Period, InputAction.NEXT_CHAPTER),
@@ -49,8 +49,8 @@ def test_nav_mode_unmapped_key():
     (Qt.Key.Key_PageDown, InputAction.PREV_ITEM),
     (Qt.Key.Key_N, InputAction.NEXT_ITEM),
     (Qt.Key.Key_B, InputAction.PREV_ITEM),
-    (Qt.Key.Key_Return, InputAction.MENU),
-    (Qt.Key.Key_Enter, InputAction.MENU),
+    (Qt.Key.Key_Return, InputAction.SELECT),
+    (Qt.Key.Key_Enter, InputAction.SELECT),
     (Qt.Key.Key_Escape, InputAction.BACK),
     (Qt.Key.Key_Backspace, InputAction.BACK),
     (Qt.Key.Key_Up, InputAction.UP),
@@ -74,12 +74,18 @@ def test_space_nav_unmapped_player_plays():
     assert player == InputAction.PLAY_PAUSE
 
 
-def test_right_different_in_modes():
-    nav = key_to_action(Qt.Key.Key_Right, player_mode=False)
-    player = key_to_action(Qt.Key.Key_Right, player_mode=True)
-    assert nav == InputAction.RIGHT
-    assert player == InputAction.SEEK_FORWARD
-    assert nav != player
+def test_right_left_same_in_both_modes():
+    """Regression: Left/Right must mean "move a selection" identically in
+    both modes — player mode used to special-case them as an instant
+    30s-seek shortcut, which made seeking unreachable on any device
+    without a real keyboard (no gamepad or basic remote can send Key_F/
+    Key_N/etc., only D-pad+Select+Back). Seeking now goes through
+    PlayerScreen's control row instead, the same way every other action
+    does."""
+    assert key_to_action(Qt.Key.Key_Right, player_mode=False) == InputAction.RIGHT
+    assert key_to_action(Qt.Key.Key_Right, player_mode=True) == InputAction.RIGHT
+    assert key_to_action(Qt.Key.Key_Left, player_mode=False) == InputAction.LEFT
+    assert key_to_action(Qt.Key.Key_Left, player_mode=True) == InputAction.LEFT
 
 
 def test_f_r_are_long_seek_only_in_player():

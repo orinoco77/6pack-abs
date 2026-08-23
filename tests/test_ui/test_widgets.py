@@ -615,8 +615,14 @@ def test_player_screen_creates(qtbot):
     qtbot.addWidget(screen)
 
 
-def test_player_screen_enter_key_does_not_pause(qtbot):
-    """Kodi: Enter in FullscreenVideo shows OSD, not play/pause. Space/P pause."""
+def test_player_screen_enter_key_activates_default_focused_play_pause(qtbot):
+    """Enter/Return now activates whichever control row button is
+    currently focused (see PlayerScreen._control_buttons), rather than
+    Kodi's "show OSD" behavior -- this app's row has no hidden OSD to
+    show, it's always visible, so Enter's role here is "confirm the
+    row's current selection" like every other action. Play/pause is the
+    row's default landing spot, so Enter triggers it immediately unless
+    focus has been moved elsewhere first."""
     from sixpack.ui.screens.player import PlayerScreen
     mock_player = MockAudioPlayer()
     screen = PlayerScreen(mock_player)
@@ -624,7 +630,7 @@ def test_player_screen_enter_key_does_not_pause(qtbot):
     screen.show()
     screen.setFocus()
     qtbot.keyClick(screen, Qt.Key.Key_Return)
-    assert mock_player.toggle_count == 0
+    assert mock_player.toggle_count == 1
 
 
 def test_player_screen_play_pause_key(qtbot):
@@ -649,7 +655,12 @@ def test_player_screen_p_key(qtbot):
     assert mock_player.toggle_count == 1
 
 
-def test_player_screen_seek_forward_key(qtbot):
+def test_player_screen_right_key_moves_focus_not_seek(qtbot):
+    """Left/Right now move the control row's highlight rather than
+    instantly seeking -- a gamepad or a basic remote (D-pad + Select +
+    Back, nothing else) has no other way to reach seek/next/prev/speed
+    at all. Seeking now requires navigating to the rewind/forward-30s
+    button and pressing Select, like every other control in the row."""
     from sixpack.ui.screens.player import PlayerScreen
     mock_player = MockAudioPlayer()
     screen = PlayerScreen(mock_player)
@@ -657,10 +668,23 @@ def test_player_screen_seek_forward_key(qtbot):
     screen.show()
     screen.setFocus()
     qtbot.keyClick(screen, Qt.Key.Key_Right)
+    assert mock_player.seek_forward_count == 0
+    assert screen._control_buttons[screen._control_focus_idx] is screen._fwd_btn
+
+
+def test_player_screen_select_on_forward_button_seeks_forward(qtbot):
+    from sixpack.ui.screens.player import PlayerScreen
+    mock_player = MockAudioPlayer()
+    screen = PlayerScreen(mock_player)
+    qtbot.addWidget(screen)
+    screen.show()
+    screen.setFocus()
+    qtbot.keyClick(screen, Qt.Key.Key_Right)  # play -> forward-30s
+    qtbot.keyClick(screen, Qt.Key.Key_Return)  # select
     assert mock_player.seek_forward_count == 1
 
 
-def test_player_screen_seek_back_key(qtbot):
+def test_player_screen_left_key_moves_focus_not_seek(qtbot):
     from sixpack.ui.screens.player import PlayerScreen
     mock_player = MockAudioPlayer()
     screen = PlayerScreen(mock_player)
@@ -668,6 +692,19 @@ def test_player_screen_seek_back_key(qtbot):
     screen.show()
     screen.setFocus()
     qtbot.keyClick(screen, Qt.Key.Key_Left)
+    assert mock_player.seek_back_count == 0
+    assert screen._control_buttons[screen._control_focus_idx] is screen._rew_btn
+
+
+def test_player_screen_select_on_rewind_button_seeks_back(qtbot):
+    from sixpack.ui.screens.player import PlayerScreen
+    mock_player = MockAudioPlayer()
+    screen = PlayerScreen(mock_player)
+    qtbot.addWidget(screen)
+    screen.show()
+    screen.setFocus()
+    qtbot.keyClick(screen, Qt.Key.Key_Left)  # play -> rewind-30s
+    qtbot.keyClick(screen, Qt.Key.Key_Return)  # select
     assert mock_player.seek_back_count == 1
 
 

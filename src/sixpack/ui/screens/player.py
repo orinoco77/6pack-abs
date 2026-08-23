@@ -238,11 +238,6 @@ class PlayerScreen(QWidget):
 
         self._play_btn = QPushButton(theme.ICON_PAUSE)
         self._play_btn.setFixedSize(80, 80)
-        self._play_btn.setStyleSheet(
-            f"font-family: '{theme.ICON_FONT_FAMILY}'; font-size: 32pt; "
-            f"background-color: {theme.ACCENT}; border-radius: 40px; "
-            f"color: white; border: none; padding: 0;"
-        )
         self._play_btn.clicked.connect(self._player.toggle_pause)
 
         self._fwd_btn = QPushButton(theme.ICON_FORWARD_30)
@@ -257,27 +252,18 @@ class PlayerScreen(QWidget):
         self._speed_btn.setFixedSize(44, 44)
         self._speed_btn.clicked.connect(self._cycle_speed)
 
-        for btn in (
+        # This row is the screen's one, always-active focus zone (see
+        # _move_control_focus/_reflect_control_focus/keyPressEvent) — real
+        # Qt focus stays off every button (NoFocus), matching how every
+        # other screen in this app manually tracks a focus index and
+        # restyles instead of relying on real Qt focus traversal.
+        self._control_buttons: list[QPushButton] = [
             self._chapters_btn, self._prev_btn, self._rew_btn, self._play_btn,
             self._fwd_btn, self._next_btn, self._speed_btn,
-        ):
+        ]
+        for btn in self._control_buttons:
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             controls.addWidget(btn)
-
-        # De-emphasize the secondary transport buttons — flat/muted — so
-        # they read as present-but-not-focusable next to the accent-filled
-        # play/pause button, which stays the one visually "hot" control.
-        for btn in (self._prev_btn, self._rew_btn, self._fwd_btn, self._next_btn):
-            btn.setStyleSheet(
-                f"font-family: '{theme.ICON_FONT_FAMILY}'; background: transparent; "
-                f"color: {theme.TEXT_SECONDARY}; border: none; font-size: 22pt; padding: 0;"
-            )
-
-        for btn in (self._chapters_btn, self._speed_btn):
-            btn.setStyleSheet(
-                f"font-family: '{theme.ICON_FONT_FAMILY}'; background: transparent; "
-                f"color: {theme.TEXT_MUTED}; border: none; font-size: 16pt; padding: 0;"
-            )
 
         # The speed button itself is icon-only (matches the approved
         # layout); the current multiplier still needs to be visible
@@ -290,6 +276,12 @@ class PlayerScreen(QWidget):
         controls.addWidget(self._speed_value_label)
 
         root.addLayout(controls)
+
+        # Play/pause is the most likely first action, so it's the row's
+        # default landing spot — no separate "enter navigation" gesture
+        # exists on this screen; Left/Right always move this highlight.
+        self._control_focus_idx = self._control_buttons.index(self._play_btn)
+        self._reflect_control_focus()
 
         self._up_next_label = QLabel("")
         self._up_next_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -361,6 +353,12 @@ class PlayerScreen(QWidget):
         self._playlist = None
         self._playlist_items = []
         self._episode_id = ""
+        # Not stale data so much as a UI cursor position, but the same
+        # "reset predictably on every new item" reasoning applies — land
+        # back on play/pause rather than leaving focus wherever a skip
+        # left it (e.g. on "next", inviting an accidental repeat-skip).
+        self._control_focus_idx = self._control_buttons.index(self._play_btn)
+        self._reflect_control_focus()
 
     def play_book(
         self,
@@ -643,6 +641,45 @@ class PlayerScreen(QWidget):
         self._speed_value_label.setText(f"{speed}x")
 
     # ------------------------------------------------------------------
+    # Control row focus (Left/Right + Select — see keyPressEvent)
+    # ------------------------------------------------------------------
+
+    def _move_control_focus(self, delta: int) -> None:
+        n = len(self._control_buttons)
+        self._control_focus_idx = max(0, min(self._control_focus_idx + delta, n - 1))
+        self._reflect_control_focus()
+
+    def _reflect_control_focus(self) -> None:
+        for i, btn in enumerate(self._control_buttons):
+            focused = i == self._control_focus_idx
+            if btn is self._play_btn:
+                # Already accent-filled regardless of focus (it's the
+                # screen's one permanently "hot" control) — focus gets a
+                # brighter ring on top rather than a color swap, since an
+                # accent-colored ring on an accent-filled button wouldn't
+                # be visible at all.
+                ring = theme.ACCENT_GLOW if focused else "transparent"
+                btn.setStyleSheet(
+                    f"font-family: '{theme.ICON_FONT_FAMILY}'; font-size: 32pt; "
+                    f"background-color: {theme.ACCENT}; border-radius: 40px; "
+                    f"color: white; border: 3px solid {ring}; padding: 0;"
+                )
+            elif btn in (self._chapters_btn, self._speed_btn):
+                border = theme.ACCENT if focused else "transparent"
+                btn.setStyleSheet(
+                    f"font-family: '{theme.ICON_FONT_FAMILY}'; background: transparent; "
+                    f"color: {theme.TEXT_MUTED}; border: 2px solid {border}; "
+                    f"border-radius: 8px; font-size: 16pt; padding: 0;"
+                )
+            else:
+                border = theme.ACCENT if focused else "transparent"
+                btn.setStyleSheet(
+                    f"font-family: '{theme.ICON_FONT_FAMILY}'; background: transparent; "
+                    f"color: {theme.TEXT_SECONDARY}; border: 2px solid {border}; "
+                    f"border-radius: 8px; font-size: 22pt; padding: 0;"
+                )
+
+    # ------------------------------------------------------------------
     # Chapter access overlay
     # ------------------------------------------------------------------
 
@@ -701,18 +738,16 @@ class PlayerScreen(QWidget):
 
         if self._chapter_overlay.isVisible():
             # While the overlay is open, it owns SELECT/UP/DOWN/BACK/MENU —
-            # none of these should also fall through to the normal
-            # player-mode bindings below (e.g. SELECT must not also seek).
+            # none of these should also fall through to the control row's
+            # own Left/Right/Select handling below.
             #
-            # Note: in player_mode, key_to_action's keyboard map never
-            # produces InputAction.SELECT for Key_Return (it maps to MENU,
-            # matching Kodi's "Enter = show OSD" convention) — SELECT only
-            # ever arrives from a gamepad's A button (see gamepad.py). So
-            # both SELECT *and* MENU are treated as "activate the
-            # highlighted chapter" here, which is what lets a keyboard user
-            # open the overlay (MENU when closed) and then confirm a
-            # highlighted chapter (MENU again, now open) with the same key.
-            # BACK is the only way to dismiss the overlay without seeking.
+            # Both SELECT and MENU are accepted as "activate the
+            # highlighted chapter" — Key_Return/Key_Enter now produce
+            # SELECT (see keyboard.py), and a gamepad's Y/Start button (if
+            # ever wired up) would still produce MENU, so accepting either
+            # keeps both paths working without needing to know which one
+            # actually fired. BACK is the only way to dismiss the overlay
+            # without jumping to a chapter.
             if action == InputAction.BACK:
                 self._chapter_overlay.hide()
             elif action in (InputAction.SELECT, InputAction.MENU):
@@ -731,7 +766,16 @@ class PlayerScreen(QWidget):
                     self._chapter_overlay.setCurrentRow(row + 1)
             return
 
-        if action == InputAction.MENU:
+        if action == InputAction.LEFT:
+            self._move_control_focus(-1)
+        elif action == InputAction.RIGHT:
+            self._move_control_focus(1)
+        elif action == InputAction.SELECT:
+            # Reuses the focused button's own .clicked wiring rather than
+            # a parallel dispatch table — whatever a mouse click on that
+            # button already does is exactly what Select should do too.
+            self._control_buttons[self._control_focus_idx].click()
+        elif action == InputAction.MENU:
             self._toggle_chapter_overlay()
         elif action == InputAction.BACK:
             self.back_requested.emit()
@@ -742,10 +786,6 @@ class PlayerScreen(QWidget):
         elif action == InputAction.STOP:
             self._player.stop()
             self.back_requested.emit()
-        elif action == InputAction.SEEK_FORWARD:
-            self._player.seek_forward()
-        elif action == InputAction.SEEK_BACK:
-            self._player.seek_back()
         elif action == InputAction.SEEK_FORWARD_LONG:
             self._player.seek_forward_long()
         elif action == InputAction.SEEK_BACK_LONG:
