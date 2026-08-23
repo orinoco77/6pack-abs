@@ -1,6 +1,11 @@
 """Dark 10-foot TV theme for SixPack."""
 from __future__ import annotations
 
+import importlib.resources
+import logging
+
+logger = logging.getLogger(__name__)
+
 # Colour palette
 BG = "#0f0f0f"
 SURFACE = "#1c1c1c"
@@ -56,6 +61,53 @@ FONT_HEADING = 20
 FONT_BODY = 16
 FONT_META = 13
 FONT_BAR_BTN = 13   # header-bar buttons — compact but readable
+
+# Icon font (Material Icons Outlined, bundled under sixpack/assets/fonts/ —
+# see load_icon_font()). Codepoints come from Google's own
+# MaterialIconsOutlined-Regular.codepoints file, not guessed.
+ICON_FONT_FAMILY = "sans-serif"  # fallback until load_icon_font() succeeds
+ICON_SKIP_PREVIOUS = ""
+ICON_SKIP_NEXT = ""
+ICON_PLAY = ""
+ICON_PAUSE = ""
+ICON_REPLAY_30 = ""
+ICON_FORWARD_30 = ""
+ICON_MENU_BOOK = ""
+ICON_SPEED = ""
+
+
+def load_icon_font() -> str:
+    """Load the bundled Material Icons Outlined font and return its family
+    name. Must be called after a QApplication/QGuiApplication exists.
+
+    Returns "" (leaving ICON_FONT_FAMILY at its "sans-serif" fallback) if
+    the font can't be loaded -- icon glyphs would render as tofu boxes
+    instead of the intended icon, but that must never crash or block
+    startup over a missing/corrupt bundled asset.
+    """
+    from PyQt6.QtGui import QFontDatabase
+
+    try:
+        font_path = importlib.resources.files("sixpack") / "assets" / "fonts" / (
+            "MaterialIconsOutlined-Regular.otf"
+        )
+        with importlib.resources.as_file(font_path) as path:
+            font_id = QFontDatabase.addApplicationFont(str(path))
+    except (FileNotFoundError, OSError) as exc:
+        logger.warning("Icon font failed to load: %s", exc)
+        return ""
+
+    if font_id == -1:
+        logger.warning("Icon font failed to load: QFontDatabase rejected the file")
+        return ""
+
+    families = QFontDatabase.applicationFontFamilies(font_id)
+    if not families:
+        return ""
+    global ICON_FONT_FAMILY
+    ICON_FONT_FAMILY = families[0]
+    return ICON_FONT_FAMILY
+
 
 CARD_WIDTH = 210
 CARD_HEIGHT = 280
@@ -218,3 +270,4 @@ QMenu::separator {{
 
 def apply(app: "QApplication") -> None:  # type: ignore[name-defined]  # noqa: F821
     app.setStyleSheet(STYLESHEET)
+    load_icon_font()

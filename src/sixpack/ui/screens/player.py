@@ -35,6 +35,19 @@ from sixpack.ui.widgets.backdrop import Backdrop
 
 _SPEED_STEPS = [1.0, 1.25, 1.5, 1.75, 2.0]
 
+# Roughly 3 lines' worth of text for the description panel -- no scrolling,
+# no expand interaction, just a preview. Truncated at a word boundary
+# rather than measuring actual font metrics (good enough for a preview;
+# doesn't need to be pixel-exact).
+_DESCRIPTION_MAX_CHARS = 280
+
+
+def _truncate_description(text: str) -> str:
+    text = text.strip()
+    if len(text) <= _DESCRIPTION_MAX_CHARS:
+        return text
+    return text[:_DESCRIPTION_MAX_CHARS].rsplit(" ", 1)[0] + "…"
+
 
 def _fmt_time(seconds: float) -> str:
     if not math.isfinite(seconds) or seconds < 0:
@@ -150,6 +163,15 @@ class PlayerScreen(QWidget):
         )
         info.addWidget(self._episode_label)
 
+        self._description_label = QLabel()
+        self._description_label.setWordWrap(True)
+        self._description_label.setStyleSheet(
+            f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_META}pt; "
+            f"background: transparent;"
+        )
+        self._description_label.setVisible(False)
+        info.addWidget(self._description_label)
+
         middle.addLayout(info, stretch=1)
         root.addLayout(middle)
 
@@ -199,31 +221,46 @@ class PlayerScreen(QWidget):
         controls.setAlignment(Qt.AlignmentFlag.AlignCenter)
         controls.setSpacing(20)
 
-        self._prev_btn = QPushButton("⏮")
+        # Chapters and speed bookend the core transport cluster, smaller and
+        # more de-emphasized than the secondary transport buttons below —
+        # they're tertiary controls, not part of the play/seek/skip group.
+        self._chapters_btn = QPushButton(theme.ICON_MENU_BOOK)
+        self._chapters_btn.setFixedSize(44, 44)
+        self._chapters_btn.clicked.connect(self._toggle_chapter_overlay)
+
+        self._prev_btn = QPushButton(theme.ICON_SKIP_PREVIOUS)
         self._prev_btn.setFixedSize(64, 64)
         self._prev_btn.clicked.connect(self.prev_item)
 
-        self._rew_btn = QPushButton("⏪ 30s")
-        self._rew_btn.setFixedWidth(100)
+        self._rew_btn = QPushButton(theme.ICON_REPLAY_30)
+        self._rew_btn.setFixedSize(64, 64)
         self._rew_btn.clicked.connect(self._player.seek_back)
 
-        self._play_btn = QPushButton("⏸")
+        self._play_btn = QPushButton(theme.ICON_PAUSE)
         self._play_btn.setFixedSize(80, 80)
         self._play_btn.setStyleSheet(
-            f"font-size: 28pt; background-color: {theme.ACCENT}; border-radius: 40px;"
-            f"color: white; border: none;"
+            f"font-family: '{theme.ICON_FONT_FAMILY}'; font-size: 32pt; "
+            f"background-color: {theme.ACCENT}; border-radius: 40px; "
+            f"color: white; border: none; padding: 0;"
         )
         self._play_btn.clicked.connect(self._player.toggle_pause)
 
-        self._fwd_btn = QPushButton("30s ⏩")
-        self._fwd_btn.setFixedWidth(100)
+        self._fwd_btn = QPushButton(theme.ICON_FORWARD_30)
+        self._fwd_btn.setFixedSize(64, 64)
         self._fwd_btn.clicked.connect(self._player.seek_forward)
 
-        self._next_btn = QPushButton("⏭")
+        self._next_btn = QPushButton(theme.ICON_SKIP_NEXT)
         self._next_btn.setFixedSize(64, 64)
         self._next_btn.clicked.connect(self.next_item)
 
-        for btn in (self._prev_btn, self._rew_btn, self._play_btn, self._fwd_btn, self._next_btn):
+        self._speed_btn = QPushButton(theme.ICON_SPEED)
+        self._speed_btn.setFixedSize(44, 44)
+        self._speed_btn.clicked.connect(self._cycle_speed)
+
+        for btn in (
+            self._chapters_btn, self._prev_btn, self._rew_btn, self._play_btn,
+            self._fwd_btn, self._next_btn, self._speed_btn,
+        ):
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             controls.addWidget(btn)
 
@@ -232,16 +269,25 @@ class PlayerScreen(QWidget):
         # play/pause button, which stays the one visually "hot" control.
         for btn in (self._prev_btn, self._rew_btn, self._fwd_btn, self._next_btn):
             btn.setStyleSheet(
-                f"background: transparent; color: {theme.TEXT_SECONDARY}; "
-                f"border: none; font-size: 18pt;"
+                f"font-family: '{theme.ICON_FONT_FAMILY}'; background: transparent; "
+                f"color: {theme.TEXT_SECONDARY}; border: none; font-size: 22pt; padding: 0;"
             )
 
-        self._speed_label = QLabel("1.0x")
-        self._speed_label.setStyleSheet(
-            f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_META}pt; "
+        for btn in (self._chapters_btn, self._speed_btn):
+            btn.setStyleSheet(
+                f"font-family: '{theme.ICON_FONT_FAMILY}'; background: transparent; "
+                f"color: {theme.TEXT_MUTED}; border: none; font-size: 16pt; padding: 0;"
+            )
+
+        # The speed button itself is icon-only (matches the approved
+        # layout); the current multiplier still needs to be visible
+        # somewhere, so it sits as a small label right next to the icon.
+        self._speed_value_label = QLabel("1.0x")
+        self._speed_value_label.setStyleSheet(
+            f"color: {theme.TEXT_MUTED}; font-size: {theme.FONT_META}pt; "
             f"background: transparent;"
         )
-        controls.addWidget(self._speed_label)
+        controls.addWidget(self._speed_value_label)
 
         root.addLayout(controls)
 
@@ -339,6 +385,7 @@ class PlayerScreen(QWidget):
         self._series_label.setText(series.name)
         seq = f"Episode {book.sequence}" if book.sequence else ""
         self._episode_label.setText(seq)
+        self._set_description(book.description)
 
         # Fetch cover (via cache if available)
         cover_url = book.cover_url(server_url, token)
@@ -379,6 +426,7 @@ class PlayerScreen(QWidget):
         self._title_label.setText(item.title)
         self._series_label.setText(item.subtitle)
         self._episode_label.setText("")
+        self._set_description(item.description)
 
         cover_url = item.cover_url(server_url, token)
         if self._cover_cache is not None:
@@ -419,6 +467,7 @@ class PlayerScreen(QWidget):
         self._title_label.setText(item.title)
         self._series_label.setText(playlist.name)
         self._episode_label.setText(f"Item {self._current_index + 1} of {len(items)}")
+        self._set_description(item.description)
 
         # Fetch cover (via cache if available)
         cover_url = item.cover_url(server_url, token)
@@ -456,6 +505,7 @@ class PlayerScreen(QWidget):
         self._title_label.setText(episode.title)
         self._series_label.setText(show.title)
         self._episode_label.setText("")
+        self._set_description(episode.description)
 
         cover_url = show.cover_url(server_url, token)
         if self._cover_cache is not None:
@@ -577,11 +627,20 @@ class PlayerScreen(QWidget):
                 self._item_id, self._position, self._duration, is_finished, self._episode_id
             )
 
+    def _set_description(self, text: str) -> None:
+        text = _truncate_description(text)
+        if not text:
+            self._description_label.setVisible(False)
+            self._description_label.setText("")
+            return
+        self._description_label.setText(text)
+        self._description_label.setVisible(True)
+
     def _cycle_speed(self) -> None:
         self._speed_index = (self._speed_index + 1) % len(_SPEED_STEPS)
         speed = _SPEED_STEPS[self._speed_index]
         self._player.set_speed(speed)
-        self._speed_label.setText(f"{speed}x")
+        self._speed_value_label.setText(f"{speed}x")
 
     # ------------------------------------------------------------------
     # Chapter access overlay

@@ -40,6 +40,15 @@ def test_playlist_item_cover_url(server_url, auth_token):
     assert url == f"{server_url}/api/items/li1/cover?token={auth_token}"
 
 
+def test_playlist_item_description_delegates_to_media():
+    library_item = LibraryItem(
+        id="li1", libraryId="lib1", mediaType="book",
+        media=LibraryItemMedia(metadata={"title": "T", "description": "Plot summary."}),
+    )
+    item = PlaylistItem(libraryItemId="li1", libraryItem=library_item)
+    assert item.description == "Plot summary."
+
+
 # ---- Playlist ----
 
 def test_playlist_fields():

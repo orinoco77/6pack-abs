@@ -284,14 +284,14 @@ def test_secondary_transport_buttons_are_flat_not_accent(screen):
 
 
 def test_speed_starts_at_1x(screen):
-    assert screen._speed_label.text() == "1.0x"
+    assert screen._speed_value_label.text() == "1.0x"
 
 
 def test_up_key_cycles_speed_forward(qtbot, screen):
     screen.show()
     qtbot.waitExposed(screen)
     qtbot.keyClick(screen, Qt.Key.Key_Up)
-    assert screen._speed_label.text() == "1.25x"
+    assert screen._speed_value_label.text() == "1.25x"
     assert screen._player.speed_calls == [1.25]
 
 
@@ -300,7 +300,7 @@ def test_speed_cycle_wraps_around(qtbot, screen):
     qtbot.waitExposed(screen)
     for _ in range(5):  # 1.0 -> 1.25 -> 1.5 -> 1.75 -> 2.0 -> 1.0
         qtbot.keyClick(screen, Qt.Key.Key_Up)
-    assert screen._speed_label.text() == "1.0x"
+    assert screen._speed_value_label.text() == "1.0x"
     assert screen._player.speed_calls[-1] == 1.0
 
 
@@ -389,12 +389,12 @@ def test_up_down_navigate_overlay_without_cycling_speed(qtbot, screen):
 
     qtbot.keyClick(screen, Qt.Key.Key_Down)
     assert screen._chapter_overlay.currentRow() == 1
-    assert screen._speed_label.text() == "1.0x"
+    assert screen._speed_value_label.text() == "1.0x"
     assert screen._player.speed_calls == []
 
     qtbot.keyClick(screen, Qt.Key.Key_Up)
     assert screen._chapter_overlay.currentRow() == 0
-    assert screen._speed_label.text() == "1.0x"
+    assert screen._speed_value_label.text() == "1.0x"
     assert screen._player.speed_calls == []
 
 
@@ -647,3 +647,180 @@ def test_play_book_hides_and_clears_open_chapter_overlay(qtbot):
 
     assert not s._chapter_overlay.isVisible()
     assert s._chapter_overlay.count() == 0
+
+
+# ----------------------------------------------------------------------
+# Description panel
+# ----------------------------------------------------------------------
+
+
+def test_play_book_shows_description(qtbot):
+    s = PlayerScreen(player=_FakePlayer())
+    qtbot.addWidget(s)
+    s.show()
+    book = SeriesBook(
+        id="b1", media=LibraryItemMedia(metadata={"title": "T", "description": "A tale."}),
+        sequence="1",
+    )
+    s.play_book(book, 0.0, _series([book]), [book], "http://server", "tok")
+    assert s._description_label.isVisible()
+    assert s._description_label.text() == "A tale."
+
+
+def test_play_book_hides_description_when_absent(qtbot):
+    s = PlayerScreen(player=_FakePlayer())
+    qtbot.addWidget(s)
+    book = _book()  # no description in metadata
+    s.play_book(book, 0.0, _series([book]), [book], "http://server", "tok")
+    assert not s._description_label.isVisible()
+    assert s._description_label.text() == ""
+
+
+def test_play_library_item_shows_description(qtbot):
+    s = PlayerScreen(player=_FakePlayer())
+    qtbot.addWidget(s)
+    s.show()
+    item = LibraryItem(
+        id="i1", library_id="lib1",
+        media=LibraryItemMedia(metadata={"title": "T", "description": "Summary."}),
+    )
+    s.play_library_item(item, 0.0, "http://server", "tok")
+    assert s._description_label.isVisible()
+    assert s._description_label.text() == "Summary."
+
+
+def test_play_playlist_item_shows_description(qtbot):
+    s = PlayerScreen(player=_FakePlayer())
+    qtbot.addWidget(s)
+    s.show()
+    library_item = LibraryItem(
+        id="i1", library_id="lib1",
+        media=LibraryItemMedia(metadata={"title": "T", "description": "Playlist item desc."}),
+    )
+    item = PlaylistItem(library_item_id="i1", library_item=library_item)
+    s.play_playlist_item(item, 0.0, _playlist([item]), [item], "http://server", "tok")
+    assert s._description_label.isVisible()
+    assert s._description_label.text() == "Playlist item desc."
+
+
+def test_play_podcast_episode_shows_description(qtbot):
+    from sixpack.api.models import PodcastEpisode
+
+    s = PlayerScreen(player=_FakePlayer())
+    qtbot.addWidget(s)
+    s.show()
+    show = LibraryItem(
+        id="show1", library_id="lib1", media_type="podcast",
+        media=LibraryItemMedia(metadata={"title": "My Show"}),
+    )
+    episode = PodcastEpisode.model_validate({
+        "id": "ep1", "libraryItemId": "show1", "title": "Ep One",
+        "description": "Show notes.",
+    })
+    s.play_podcast_episode(episode, show, 0.0, "http://abs.test", "tok")
+    assert s._description_label.isVisible()
+    assert s._description_label.text() == "Show notes."
+
+
+def test_description_switches_between_items(qtbot):
+    """Regression: a later item with no description must hide the label
+    again, not leave the previous item's text showing stale."""
+    s = PlayerScreen(player=_FakePlayer())
+    qtbot.addWidget(s)
+    s.show()
+    book_with_desc = SeriesBook(
+        id="a", media=LibraryItemMedia(metadata={"title": "A", "description": "Has one."}),
+    )
+    book_without_desc = _book(book_id="b", title="B")
+    series = _series([book_with_desc, book_without_desc])
+
+    s.play_book(book_with_desc, 0.0, series, [book_with_desc, book_without_desc],
+                "http://server", "tok")
+    assert s._description_label.isVisible()
+
+    s.play_book(book_without_desc, 0.0, series, [book_with_desc, book_without_desc],
+                "http://server", "tok")
+    assert not s._description_label.isVisible()
+
+
+def test_description_truncated_at_word_boundary_with_ellipsis(qtbot):
+    s = PlayerScreen(player=_FakePlayer())
+    qtbot.addWidget(s)
+    long_text = "word " * 100  # far beyond the 280-char cap
+    book = SeriesBook(
+        id="b1", media=LibraryItemMedia(metadata={"title": "T", "description": long_text}),
+    )
+    s.play_book(book, 0.0, _series([book]), [book], "http://server", "tok")
+    shown = s._description_label.text()
+    assert shown.endswith("…")
+    assert len(shown) <= 281  # 280 chars + the ellipsis character
+    assert not shown[:-1].endswith(" ")  # truncated at a word boundary, not mid-word
+
+
+def test_description_short_text_not_truncated(qtbot):
+    s = PlayerScreen(player=_FakePlayer())
+    qtbot.addWidget(s)
+    book = SeriesBook(
+        id="b1", media=LibraryItemMedia(metadata={"title": "T", "description": "Short."}),
+    )
+    s.play_book(book, 0.0, _series([book]), [book], "http://server", "tok")
+    assert s._description_label.text() == "Short."
+
+
+# ----------------------------------------------------------------------
+# Icon-font transport controls (chapters/speed buttons, glyph codepoints)
+# ----------------------------------------------------------------------
+
+
+def test_transport_buttons_use_icon_font_codepoints(screen):
+    from sixpack.ui import theme
+
+    assert screen._prev_btn.text() == theme.ICON_SKIP_PREVIOUS
+    assert screen._next_btn.text() == theme.ICON_SKIP_NEXT
+    assert screen._rew_btn.text() == theme.ICON_REPLAY_30
+    assert screen._fwd_btn.text() == theme.ICON_FORWARD_30
+    assert screen._play_btn.text() == theme.ICON_PAUSE
+    assert screen._chapters_btn.text() == theme.ICON_MENU_BOOK
+    assert screen._speed_btn.text() == theme.ICON_SPEED
+
+
+def test_chapters_button_click_toggles_overlay(qtbot, screen):
+    from sixpack.api.models import Chapter
+
+    screen.set_chapters([Chapter(id=0, start=0.0, end=100.0, title="Ch1")])
+    assert not screen._chapter_overlay.isVisible()
+
+    qtbot.mouseClick(screen._chapters_btn, Qt.MouseButton.LeftButton)
+    assert screen._chapter_overlay.isVisible()
+
+    qtbot.mouseClick(screen._chapters_btn, Qt.MouseButton.LeftButton)
+    assert not screen._chapter_overlay.isVisible()
+
+
+def test_speed_button_click_cycles_speed(qtbot, screen):
+    assert screen._speed_value_label.text() == "1.0x"
+    qtbot.mouseClick(screen._speed_btn, Qt.MouseButton.LeftButton)
+    assert screen._speed_value_label.text() == "1.25x"
+    assert screen._player.speed_calls == [1.25]
+
+
+def test_chapters_and_speed_buttons_are_unfocusable_and_muted(screen):
+    from sixpack.ui import theme
+
+    for btn in (screen._chapters_btn, screen._speed_btn):
+        assert btn.focusPolicy() == Qt.FocusPolicy.NoFocus
+        assert theme.TEXT_MUTED in btn.styleSheet()
+
+
+def test_icon_buttons_zero_out_the_app_wide_button_padding(screen):
+    """Regression: the app-wide QPushButton stylesheet sets `padding: 10px
+    24px`. Without an explicit `padding: 0` override, that 24px-per-side
+    horizontal padding exceeds the 44px fixed width of the chapters/speed
+    buttons entirely, leaving negative room for the glyph -- confirmed via
+    a real screenshot to render as a fully invisible icon, not just a
+    slightly-off one. Every icon-only button must override it."""
+    for btn in (
+        screen._chapters_btn, screen._prev_btn, screen._rew_btn,
+        screen._play_btn, screen._fwd_btn, screen._next_btn, screen._speed_btn,
+    ):
+        assert "padding: 0" in btn.styleSheet()
