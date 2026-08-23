@@ -285,6 +285,62 @@ def test_browse_screen_set_row_items_unknown_type(qtbot):
     screen.set_row_items(RowType.PLAYLISTS, [_playlist("p1", "P")])
 
 
+def test_set_row_items_repopulate_preserves_navigated_focus(qtbot):
+    """Regression: BrowseScreen shows a row instantly from the on-disk
+    cache, then set_row_items() is called again moments later with the
+    real network result for the same row (see app.py's
+    _fetch_browse_content: cache-primed render superseded by the async
+    fetch). If the user has already navigated within that row during the
+    gap, the second call must not snap focus back to the first card."""
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    screen.load_libraries([_lib("l1", "Audiobooks")], "http://s", "tok")
+    ra_idx = screen._row_types.index(RowType.RECENTLY_ADDED)
+    screen.set_row_items(RowType.RECENTLY_ADDED, [_li("i1", "A"), _li("i2", "B")])
+    screen.show()
+    screen._zone = "rows"
+    screen._focused_row = ra_idx
+    screen._row_item_idxs[ra_idx] = 1  # user navigated to the 2nd card
+
+    # The real fetch resolves with the same (or refreshed) items.
+    screen.set_row_items(RowType.RECENTLY_ADDED, [_li("i1", "A"), _li("i2", "B")])
+
+    assert screen._row_item_idxs[ra_idx] == 1
+    assert screen._row_widgets[ra_idx]._focused_idx == 1
+
+
+def test_set_row_items_repopulate_clamps_shorter_list(qtbot):
+    """If the refreshed row is shorter than before, the preserved index
+    must clamp into range rather than pointing past the end."""
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    screen.load_libraries([_lib("l1", "Audiobooks")], "http://s", "tok")
+    ra_idx = screen._row_types.index(RowType.RECENTLY_ADDED)
+    screen.set_row_items(
+        RowType.RECENTLY_ADDED, [_li("i1", "A"), _li("i2", "B"), _li("i3", "C")]
+    )
+    screen.show()
+    screen._zone = "rows"
+    screen._focused_row = ra_idx
+    screen._row_item_idxs[ra_idx] = 2
+
+    screen.set_row_items(RowType.RECENTLY_ADDED, [_li("i1", "A")])
+
+    assert screen._row_item_idxs[ra_idx] == 0
+
+
+def test_set_row_items_first_population_still_defaults_to_zero(qtbot):
+    """A row's genuine first population (no prior items) must still start
+    at index 0 -- only a re-population of an already-populated row
+    preserves the existing index."""
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    screen.load_libraries([_lib("l1", "Audiobooks")], "http://s", "tok")
+    ra_idx = screen._row_types.index(RowType.RECENTLY_ADDED)
+    screen.set_row_items(RowType.RECENTLY_ADDED, [_li("i1", "A"), _li("i2", "B")])
+    assert screen._row_item_idxs[ra_idx] == 0
+
+
 # ---------------------------------------------------------------------------
 # BrowseScreen — sidebar zone keyboard navigation
 # ---------------------------------------------------------------------------
