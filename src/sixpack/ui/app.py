@@ -524,13 +524,12 @@ class MainWindow(QMainWindow):
     def _on_playlist_item_activated(self, item: PlaylistItem) -> None:
         self._pending_playlist_item = item
         self._chapter_back_target = "playlist_detail"
-        self._player_back_target = "chapter"
+        self._player_back_target = "playlist_detail"
         self._worker.run("playlist_item_chapters", self._async_get_book_chapters(item.library_item_id))
 
     def _on_playlist_item_play_requested(self, item: PlaylistItem, start_time: float) -> None:
         if not self._player or not self._player_screen:
             return
-        self._player_back_target = "chapter" if self._chapter_back_target == "playlist_detail" else "playlist_detail"
         self._current_playlist_item = item
         self._current_start_time = start_time
         playlist = self._current_playlist
@@ -927,12 +926,14 @@ class MainWindow(QMainWindow):
                 return
             chapters = library_item.media.chapters
             if len(chapters) > 1:
+                self._player_back_target = "chapter"
                 prog = self._playlist_detail_screen._progress.get(item.library_item_id)
                 self._chapter_screen.load_from_playlist_item(item, chapters, prog, self._server_url, self._token)
                 self._stack.setCurrentWidget(self._chapter_screen)
             else:
                 prog = self._playlist_detail_screen._progress.get(item.library_item_id)
                 start_time = prog.current_time if prog and not prog.is_finished else 0.0
+                self._player_back_target = "playlist_detail"
                 self._on_playlist_item_play_requested(item, start_time)
                 if self._player_screen:
                     self._player_screen.set_chapters(chapters)
