@@ -49,7 +49,7 @@ DEFAULT_ROW_TYPES: list[RowType] = [
 # Sidebar item
 # ---------------------------------------------------------------------------
 
-_LIB_ICONS = {"book": "📚", "podcast": "🎙", "ebook": "📖", "exit": "⏻"}
+_LIB_ICONS = {"book": "📚", "podcast": "🎙", "ebook": "📖", "exit": "🚪"}
 
 
 class _SidebarItem(QWidget):
@@ -430,7 +430,15 @@ class BrowseScreen(QWidget):
         self._exit_overlay.hide()
 
     def _exit_confirm_geometry(self) -> QRect:
-        w, h = int(self.width() * 0.3), 140
+        # Height comes from the overlay's own sizeHint(), not a guessed
+        # constant -- a fixed pixel height chosen against this dev
+        # machine's font rendering can end up shorter than what the same
+        # point-sized font actually needs on a different machine's font
+        # stack/DPI, squeezing the button row short enough to clip its own
+        # text vertically (confirmed: even on this dev machine, a
+        # hardcoded 140 was already 11px short of the real 151px needed).
+        w = int(self.width() * 0.3)
+        h = self._exit_overlay.sizeHint().height()
         return QRect((self.width() - w) // 2, (self.height() - h) // 2, w, h)
 
     def _build_content(self) -> QWidget:
