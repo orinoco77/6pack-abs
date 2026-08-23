@@ -366,36 +366,6 @@ def test_media_card_media_type_param(qtbot):
     assert card._media_type == "podcast"
 
 
-def test_media_card_focus_installs_glow(qtbot):
-    """Focusing a card must visibly signal it via an accent-colored glow,
-    but never via a QGraphicsEffect (see docs/qt-graphics-effect-crash.md):
-    the glow is a paint-level strength value animated toward 1.0 and
-    rendered directly in MediaCard.paintEvent."""
-    card = MediaCard(title="Test")
-    qtbot.addWidget(card)
-    card.set_focused(True)
-    assert card.graphicsEffect() is None
-    assert card._glow_anim is not None
-    assert card._glow_anim.endValue() == 1.0
-
-
-def test_media_card_glow_anim_reused_not_leaked(qtbot):
-    """Regression guard: MediaCard must reuse a single QVariantAnimation for
-    its focus glow rather than constructing a new one on every
-    set_focused() call. Recreating one per call leaks a live QObject child
-    each time (dropping the Python reference doesn't delete the underlying
-    C++ object while `card` still parents it) — measured at 200 live
-    QVariantAnimation children after 200 focus changes before this fix."""
-    from PyQt6.QtCore import QVariantAnimation
-
-    card = MediaCard(title="Test")
-    qtbot.addWidget(card)
-    for i in range(200):
-        card.set_focused(i % 2 == 0)
-    assert len(card.findChildren(QVariantAnimation)) == 1
-    assert card._glow_anim is not None
-
-
 def test_media_card_no_graphics_effect_ever_installed(qtbot):
     """Regression guard for the QGraphicsDropShadowEffect glow that used to
     live on `self` and was implicated (via lldb) in a Qt6.11/PyQt6
@@ -417,8 +387,7 @@ def _expected_scrim_alpha():
 def test_media_card_no_graphics_effect_used_for_dim(qtbot):
     """The dim must never be a QGraphicsEffect of any kind — see
     docs/qt-graphics-effect-crash.md. No QGraphicsEffect of any kind remains
-    anywhere on the card, including the outer focus glow, which is
-    paint-level too."""
+    anywhere on the card."""
     from PyQt6.QtWidgets import QGraphicsEffect
     card = MediaCard(title="Test")
     qtbot.addWidget(card)
@@ -466,15 +435,12 @@ def test_media_card_default_construction_dims(qtbot):
 
 def test_media_card_default_construction_then_focus_true(qtbot):
     """A freshly constructed (now dim-by-default) card must still focus
-    correctly: set_focused(True) removes the dim scrim and starts the glow
-    strength animating toward 1.0."""
+    correctly: set_focused(True) removes the dim scrim."""
     card = MediaCard(title="Test")
     qtbot.addWidget(card)
     card.set_focused(True)
     assert not card._scrim.isVisibleTo(card._body)
     assert card._scrim.color().alpha() == 0
-    assert card._glow_anim is not None
-    assert card._glow_anim.endValue() == 1.0
 
 
 def test_media_card_scrim_is_non_interactive_and_covers_body(qtbot):
