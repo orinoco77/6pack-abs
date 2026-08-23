@@ -663,8 +663,17 @@ class BrowseScreen(QWidget):
             idx = self._row_types.index(row_type)
         except ValueError:
             return
+        had_items = bool(self._row_items[idx])
         self._row_items[idx] = items
-        self._row_item_idxs[idx] = 0
+        if had_items and items:
+            # Not this row's first population -- e.g. the fast cache-primed
+            # render being superseded by the real network fetch shortly
+            # after. Preserve wherever the user has already navigated to
+            # within it (clamped in case the refreshed row is shorter)
+            # rather than snapping focus back to the first card.
+            self._row_item_idxs[idx] = min(self._row_item_idxs[idx], len(items) - 1)
+        else:
+            self._row_item_idxs[idx] = 0
         self._populate_row(idx)
 
     def _rebuild_sidebar(self) -> None:
