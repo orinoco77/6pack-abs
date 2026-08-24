@@ -1321,6 +1321,42 @@ def test_splash_shows_update_check_status_on_startup(qtbot, monkeypatch):
 
 # ---- Sidebar Exit wiring ----
 
+def test_series_detail_finished_changed_wired_to_progress_update(window, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        window, "_async_update_progress",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or _noop_coro(),
+    )
+    window._server_url = "http://abs.test"
+    window._token = "tok"
+    window._detail_screen.finished_changed.emit("item1", 100.0, 100.0, True, "")
+    assert calls
+
+
+def test_playlist_detail_finished_changed_wired_to_progress_update(window, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        window, "_async_update_progress",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or _noop_coro(),
+    )
+    window._server_url = "http://abs.test"
+    window._token = "tok"
+    window._playlist_detail_screen.finished_changed.emit("item1", 100.0, 100.0, True, "")
+    assert calls
+
+
+def test_podcast_detail_finished_changed_wired_to_progress_update(window, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        window, "_async_update_progress",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or _noop_coro(),
+    )
+    window._server_url = "http://abs.test"
+    window._token = "tok"
+    window._podcast_detail_screen.finished_changed.emit("item1", 100.0, 100.0, True, "ep1")
+    assert calls
+
+
 def test_browse_exit_requested_calls_close(qtbot, monkeypatch):
     """BrowseScreen.exit_requested must be wired straight to MainWindow's
     own close() -- the same method the old Q/Ctrl+Q shortcut used to call
