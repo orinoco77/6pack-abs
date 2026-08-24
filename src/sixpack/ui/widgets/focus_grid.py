@@ -10,7 +10,10 @@ class FocusGrid(QWidget):
     Lays out child widgets in a grid and handles arrow-key navigation
     between them. Column count is set at construction time.
 
-    Emits item_activated(index) when an item fires its activated signal.
+    Emits item_activated(index) on a short Select tap (resolved on key
+    release, not press -- the standard trade-off needed to distinguish a
+    tap from a hold) and long_press_activated(index) after a 500ms Select
+    hold, both using whichever index is currently focused when they fire.
     """
 
     item_activated = pyqtSignal(int)
@@ -78,6 +81,8 @@ class FocusGrid(QWidget):
             item.deleteLater()
         self._items.clear()
         self._focused_index = 0
+        self._select_hold_timer.stop()
+        self._select_held = False
 
     def focus_item(self, index: int) -> None:
         if not self._items:

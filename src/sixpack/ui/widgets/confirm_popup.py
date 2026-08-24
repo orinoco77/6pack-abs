@@ -15,13 +15,17 @@ from sixpack.ui import theme
 
 
 class ConfirmPopup(QWidget):
-    """Host screens must check `.isVisible()` in their own keyPressEvent
-    and call `handle_key(action)` (then unconditionally return) before
-    falling through to normal handling -- see PlayerScreen's existing
-    chapter-overlay convention, now shared by two screens. `handle_key`
-    always consumes the key while visible; it has no return value because
-    every caller's usage is unconditional "call it, then return" while
-    the popup is up.
+    """Takes real Qt keyboard focus while visible (see show_confirm's
+    setFocus() call), so it naturally intercepts key events via its own
+    keyPressEvent instead of relying on a host screen to forward them --
+    a host's own keyPressEvent does NOT need an `.isVisible()` check for
+    this popup. Hosts DO need to restore focus to their own real focus
+    target (e.g. FocusGrid) when the popup closes, since Qt does not do
+    this automatically on `.hide()` -- connect both `confirmed` and
+    `cancelled` and call `.setFocus()` on the right target in each.
+    `handle_key` is still public/standalone (used directly by
+    keyPressEvent, and by tests that drive actions without going through
+    real Qt key events).
     """
 
     confirmed = pyqtSignal()
@@ -31,6 +35,7 @@ class ConfirmPopup(QWidget):
         super().__init__(parent)
         self._focus_index = 0  # 0 = Cancel, 1 = Confirm -- safer default
         self._build_ui()
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.hide()
 
     def _build_ui(self) -> None:
@@ -74,6 +79,13 @@ class ConfirmPopup(QWidget):
         self._reflect_focus()
         self.show()
         self.raise_()
+        self.setFocus()
+
+    def keyPressEvent(self, event) -> None:
+        from sixpack.input.keyboard import key_to_action
+
+        action = key_to_action(event.key())
+        self.handle_key(action)
 
     def handle_key(self, action: InputAction | None) -> None:
         if action == InputAction.BACK:

@@ -103,3 +103,21 @@ def test_reopening_resets_focus_to_cancel(qtbot):
 
     popup.show_confirm("Second message")
     assert popup._focus_index == 0
+
+
+def test_visible_popup_has_real_qt_focus_and_handles_keys_directly(qtbot):
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
+
+    popup = ConfirmPopup()
+    qtbot.addWidget(popup)
+    popup.show()
+    qtbot.waitExposed(popup)
+    popup.activateWindow()
+    QTest.qWaitForWindowActive(popup)
+    popup.show_confirm("Are you sure?")
+
+    assert popup.hasFocus()
+
+    qtbot.keyClick(popup, Qt.Key.Key_Right)
+    assert popup._focus_index == 1
