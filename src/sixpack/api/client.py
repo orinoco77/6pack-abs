@@ -6,8 +6,6 @@ from typing import Any
 
 import httpx
 
-logger = logging.getLogger(__name__)
-
 from .models import (
     Library,
     LibraryItem,
@@ -20,6 +18,8 @@ from .models import (
     Series,
     User,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class AuthenticationError(Exception):
@@ -81,7 +81,10 @@ class ABSClient:
         if response.status_code == 401:
             raise AuthenticationError("Invalid or expired token")
         if response.is_error:
-            raise APIError(response.status_code, f"API error {response.status_code}: {response.text[:200]}")
+            raise APIError(
+                response.status_code,
+                f"API error {response.status_code}: {response.text[:200]}",
+            )
 
     # ------------------------------------------------------------------
     # Authentication

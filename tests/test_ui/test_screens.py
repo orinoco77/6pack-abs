@@ -1,7 +1,6 @@
 """UI screen tests using pytest-qt (headless)."""
 from __future__ import annotations
 
-import pytest
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 
@@ -15,12 +14,12 @@ from sixpack.api.models import (
 from sixpack.ui.screens.login import LoginScreen
 from sixpack.ui.screens.series_detail import SeriesDetailScreen
 
-
 # ---- SplashScreen ----
 
 def test_splash_screen_creates(qtbot):
-    from sixpack.ui.screens.splash import SplashScreen
     from PyQt6.QtWidgets import QLabel
+
+    from sixpack.ui.screens.splash import SplashScreen
     screen = SplashScreen()
     qtbot.addWidget(screen)
     labels = screen.findChildren(QLabel)
@@ -357,7 +356,8 @@ def test_login_keyboard_reachable_via_real_dpad_navigation(qtbot):
         # character into whichever field is active when Select is
         # pressed on a key.
         before = screen._url_input.text()
-        qtbot.keyClick(screen._keyboard, Qt.Key.Key_Return)  # selects the keyboard's default-focused key
+        # Selects the keyboard's default-focused key.
+        qtbot.keyClick(screen._keyboard, Qt.Key.Key_Return)
         assert (
             screen._url_input.text() != before
             or screen._user_input.text()
@@ -682,7 +682,9 @@ def test_detail_screen_load(qtbot):
 
 
 def test_detail_screen_back_signal(qtbot):
-    from sixpack.input.keyboard import key_to_action  # noqa: F401 — confirm import path used by screen
+    from sixpack.input.keyboard import (
+        key_to_action,  # noqa: F401 — confirm import path used by screen
+    )
     screen = SeriesDetailScreen()
     qtbot.addWidget(screen)
     screen.load(_make_series(), {}, "http://localhost", "tok")
@@ -714,7 +716,9 @@ def test_detail_update_progress_refreshes_in_place(qtbot):
     series = _make_series()
     screen.load(series, {}, "http://localhost", "tok")
     card_before = screen._grid._items[0]
-    screen.update_progress({"b1": MediaProgress(currentTime=1800.0, duration=1800.0, isFinished=True)})
+    screen.update_progress({
+        "b1": MediaProgress(currentTime=1800.0, duration=1800.0, isFinished=True)
+    })
     assert screen._grid._items[0] is card_before
 
 
@@ -850,7 +854,6 @@ def _make_chapters():
 
 
 def _make_box_set_book():
-    from sixpack.api.models import Chapter
     media = LibraryItemMedia(
         metadata={"title": "Invasion of Earth"},
         duration=4200.0,
@@ -1036,16 +1039,16 @@ def test_chapter_screen_resume_index_finished(qtbot):
 
 def test_chapter_status_finished_book(qtbot):
     """All chapters show as finished when the book is finished."""
-    from sixpack.ui.screens.chapter_select import ChapterSelectScreen, _chapter_status
     from sixpack.api.models import Chapter
+    from sixpack.ui.screens.chapter_select import _chapter_status
     ch = Chapter(id=0, start=0.0, end=1500.0, title="Part One")
     assert _chapter_status(ch, 4200.0, is_finished=True) == "finished"
     assert _chapter_status(ch, 0.0, is_finished=True) == "finished"
 
 
 def test_chapter_status_in_progress():
-    from sixpack.ui.screens.chapter_select import _chapter_status
     from sixpack.api.models import Chapter
+    from sixpack.ui.screens.chapter_select import _chapter_status
     ch = Chapter(id=1, start=1500.0, end=3000.0, title="Part Two")
     assert _chapter_status(ch, 2000.0, is_finished=False) == "in_progress"
     assert _chapter_status(ch, 3001.0, is_finished=False) == "finished"
@@ -1054,16 +1057,16 @@ def test_chapter_status_in_progress():
 
 def test_chapter_fraction_not_in_progress_is_zero():
     """Any status other than in_progress (unstarted, finished) reports 0.0."""
-    from sixpack.ui.screens.chapter_select import _chapter_fraction
     from sixpack.api.models import Chapter
+    from sixpack.ui.screens.chapter_select import _chapter_fraction
     ch = Chapter(id=0, start=0.0, end=1500.0, title="Part One")
     assert _chapter_fraction(ch, current_time=0.0, status="unstarted") == 0.0
     assert _chapter_fraction(ch, current_time=1500.0, status="finished") == 0.0
 
 
 def test_chapter_fraction_in_progress_computes_correctly():
-    from sixpack.ui.screens.chapter_select import _chapter_fraction
     from sixpack.api.models import Chapter
+    from sixpack.ui.screens.chapter_select import _chapter_fraction
     ch = Chapter(id=1, start=1500.0, end=3000.0, title="Part Two")
     # 375s into a 1500s chapter that starts at t=1500 -> 25%
     assert abs(_chapter_fraction(ch, current_time=1875.0, status="in_progress") - 0.25) < 1e-6
@@ -1071,15 +1074,15 @@ def test_chapter_fraction_in_progress_computes_correctly():
 
 def test_chapter_fraction_zero_span_is_zero():
     """A zero-length chapter (start == end) must not raise ZeroDivisionError."""
-    from sixpack.ui.screens.chapter_select import _chapter_fraction
     from sixpack.api.models import Chapter
+    from sixpack.ui.screens.chapter_select import _chapter_fraction
     ch = Chapter(id=0, start=60.0, end=60.0, title="Ch (zero-length)")
     assert _chapter_fraction(ch, current_time=60.0, status="in_progress") == 0.0
 
 
 def test_chapter_screen_load_from_library_item(qtbot):
-    from sixpack.ui.screens.chapter_select import ChapterSelectScreen
     from sixpack.api.models import LibraryItem, LibraryItemMedia
+    from sixpack.ui.screens.chapter_select import ChapterSelectScreen
 
     screen = ChapterSelectScreen()
     qtbot.addWidget(screen)
@@ -1100,8 +1103,8 @@ def test_chapter_screen_load_from_library_item(qtbot):
 
 
 def test_chapter_screen_library_item_play_signal(qtbot):
-    from sixpack.ui.screens.chapter_select import ChapterSelectScreen
     from sixpack.api.models import LibraryItem, LibraryItemMedia
+    from sixpack.ui.screens.chapter_select import ChapterSelectScreen
 
     screen = ChapterSelectScreen()
     qtbot.addWidget(screen)
@@ -1123,8 +1126,8 @@ def test_chapter_screen_library_item_play_signal(qtbot):
 
 
 def test_chapter_screen_load_clears_library_item(qtbot):
-    from sixpack.ui.screens.chapter_select import ChapterSelectScreen
     from sixpack.api.models import LibraryItem, LibraryItemMedia
+    from sixpack.ui.screens.chapter_select import ChapterSelectScreen
 
     screen = ChapterSelectScreen()
     qtbot.addWidget(screen)
@@ -1140,8 +1143,8 @@ def test_chapter_screen_load_clears_library_item(qtbot):
 
 
 def test_chapter_screen_load_from_library_item_resume(qtbot):
-    from sixpack.ui.screens.chapter_select import ChapterSelectScreen
     from sixpack.api.models import LibraryItem, LibraryItemMedia, MediaProgress
+    from sixpack.ui.screens.chapter_select import ChapterSelectScreen
 
     screen = ChapterSelectScreen()
     qtbot.addWidget(screen)
@@ -1329,7 +1332,7 @@ def test_chapter_screen_backdrop_image_shown_blocks_late_color_reset(qtbot):
 # ---- Config ----
 
 def test_config_save_load(tmp_path, monkeypatch):
-    from sixpack.config import AppConfig, ServerConfig, CONFIG_FILE, CONFIG_DIR
+    from sixpack.config import AppConfig, ServerConfig
     monkeypatch.setattr("sixpack.config.CONFIG_DIR", tmp_path)
     monkeypatch.setattr("sixpack.config.CONFIG_FILE", tmp_path / "config.json")
 
@@ -1401,7 +1404,10 @@ def test_config_last_library_id_persists(tmp_path, monkeypatch):
 def test_config_last_library_id_defaults_empty(tmp_path, monkeypatch):
     """Old config files without last_library_id load without error."""
     cfg_file = tmp_path / "config.json"
-    cfg_file.write_text('{"servers": [{"name": "H", "url": "http://x", "token": "t"}], "active_server_index": 0}')
+    cfg_file.write_text(
+        '{"servers": [{"name": "H", "url": "http://x", "token": "t"}], '
+        '"active_server_index": 0}'
+    )
     monkeypatch.setattr("sixpack.config.CONFIG_DIR", tmp_path)
     monkeypatch.setattr("sixpack.config.CONFIG_FILE", cfg_file)
 

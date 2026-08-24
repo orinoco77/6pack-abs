@@ -3,9 +3,8 @@ from __future__ import annotations
 import json
 import os
 import stat
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-
 
 CONFIG_DIR = Path.home() / ".config" / "sixpack"
 CONFIG_FILE = CONFIG_DIR / "config.json"

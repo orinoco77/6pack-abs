@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt, QVariantAnimation
-from PyQt6.QtGui import QColor, QPixmap, QPainter, QLinearGradient, QBrush
+from PyQt6.QtGui import QBrush, QColor, QLinearGradient, QPainter, QPixmap
 from PyQt6.QtWidgets import QWidget
 
 from sixpack.ui import theme

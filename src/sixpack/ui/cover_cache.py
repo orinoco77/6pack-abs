@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
-from PyQt6.QtCore import QObject, QRunnable, QSize, QThreadPool, QUrl, Qt, pyqtSignal
+from PyQt6.QtCore import QObject, QRunnable, QSize, Qt, QThreadPool, QUrl, pyqtSignal
 from PyQt6.QtGui import QBrush, QColor, QImage, QLinearGradient, QPainter, QPixmap
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 

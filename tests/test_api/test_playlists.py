@@ -1,12 +1,12 @@
 """Tests for Playlist models and API methods."""
 from __future__ import annotations
 
+import httpx
 import pytest
 import respx
-import httpx
 
-from sixpack.api.models import Playlist, PlaylistItem, LibraryItem, LibraryItemMedia
 from sixpack.api.client import ABSClient
+from sixpack.api.models import LibraryItem, LibraryItemMedia, Playlist, PlaylistItem
 
 
 def _make_item(library_item_id="li1", title="Test Book", duration=3600.0, library_id="lib1"):

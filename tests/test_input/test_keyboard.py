@@ -7,7 +7,6 @@ from PyQt6.QtCore import Qt
 from sixpack.input.actions import InputAction
 from sixpack.input.keyboard import key_to_action
 
-
 # ---- Navigation mode ----
 
 @pytest.mark.parametrize("key,expected", [

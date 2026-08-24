@@ -1,6 +1,7 @@
 from PyQt6.QtCore import QVariantAnimation
 from PyQt6.QtGui import QColor, QPixmap
 from PyQt6.QtWidgets import QGraphicsEffect, QWidget
+
 from sixpack.ui.widgets.backdrop import Backdrop
 
 

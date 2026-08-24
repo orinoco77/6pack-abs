@@ -274,6 +274,6 @@ QMenu::separator {{
 """
 
 
-def apply(app: "QApplication") -> None:  # type: ignore[name-defined]  # noqa: F821
+def apply(app: QApplication) -> None:  # type: ignore[name-defined]  # noqa: F821
     app.setStyleSheet(STYLESHEET)
     load_icon_font()

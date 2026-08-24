@@ -1,17 +1,13 @@
 """Tests for FocusGrid, MediaCard, and PlayerScreen."""
 from __future__ import annotations
 
-import sys
-from unittest.mock import MagicMock, patch
 import pytest
-from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap
-from PyQt6.QtWidgets import QPushButton, QWidget
 
-from sixpack.api.models import LibraryItemMedia, MediaProgress, Series, SeriesBook
+from sixpack.api.models import LibraryItemMedia, Series, SeriesBook
 from sixpack.ui.widgets.focus_grid import FocusGrid
 from sixpack.ui.widgets.media_card import MediaCard
-
 
 # ===========================================================================
 # FocusGrid tests
@@ -163,7 +159,6 @@ def test_focus_grid_empty_nav_no_crash(qtbot):
 
 def test_focus_grid_card_visual_focus(qtbot):
     """focus_item() sets the accent border on the target card and clears the old one."""
-    from sixpack.ui import theme
     grid = FocusGrid(columns=3)
     qtbot.addWidget(grid)
     for i in range(3):
@@ -960,8 +955,9 @@ def test_player_fmt_time_negative():
 
 
 def test_player_fmt_time_inf():
-    from sixpack.ui.screens.player import _fmt_time
     import math
+
+    from sixpack.ui.screens.player import _fmt_time
     assert _fmt_time(math.inf) == "0:00"
 
 

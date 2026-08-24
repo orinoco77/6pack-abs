@@ -1,7 +1,6 @@
 """Tests for InputAction enum and keyboard mapping."""
 from __future__ import annotations
 
-import pytest
 from sixpack.input.actions import InputAction
 
 

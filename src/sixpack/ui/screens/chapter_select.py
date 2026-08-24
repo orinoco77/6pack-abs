@@ -12,7 +12,7 @@ finished, instead of the old small colored status dot.
 from __future__ import annotations
 
 from PyQt6 import sip
-from PyQt6.QtCore import Qt, pyqtSignal, QSize
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QHBoxLayout,
@@ -168,21 +168,24 @@ class ChapterItem(QWidget):
         num_label = QLabel(str(index + 1))
         num_label.setFixedWidth(36)
         num_label.setStyleSheet(
-            f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_META}pt; background: transparent; border: none;"
+            f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_META}pt; "
+            f"background: transparent; border: none;"
         )
         row.addWidget(num_label)
 
         title_text = chapter.title if chapter.title else f"Chapter {index + 1}"
         title = QLabel(title_text)
         title.setStyleSheet(
-            f"color: {theme.TEXT_PRIMARY}; font-size: {theme.FONT_BODY}pt; font-weight: bold; background: transparent; border: none;"
+            f"color: {theme.TEXT_PRIMARY}; font-size: {theme.FONT_BODY}pt; font-weight: bold; "
+            f"background: transparent; border: none;"
         )
         row.addWidget(title, stretch=1)
 
         duration = _fmt_duration(chapter.end - chapter.start)
         dur_label = QLabel(duration)
         dur_label.setStyleSheet(
-            f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_META}pt; background: transparent; border: none;"
+            f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_META}pt; "
+            f"background: transparent; border: none;"
         )
         row.addWidget(dur_label)
 
@@ -490,8 +493,8 @@ class ChapterSelectScreen(QWidget):
             self.setFocus()
 
     def keyPressEvent(self, event) -> None:
-        from sixpack.input.keyboard import key_to_action
         from sixpack.input.actions import InputAction
+        from sixpack.input.keyboard import key_to_action
 
         action = key_to_action(event.key())
         if action == InputAction.BACK:

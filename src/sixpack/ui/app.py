@@ -6,14 +6,20 @@ import logging
 from typing import Any
 
 from PyQt6.QtCore import (
-    QEvent, QMetaObject, QObject, Qt, QThread, QTimer, Q_ARG, pyqtSignal, pyqtSlot,
+    Q_ARG,
+    QEvent,
+    QMetaObject,
+    QObject,
+    Qt,
+    QThread,
+    QTimer,
+    pyqtSignal,
+    pyqtSlot,
 )
-from PyQt6.QtGui import QCursor, QKeyEvent
-from PyQt6.QtWidgets import QMainWindow, QStackedWidget, QApplication
+from PyQt6.QtGui import QKeyEvent
+from PyQt6.QtWidgets import QApplication, QMainWindow, QStackedWidget
 
-from sixpack.api.client import ABSClient, AuthenticationError, APIError
-from sixpack.input.actions import InputAction
-from sixpack.input.gamepad import GamepadListener
+from sixpack.api.client import ABSClient
 from sixpack.api.models import (
     Library,
     LibraryItem,
@@ -25,17 +31,18 @@ from sixpack.api.models import (
     SeriesBook,
 )
 from sixpack.config import AppConfig, ServerConfig
+from sixpack.input.actions import InputAction
+from sixpack.input.gamepad import GamepadListener
 from sixpack.player.player import AudioPlayer, PlayerError
-from sixpack.ui import theme
 from sixpack.ui.browse_cache import BrowseCache
 from sixpack.ui.cover_cache import CoverCache
 from sixpack.ui.screens.browse import BrowseScreen, RowType
+from sixpack.ui.screens.chapter_select import ChapterSelectScreen
 from sixpack.ui.screens.login import LoginScreen
+from sixpack.ui.screens.player import PlayerScreen
 from sixpack.ui.screens.playlist_detail import PlaylistDetailScreen
 from sixpack.ui.screens.podcast_detail import PodcastDetailScreen
-from sixpack.ui.screens.chapter_select import ChapterSelectScreen
 from sixpack.ui.screens.series_detail import SeriesDetailScreen
-from sixpack.ui.screens.player import PlayerScreen
 from sixpack.ui.screens.splash import SplashScreen
 from sixpack.ui.screens.update_prompt import UpdatePromptScreen
 from sixpack.updater import (
@@ -615,7 +622,9 @@ class MainWindow(QMainWindow):
         self._pending_playlist_item = item
         self._chapter_back_target = "playlist_detail"
         self._player_back_target = "playlist_detail"
-        self._worker.run("playlist_item_chapters", self._async_get_book_chapters(item.library_item_id))
+        self._worker.run(
+            "playlist_item_chapters", self._async_get_book_chapters(item.library_item_id)
+        )
 
     def _on_playlist_item_play_requested(self, item: PlaylistItem, start_time: float) -> None:
         if not self._player or not self._player_screen:
@@ -631,7 +640,9 @@ class MainWindow(QMainWindow):
             item, start_time, playlist, playlist.items,
             self._server_url, self._token,
         )
-        self._worker.run("start_session", self._async_start_session(item.library_item_id, start_time))
+        self._worker.run(
+            "start_session", self._async_start_session(item.library_item_id, start_time)
+        )
         self._stack.setCurrentWidget(self._player_screen)
         self._player_screen.setFocus()
 
@@ -979,7 +990,9 @@ class MainWindow(QMainWindow):
 
         elif tag == "playlist_detail":
             playlist, progress_map = result
-            logger.debug("Playlist detail loaded: %s (%d items)", playlist.name, playlist.item_count)
+            logger.debug(
+                "Playlist detail loaded: %s (%d items)", playlist.name, playlist.item_count
+            )
             if self._current_playlist and playlist.id == self._current_playlist.id:
                 clean_progress = {k: v for k, v in progress_map.items() if v is not None}
                 self._playlist_detail_screen.update_progress(clean_progress)
@@ -1018,7 +1031,9 @@ class MainWindow(QMainWindow):
             if len(chapters) > 1:
                 self._player_back_target = "chapter"
                 prog = self._playlist_detail_screen._progress.get(item.library_item_id)
-                self._chapter_screen.load_from_playlist_item(item, chapters, prog, self._server_url, self._token)
+                self._chapter_screen.load_from_playlist_item(
+                    item, chapters, prog, self._server_url, self._token
+                )
                 self._stack.setCurrentWidget(self._chapter_screen)
             else:
                 prog = self._playlist_detail_screen._progress.get(item.library_item_id)
