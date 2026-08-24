@@ -435,10 +435,14 @@ def test_stream_url_absolute(server_url):
 # ---- Context manager guard ----
 
 @pytest.mark.asyncio
-async def test_http_property_raises_outside_context(server_url):
+async def test_http_property_usable_outside_context(server_url):
+    """ABSClient is constructed eagerly (see client.py's __init__ docstring)
+    so it can be held for a whole session, not just one `async with` scope
+    -- _http must be usable immediately, without ever entering the context
+    manager."""
     client = ABSClient(server_url)
-    with pytest.raises(RuntimeError):
-        _ = client._http
+    assert client._http is not None
+    await client.aclose()
 
 
 # ---- Auth header ----

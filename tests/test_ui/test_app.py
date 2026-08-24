@@ -5,6 +5,8 @@ import httpx
 import pytest
 import respx
 
+from sixpack.api.client import ABSClient
+
 
 class _FakeAudioPlayer:
     """Minimal stand-in for sixpack.player.player.AudioPlayer.
@@ -126,6 +128,7 @@ async def test_async_get_libraries_excludes_library_with_no_audio(window):
     can) must not appear in the list handed to the browse screen."""
     window._server_url = "http://abs.test"
     window._token = "tok"
+    window._client = ABSClient(window._server_url, token=window._token)
     async with respx.mock(base_url="http://abs.test") as mock:
         mock.get("/api/libraries").mock(
             return_value=httpx.Response(
@@ -157,6 +160,7 @@ async def test_async_get_libraries_keeps_library_on_stats_fetch_failure(window):
     fail open rather than risk hiding a real, playable library."""
     window._server_url = "http://abs.test"
     window._token = "tok"
+    window._client = ABSClient(window._server_url, token=window._token)
     async with respx.mock(base_url="http://abs.test") as mock:
         mock.get("/api/libraries").mock(
             return_value=httpx.Response(
@@ -1039,15 +1043,15 @@ def test_podcast_continue_progress_single_chapter_sets_player_chapters(window):
     assert window._player_screen._chapters == chapters
 
 
-def test_async_fetch_podcast_detail_reuses_one_client(window, monkeypatch):
+def test_async_fetch_podcast_detail_reuses_one_client(window):
     """The item-detail fetch and the per-episode progress fan-out must
     share a single ABSClient (matching _async_get_browse_book's equivalent
-    pattern for books), instead of opening two separate `async with`
-    blocks back-to-back (final whole-plan review, Fix 8)."""
+    pattern for books) -- and, per the session-wide connection-reuse fix,
+    that's window._client itself: no per-call ABSClient is constructed at
+    all anymore."""
     import asyncio
 
     from sixpack.api.models import LibraryItem, LibraryItemMedia, PodcastEpisode
-    from sixpack.ui import app as app_module
 
     ep = PodcastEpisode(id="ep1", libraryItemId="show1", title="Episode One")
     show = LibraryItem(
@@ -1059,32 +1063,27 @@ def test_async_fetch_podcast_detail_reuses_one_client(window, monkeypatch):
         media=LibraryItemMedia(metadata={"title": "My Show"}, episodes=[ep]),
     )
 
-    instances = []
+    calls = []
 
     class FakeClient:
-        def __init__(self, *args, **kwargs):
-            instances.append(self)
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            return False
-
         async def get_library_item(self, item_id):
+            calls.append(("get_library_item", item_id))
             return full_show
 
         async def get_progress(self, item_id, episode_id=None):
+            calls.append(("get_progress", item_id, episode_id))
             return None
 
-    monkeypatch.setattr(app_module, "ABSClient", FakeClient)
+    fake = FakeClient()
     window._server_url = "http://abs.test"
     window._token = "tok"
+    window._client = fake
 
     full, progress = asyncio.run(window._async_fetch_podcast_detail(show))
 
     assert full is full_show
-    assert len(instances) == 1
+    assert ("get_library_item", "show1") in calls
+    assert ("get_progress", "show1", "ep1") in calls
 
 
 def test_on_progress_update_via_real_signal_forwards_episode_id(window, monkeypatch):
