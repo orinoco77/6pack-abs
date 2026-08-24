@@ -304,21 +304,32 @@ class MainWindow(QMainWindow):
     # Login / auth
     # ------------------------------------------------------------------
 
+    def _set_client(self, client: ABSClient) -> None:
+        """Replace self._client -- the session-lifetime ABSClient every
+        _async_* method below reuses instead of opening a fresh connection
+        per call (see the dedent refactor throughout this file). Closes the
+        previous client's connection pool on the worker's event loop, since
+        that's the loop its httpx.AsyncClient was actually used from."""
+        old = self._client
+        self._client = client
+        if old is not None:
+            self._worker.run("_close_stale_client", old.aclose())
+
     def _on_login_requested(self, url: str, username: str, password: str) -> None:
         self._server_url = url
-        self._client = ABSClient(url)
+        self._set_client(ABSClient(url))
         self._worker.run("login", self._async_login(username, password))
 
     async def _async_login(self, username: str, password: str):
         async with ABSClient(self._server_url) as client:
             result = await client.login(username, password)
-            self._client = ABSClient(self._server_url, token=result.user.token)
+            self._set_client(ABSClient(self._server_url, token=result.user.token))
             return result
 
     def _on_pairing_login_succeeded(self, url: str, username: str, token: str) -> None:
         self._server_url = url
         self._token = token
-        self._client = ABSClient(url, token=token)
+        self._set_client(ABSClient(url, token=token))
         self._config.add_or_update_server(
             ServerConfig(
                 name=self._server_url,
@@ -334,7 +345,7 @@ class MainWindow(QMainWindow):
     def _do_connect_with_token(self, url: str, token: str) -> None:
         self._server_url = url
         self._token = token
-        self._client = ABSClient(url, token=token)
+        self._set_client(ABSClient(url, token=token))
         self._prime_browse_from_cache()
         self._worker.run("autologin", self._async_get_libraries())
 
@@ -377,9 +388,9 @@ class MainWindow(QMainWindow):
                     logger.warning("Library stats fetch failed for %s: %s", library_id, exc)
                     return None
 
-        async with ABSClient(self._server_url, token=self._token) as client:
-            libraries = await client.get_libraries()
-            stats = await asyncio.gather(*(_fetch_stats(client, lib.id) for lib in libraries))
+        client = self._client
+        libraries = await client.get_libraries()
+        stats = await asyncio.gather(*(_fetch_stats(client, lib.id) for lib in libraries))
         return [
             lib
             for lib, s in zip(libraries, stats)
@@ -424,13 +435,13 @@ class MainWindow(QMainWindow):
         self._worker.run("browse_content", self._async_get_browse_content(library_id))
 
     async def _async_get_browse_content(self, library_id: str) -> tuple:
-        async with ABSClient(self._server_url, token=self._token) as client:
-            shelves, recent, series_list, playlists = await asyncio.gather(
-                client.get_personalized_shelves(library_id),
-                client.get_library_items_recent(library_id, 20),
-                client.get_series(library_id),
-                client.get_playlists(library_id),
-            )
+        client = self._client
+        shelves, recent, series_list, playlists = await asyncio.gather(
+            client.get_personalized_shelves(library_id),
+            client.get_library_items_recent(library_id, 20),
+            client.get_series(library_id),
+            client.get_playlists(library_id),
+        )
         continue_listening: list = []
         for shelf in shelves:
             if "continue" in shelf.label.lower():
@@ -451,20 +462,20 @@ class MainWindow(QMainWindow):
         self._worker.run("see_all", self._async_get_see_all(row_type, lib.id))
 
     async def _async_get_see_all(self, row_type: RowType, library_id: str) -> tuple:
-        async with ABSClient(self._server_url, token=self._token) as client:
-            if row_type == RowType.CONTINUE_LISTENING:
-                shelves = await client.get_personalized_shelves(library_id)
-                items = []
-                for shelf in shelves:
-                    if "continue" in shelf.label.lower():
-                        items = shelf.entities
-                        break
-            elif row_type == RowType.RECENTLY_ADDED:
-                items = await client.get_library_items_recent(library_id, limit=100)
-            elif row_type == RowType.SERIES:
-                items = await client.get_series(library_id, limit=500)
-            else:  # PLAYLISTS
-                items = await client.get_playlists(library_id)
+        client = self._client
+        if row_type == RowType.CONTINUE_LISTENING:
+            shelves = await client.get_personalized_shelves(library_id)
+            items = []
+            for shelf in shelves:
+                if "continue" in shelf.label.lower():
+                    items = shelf.entities
+                    break
+        elif row_type == RowType.RECENTLY_ADDED:
+            items = await client.get_library_items_recent(library_id, limit=100)
+        elif row_type == RowType.SERIES:
+            items = await client.get_series(library_id, limit=500)
+        else:  # PLAYLISTS
+            items = await client.get_playlists(library_id)
         return row_type, items
 
     def _on_browse_book_selected(self, item: LibraryItem) -> None:
@@ -474,11 +485,11 @@ class MainWindow(QMainWindow):
         self._worker.run("browse_book", self._async_get_browse_book(item.id))
 
     async def _async_get_browse_book(self, item_id: str):
-        async with ABSClient(self._server_url, token=self._token) as client:
-            full_item, progress = await asyncio.gather(
-                client.get_library_item(item_id),
-                client.get_progress(item_id),
-            )
+        client = self._client
+        full_item, progress = await asyncio.gather(
+            client.get_library_item(item_id),
+            client.get_progress(item_id),
+        )
         return full_item, progress
 
     def _on_browse_item_play_requested(self, item: LibraryItem, start_time: float) -> None:
@@ -511,10 +522,10 @@ class MainWindow(QMainWindow):
                     logger.warning("Progress fetch failed for %s: %s", book_id, exc)
                     return book_id, None
 
-        async with ABSClient(self._server_url, token=self._token) as client:
-            pairs = await asyncio.gather(
-                *(_fetch_one(client, book.id) for book in series.sorted_books)
-            )
+        client = self._client
+        pairs = await asyncio.gather(
+            *(_fetch_one(client, book.id) for book in series.sorted_books)
+        )
         return (series, dict(pairs))
 
     # ------------------------------------------------------------------
@@ -539,10 +550,10 @@ class MainWindow(QMainWindow):
                     logger.warning("Progress fetch failed for %s: %s", item_id, exc)
                     return item_id, None
 
-        async with ABSClient(self._server_url, token=self._token) as client:
-            pairs = await asyncio.gather(
-                *(_fetch_one(client, item.library_item_id) for item in playlist.items)
-            )
+        client = self._client
+        pairs = await asyncio.gather(
+            *(_fetch_one(client, item.library_item_id) for item in playlist.items)
+        )
         return (playlist, dict(pairs))
 
     def _on_playlist_item_activated(self, item: PlaylistItem) -> None:
@@ -606,11 +617,11 @@ class MainWindow(QMainWindow):
         # One client shared by both the item-detail fetch and the
         # per-episode progress fan-out — matches _async_get_browse_book's
         # equivalent pattern for books.
-        async with ABSClient(self._server_url, token=self._token) as client:
-            full_show = await client.get_library_item(show.id)
-            pairs = await asyncio.gather(
-                *(_fetch_one(client, full_show.id, ep.id) for ep in full_show.media.episodes)
-            )
+        client = self._client
+        full_show = await client.get_library_item(show.id)
+        pairs = await asyncio.gather(
+            *(_fetch_one(client, full_show.id, ep.id) for ep in full_show.media.episodes)
+        )
         return full_show, dict(pairs)
 
     def _on_podcast_episode_activated(self, episode: PodcastEpisode) -> None:
@@ -681,8 +692,8 @@ class MainWindow(QMainWindow):
         # have changed while this fetch was in flight, e.g. the user
         # navigated to a different podcast show) to know which show/episode
         # this result belongs to.
-        async with ABSClient(self._server_url, token=self._token) as client:
-            progress = await client.get_progress(show.id, episode.id)
+        client = self._client
+        progress = await client.get_progress(show.id, episode.id)
         return show, episode, progress
 
     # ------------------------------------------------------------------
@@ -696,8 +707,8 @@ class MainWindow(QMainWindow):
         self._worker.run("book_chapters", self._async_get_book_chapters(book.id))
 
     async def _async_get_book_chapters(self, book_id: str):
-        async with ABSClient(self._server_url, token=self._token) as client:
-            return await client.get_library_item(book_id)
+        client = self._client
+        return await client.get_library_item(book_id)
 
     # ------------------------------------------------------------------
     # Playback
@@ -722,8 +733,8 @@ class MainWindow(QMainWindow):
     async def _async_start_session(
         self, item_id: str, start_time: float, episode_id: str | None = None
     ):
-        async with ABSClient(self._server_url, token=self._token) as client:
-            return await client.start_playback_session(item_id, start_time, episode_id=episode_id)
+        client = self._client
+        return await client.start_playback_session(item_id, start_time, episode_id=episode_id)
 
     def _on_next_item(self) -> None:
         # Invalidate any in-flight "up next" timer and hide its label — a
@@ -844,10 +855,10 @@ class MainWindow(QMainWindow):
         self, item_id: str, current_time: float, duration: float, is_finished: bool,
         episode_id: str | None = None,
     ):
-        async with ABSClient(self._server_url, token=self._token) as client:
-            await client.update_progress(
-                item_id, current_time, duration, is_finished, episode_id=episode_id
-            )
+        client = self._client
+        await client.update_progress(
+            item_id, current_time, duration, is_finished, episode_id=episode_id
+        )
 
     # ------------------------------------------------------------------
     # Async result handling

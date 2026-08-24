@@ -38,24 +38,35 @@ class ABSClient:
     def __init__(self, base_url: str, token: str = "") -> None:
         self.base_url = base_url.rstrip("/")
         self.token = token
-        self._client: httpx.AsyncClient | None = None
+        # Constructed eagerly, not deferred to __aenter__: httpx.AsyncClient
+        # doesn't need a running event loop to be constructed (only actual
+        # requests do), and this lets ABSClient double as a long-lived,
+        # connection-pooling client held for a whole login session -- not
+        # just a short-lived `async with` scope -- without changing its
+        # public shape. `async with` still works unchanged for one-shot
+        # uses (e.g. the pre-auth login request in app.py).
+        self._client = httpx.AsyncClient(
+            base_url=self.base_url,
+            headers=self._auth_headers(),
+            timeout=30.0,
+        )
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     async def __aenter__(self) -> ABSClient:
-        self._client = httpx.AsyncClient(
-            base_url=self.base_url,
-            headers=self._auth_headers(),
-            timeout=30.0,
-        )
         return self
 
     async def __aexit__(self, *_: Any) -> None:
-        if self._client:
-            await self._client.aclose()
-            self._client = None
+        await self.aclose()
+
+    async def aclose(self) -> None:
+        """Close the underlying connection pool. Callers that hold an
+        ABSClient for a whole session (rather than via `async with`) must
+        call this explicitly when done with it -- e.g. before replacing
+        MainWindow._client with a new one on re-login/server switch."""
+        await self._client.aclose()
 
     def _auth_headers(self) -> dict[str, str]:
         if self.token:
@@ -64,8 +75,6 @@ class ABSClient:
 
     @property
     def _http(self) -> httpx.AsyncClient:
-        if self._client is None:
-            raise RuntimeError("ABSClient must be used as an async context manager")
         return self._client
 
     def _raise_for_status(self, response: httpx.Response) -> None:
