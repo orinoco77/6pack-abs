@@ -1,7 +1,7 @@
 """A keyboard-navigable grid of focusable widgets."""
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import QGridLayout, QScrollArea, QVBoxLayout, QWidget
 
 
@@ -14,6 +14,7 @@ class FocusGrid(QWidget):
     """
 
     item_activated = pyqtSignal(int)
+    long_press_activated = pyqtSignal(int)
     focus_changed = pyqtSignal(int)
 
     def __init__(
@@ -24,6 +25,16 @@ class FocusGrid(QWidget):
         self._columns = columns
         self._items: list[QWidget] = []
         self._focused_index = 0
+
+        # Select-hold detection (see keyPressEvent/keyReleaseEvent below).
+        # 500ms is the standard long-press threshold (matches Android's own
+        # ViewConfiguration.getLongPressTimeout() default).
+        self._select_hold_timer = QTimer(self)
+        self._select_hold_timer.setSingleShot(True)
+        self._select_hold_timer.setInterval(500)
+        self._select_hold_timer.timeout.connect(self._on_select_hold_timeout)
+        self._select_held = False
+        self._select_resolved_as_hold = False
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -121,9 +132,31 @@ class FocusGrid(QWidget):
             if new >= 0:
                 self.focus_item(new)
         elif action == InputAction.SELECT:
-            self.item_activated.emit(idx)
+            if not event.isAutoRepeat() and not self._select_held:
+                self._select_held = True
+                self._select_resolved_as_hold = False
+                self._select_hold_timer.start()
         else:
             super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event) -> None:
+        from sixpack.input.actions import InputAction
+        from sixpack.input.keyboard import key_to_action
+
+        if event.isAutoRepeat():
+            return
+        action = key_to_action(event.key())
+        if action != InputAction.SELECT or not self._select_held:
+            super().keyReleaseEvent(event)
+            return
+        self._select_held = False
+        self._select_hold_timer.stop()
+        if not self._select_resolved_as_hold:
+            self.item_activated.emit(self._focused_index)
+
+    def _on_select_hold_timeout(self) -> None:
+        self._select_resolved_as_hold = True
+        self.long_press_activated.emit(self._focused_index)
 
     @property
     def item_count(self) -> int:
