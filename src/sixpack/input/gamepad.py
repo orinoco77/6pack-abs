@@ -92,7 +92,7 @@ class GamepadListener:
     Call start() to begin listening, stop() to shut down.
     """
 
-    def __init__(self, callback: Callable[[InputAction], None]) -> None:
+    def __init__(self, callback: Callable[[InputAction, bool], None]) -> None:
         self._callback = callback
         self._threads: list[threading.Thread] = []
         self._stop_event = threading.Event()
@@ -126,17 +126,25 @@ class GamepadListener:
             for event in device.read_loop():
                 if self._stop_event.is_set():
                     break
-                action = self._map_event(event)
-                if action is not None:
-                    self._callback(action)
+                result = self._map_event(event)
+                if result is not None:
+                    action, is_press = result
+                    self._callback(action, is_press)
         except OSError as exc:
             logger.warning("Gamepad %s disconnected: %s", device.name, exc)
 
-    def _map_event(self, event: evdev.InputEvent) -> InputAction | None:
+    def _map_event(self, event: evdev.InputEvent) -> tuple[InputAction, bool] | None:
         if not _EVDEV_AVAILABLE:
             return None
-        if event.type == ecodes.EV_KEY and event.value == 1:
-            return self._button_map.get(event.code)
+        if event.type == ecodes.EV_KEY:
+            if event.value == 1:
+                action = self._button_map.get(event.code)
+                return (action, True) if action is not None else None
+            if event.value == 0:
+                action = self._button_map.get(event.code)
+                return (action, False) if action is not None else None
+            return None  # value == 2 (autorepeat) -- ignored, matches keyboard.py
         if event.type == ecodes.EV_ABS and event.value != 0:
-            return self._hat_map.get((event.code, event.value))
+            action = self._hat_map.get((event.code, event.value))
+            return (action, True) if action is not None else None
         return None
