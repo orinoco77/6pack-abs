@@ -360,6 +360,30 @@ class PlayerScreen(QWidget):
         self._control_focus_idx = self._control_buttons.index(self._play_btn)
         self._reflect_control_focus()
 
+    def _finish_play_setup(self, cover_url: str, server_url: str, token: str) -> None:
+        """Shared tail of every play_* method below: fetch cover/backdrop
+        and start the progress-sync timer. Called once the caller has
+        already set this item's own fields (title/series/episode labels,
+        description, _item_id, etc.) -- _item_id specifically must already
+        be set, since it's used to guard the async backdrop fetch below
+        against a stale callback (this screen instance is reused across
+        play_book()/play_library_item()/play_playlist_item()/
+        play_podcast_episode() calls -- app.py's _on_next_item/_on_prev_item
+        call back into this same instance -- so a fetch still in flight for
+        a previous item must not clobber a later item's backdrop when it
+        resolves)."""
+        if self._cover_cache is not None:
+            self._cover_cache.fetch(cover_url, token, self._set_cover_pixmap)
+            self._backdrop.set_expected_key(self._item_id)
+            self._cover_cache.fetch_backdrop(
+                cover_url, token,
+                lambda pix, key=self._item_id: self._set_backdrop_pixmap(pix, key),
+            )
+
+        self._server_url = server_url
+        self._token = token
+        self._sync_timer.start()
+
     def play_book(
         self,
         book: SeriesBook,
@@ -384,28 +408,7 @@ class PlayerScreen(QWidget):
         seq = f"Episode {book.sequence}" if book.sequence else ""
         self._episode_label.setText(seq)
         self._set_description(book.description)
-
-        # Fetch cover (via cache if available)
-        cover_url = book.cover_url(server_url, token)
-        if self._cover_cache is not None:
-            self._cover_cache.fetch(cover_url, token, self._set_cover_pixmap)
-            # Set the expected key synchronously, before the async
-            # fetch_backdrop() call below kicks off — see
-            # `_set_backdrop_pixmap`/`Backdrop.set_expected_key` for why:
-            # this screen is constructed once and reused across
-            # play_book()/play_library_item()/play_playlist_item() calls
-            # (app.py's _on_next_item/_on_prev_item call back into this same
-            # instance), so a fetch still in flight for a previous item must
-            # not clobber a later item's backdrop when it resolves.
-            self._backdrop.set_expected_key(self._item_id)
-            self._cover_cache.fetch_backdrop(
-                cover_url, token,
-                lambda pix, key=self._item_id: self._set_backdrop_pixmap(pix, key),
-            )
-
-        self._server_url = server_url
-        self._token = token
-        self._sync_timer.start()
+        self._finish_play_setup(book.cover_url(server_url, token), server_url, token)
 
     def play_library_item(
         self,
@@ -425,22 +428,7 @@ class PlayerScreen(QWidget):
         self._series_label.setText(item.subtitle)
         self._episode_label.setText("")
         self._set_description(item.description)
-
-        cover_url = item.cover_url(server_url, token)
-        if self._cover_cache is not None:
-            self._cover_cache.fetch(cover_url, token, self._set_cover_pixmap)
-            # See the matching comment in play_book() — this screen instance
-            # is reused across play_* calls, so guard the async backdrop
-            # fetch against a stale callback overwriting a later item.
-            self._backdrop.set_expected_key(self._item_id)
-            self._cover_cache.fetch_backdrop(
-                cover_url, token,
-                lambda pix, key=self._item_id: self._set_backdrop_pixmap(pix, key),
-            )
-
-        self._server_url = server_url
-        self._token = token
-        self._sync_timer.start()
+        self._finish_play_setup(item.cover_url(server_url, token), server_url, token)
 
     def play_playlist_item(
         self,
@@ -466,23 +454,7 @@ class PlayerScreen(QWidget):
         self._series_label.setText(playlist.name)
         self._episode_label.setText(f"Item {self._current_index + 1} of {len(items)}")
         self._set_description(item.description)
-
-        # Fetch cover (via cache if available)
-        cover_url = item.cover_url(server_url, token)
-        if self._cover_cache is not None:
-            self._cover_cache.fetch(cover_url, token, self._set_cover_pixmap)
-            # See the matching comment in play_book() — this screen instance
-            # is reused across play_* calls, so guard the async backdrop
-            # fetch against a stale callback overwriting a later item.
-            self._backdrop.set_expected_key(self._item_id)
-            self._cover_cache.fetch_backdrop(
-                cover_url, token,
-                lambda pix, key=self._item_id: self._set_backdrop_pixmap(pix, key),
-            )
-
-        self._server_url = server_url
-        self._token = token
-        self._sync_timer.start()
+        self._finish_play_setup(item.cover_url(server_url, token), server_url, token)
 
     def play_podcast_episode(
         self,
@@ -504,19 +476,7 @@ class PlayerScreen(QWidget):
         self._series_label.setText(show.title)
         self._episode_label.setText("")
         self._set_description(episode.description)
-
-        cover_url = show.cover_url(server_url, token)
-        if self._cover_cache is not None:
-            self._cover_cache.fetch(cover_url, token, self._set_cover_pixmap)
-            self._backdrop.set_expected_key(self._item_id)
-            self._cover_cache.fetch_backdrop(
-                cover_url, token,
-                lambda pix, key=self._item_id: self._set_backdrop_pixmap(pix, key),
-            )
-
-        self._server_url = server_url
-        self._token = token
-        self._sync_timer.start()
+        self._finish_play_setup(show.cover_url(server_url, token), server_url, token)
 
     def set_chapters(self, chapters: list[Chapter]) -> None:
         """Give this screen the current item's chapter list, for the
