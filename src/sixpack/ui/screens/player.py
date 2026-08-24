@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import math
 
-from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, QSize, Q_ARG, QMetaObject, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QPixmap, QKeyEvent
 from PyQt6.QtWidgets import (
     QHBoxLayout,
@@ -529,7 +529,7 @@ class PlayerScreen(QWidget):
 
     def set_audio_tracks(self, content_url: str, start_time: float, token: str) -> None:
         self._player.play(content_url, start_time=start_time, auth_token=token)
-        self._play_btn.setText("⏸")
+        self._play_btn.setText(theme.ICON_PAUSE)
 
     def show_up_next(self, message: str) -> None:
         self._up_next_label.setText(message)
@@ -556,7 +556,6 @@ class PlayerScreen(QWidget):
     def _on_position(self, seconds: float) -> None:
         self._position = seconds
         # Marshal to GUI thread
-        from PyQt6.QtCore import QMetaObject, Q_ARG
         QMetaObject.invokeMethod(
             self, "_update_position",
             Qt.ConnectionType.QueuedConnection,
@@ -565,7 +564,6 @@ class PlayerScreen(QWidget):
 
     def _on_duration_changed(self, seconds: float) -> None:
         self._duration = seconds
-        from PyQt6.QtCore import QMetaObject, Q_ARG
         QMetaObject.invokeMethod(
             self, "_update_duration",
             Qt.ConnectionType.QueuedConnection,
@@ -573,7 +571,6 @@ class PlayerScreen(QWidget):
         )
 
     def _on_state_changed(self, state: str) -> None:
-        from PyQt6.QtCore import QMetaObject, Q_ARG
         QMetaObject.invokeMethod(
             self, "_update_state",
             Qt.ConnectionType.QueuedConnection,
@@ -581,7 +578,6 @@ class PlayerScreen(QWidget):
         )
 
     def _on_end_of_track(self) -> None:
-        from PyQt6.QtCore import QMetaObject
         QMetaObject.invokeMethod(
             self, "_handle_end_of_track",
             Qt.ConnectionType.QueuedConnection,
@@ -590,12 +586,6 @@ class PlayerScreen(QWidget):
     # ------------------------------------------------------------------
     # GUI-thread slots
     # ------------------------------------------------------------------
-
-    @staticmethod
-    def _slot_update_position(self, seconds: float) -> None:
-        pass
-
-    from PyQt6.QtCore import pyqtSlot
 
     @pyqtSlot(float)
     def _update_position(self, seconds: float) -> None:
@@ -611,7 +601,7 @@ class PlayerScreen(QWidget):
 
     @pyqtSlot(str)
     def _update_state(self, state: str) -> None:
-        self._play_btn.setText("⏸" if state == "playing" else "▶")
+        self._play_btn.setText(theme.ICON_PAUSE if state == "playing" else theme.ICON_PLAY)
 
     @pyqtSlot()
     def _handle_end_of_track(self) -> None:

@@ -870,21 +870,23 @@ def test_player_screen_update_duration(qtbot):
 
 
 def test_player_screen_state_playing(qtbot):
+    from sixpack.ui import theme
     from sixpack.ui.screens.player import PlayerScreen
     mock_player = MockAudioPlayer()
     screen = PlayerScreen(mock_player)
     qtbot.addWidget(screen)
     screen._update_state("playing")
-    assert "⏸" in screen._play_btn.text()
+    assert screen._play_btn.text() == theme.ICON_PAUSE
 
 
 def test_player_screen_state_paused(qtbot):
+    from sixpack.ui import theme
     from sixpack.ui.screens.player import PlayerScreen
     mock_player = MockAudioPlayer()
     screen = PlayerScreen(mock_player)
     qtbot.addWidget(screen)
     screen._update_state("paused")
-    assert "▶" in screen._play_btn.text()
+    assert screen._play_btn.text() == theme.ICON_PLAY
 
 
 def test_player_screen_sync_progress(qtbot):
@@ -936,12 +938,13 @@ def test_player_screen_sync_progress_no_duration(qtbot):
 
 
 def test_player_screen_set_audio_tracks(qtbot):
+    from sixpack.ui import theme
     from sixpack.ui.screens.player import PlayerScreen
     mock_player = MockAudioPlayer()
     screen = PlayerScreen(mock_player)
     qtbot.addWidget(screen)
     screen.set_audio_tracks("http://abs.test/file.mp3", 0.0, "token")
-    assert "⏸" in screen._play_btn.text()
+    assert screen._play_btn.text() == theme.ICON_PAUSE
 
 
 def test_player_fmt_time_seconds():

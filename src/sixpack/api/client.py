@@ -205,8 +205,8 @@ class ABSClient:
         for item in data:
             try:
                 shelves.append(PersonalizedShelf.model_validate(item))
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Skipping malformed personalized shelf: %s", exc)
         return shelves
 
     async def get_library_items_recent(self, library_id: str, limit: int = 20) -> list[LibraryItem]:
@@ -293,12 +293,10 @@ class ABSClient:
             path = f"{path}/{episode_id}"
         response = await self._http.post(path, json=payload)
         self._raise_for_status(response)
-        session = PlaybackSession.model_validate(response.json())
+        data = response.json()
         if start_time > 0:
-            session = PlaybackSession.model_validate(
-                {**response.json(), "currentTime": start_time}
-            )
-        return session
+            data = {**data, "currentTime": start_time}
+        return PlaybackSession.model_validate(data)
 
     async def close_playback_session(self, session_id: str) -> None:
         response = await self._http.post(f"/api/session/{session_id}/close")
