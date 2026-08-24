@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
@@ -41,11 +43,16 @@ class AppConfig:
 
     def save(self) -> None:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        os.chmod(CONFIG_DIR, stat.S_IRWXU)  # 0o700 -- owner-only
         data = {
             "servers": [asdict(s) for s in self.servers],
             "active_server_index": self.active_server_index,
         }
         CONFIG_FILE.write_text(json.dumps(data, indent=2))
+        # Server entries carry a bearer token; the file otherwise inherits
+        # the process umask (typically 644 -- group/world-readable on most
+        # Linux distros).
+        os.chmod(CONFIG_FILE, stat.S_IRUSR | stat.S_IWUSR)  # 0o600
 
     @classmethod
     def load(cls) -> AppConfig:

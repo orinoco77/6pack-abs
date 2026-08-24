@@ -2,6 +2,7 @@
 install). Pure async/subprocess logic, independent of Qt."""
 from __future__ import annotations
 
+import asyncio
 import zipfile
 from pathlib import Path
 
@@ -173,6 +174,26 @@ async def test_download_and_extract_raises_on_network_error(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_download_and_extract_rejects_path_traversal_entry(tmp_path):
+    """A malicious/corrupt archive entry that resolves outside dest_dir
+    (e.g. via ../../ in its name) must be rejected outright, not silently
+    extracted somewhere unexpected. CPython's own zipfile already
+    neutralizes literal path escapes on extract, but this is checked and
+    rejected explicitly before extraction is ever attempted -- defense in
+    depth, not reliance on stdlib internals."""
+    zip_path = tmp_path / "evil.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("repo-abc123/pyproject.toml", "[project]\n")
+        zf.writestr("../../etc/evil.txt", "pwned")
+    dest_dir = tmp_path / "dest"
+    dest_dir.mkdir()
+    async with respx.mock(base_url="https://example.com") as mock:
+        mock.get("/z.zip").mock(return_value=httpx.Response(200, content=zip_path.read_bytes()))
+        with pytest.raises(UpdateError, match="unsafe"):
+            await download_and_extract("https://example.com/z.zip", dest_dir)
+
+
+@pytest.mark.asyncio
 async def test_download_and_extract_raises_when_zip_has_no_single_top_level_dir(tmp_path):
     zip_path = tmp_path / "flat.zip"
     with zipfile.ZipFile(zip_path, "w") as zf:
@@ -235,6 +256,42 @@ async def test_install_raises_when_uv_not_found(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_install_raises_on_timeout(tmp_path, monkeypatch):
+    """A stalled `uv tool install` (e.g. a hung package-index resolution)
+    must not hang apply_update() forever with no feedback -- it's killed
+    and reported as a failure instead."""
+    killed = []
+
+    class _HangingProc:
+        returncode = None
+
+        async def communicate(self):
+            raise asyncio.TimeoutError  # unreachable directly; wait_for raises this itself
+
+        def kill(self):
+            killed.append(True)
+
+        async def wait(self):
+            return None
+
+    async def fake_exec(*args, **kwargs):
+        return _HangingProc()
+
+    async def fake_wait_for(coro, timeout):
+        coro.close()
+        raise asyncio.TimeoutError
+
+    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}" if name == "uv" else None)
+    monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
+    monkeypatch.setattr("asyncio.wait_for", fake_wait_for)
+
+    with pytest.raises(UpdateError, match="timed out"):
+        await install(tmp_path)
+
+    assert killed == [True]
+
+
+@pytest.mark.asyncio
 async def test_install_falls_back_to_home_local_bin(tmp_path, monkeypatch):
     fake_home = tmp_path / "home"
     (fake_home / ".local" / "bin").mkdir(parents=True)
@@ -290,17 +347,32 @@ async def test_apply_update_cleans_up_temp_dir_on_download_failure(monkeypatch):
 
 # ---- relaunch ----
 
+class _FakePopenProc:
+    """Stand-in for subprocess.Popen's return value. `poll()` returns None
+    while the process is presumed alive, or an exit code once it "dies" --
+    matching the real Popen contract relaunch()'s health check relies on.
+    """
+
+    def __init__(self, exit_code: int | None = None) -> None:
+        self.returncode = exit_code
+
+    def poll(self):
+        return self.returncode
+
+
 def test_relaunch_spawns_detached_sixpack_process(monkeypatch):
     calls = []
 
     def fake_popen(args, **kwargs):
         calls.append((args, kwargs))
+        return _FakePopenProc(exit_code=None)  # still running past the grace window
 
     def fake_which(name):
         return "/home/user/.local/bin/sixpack" if name == "sixpack" else None
 
     monkeypatch.setattr("shutil.which", fake_which)
     monkeypatch.setattr("subprocess.Popen", fake_popen)
+    monkeypatch.setattr("time.sleep", lambda seconds: None)
 
     relaunch()
 
@@ -312,4 +384,17 @@ def test_relaunch_raises_when_sixpack_not_found(monkeypatch, tmp_path):
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "no-such-home")
 
     with pytest.raises(UpdateError, match="sixpack"):
+        relaunch()
+
+
+def test_relaunch_raises_when_new_process_dies_immediately(monkeypatch):
+    """A new build that crashes on startup (e.g. a broken import) must not
+    let the caller quit the current, still-working process -- see
+    app.py's "apply_update" handler, which only calls
+    QApplication.quit() if relaunch() doesn't raise."""
+    monkeypatch.setattr("shutil.which", lambda name: "/bin/sixpack")
+    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: _FakePopenProc(exit_code=1))
+    monkeypatch.setattr("time.sleep", lambda seconds: None)
+
+    with pytest.raises(UpdateError, match="exited immediately"):
         relaunch()

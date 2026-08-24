@@ -13,6 +13,7 @@ import importlib.metadata
 import shutil
 import subprocess
 import tempfile
+import time
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +24,8 @@ REPO = "orinoco77/6pack-abs"
 CURRENT_VERSION = importlib.metadata.version("sixpack-abs")
 _API_TIMEOUT = 5.0
 _DOWNLOAD_TIMEOUT = 60.0
+_INSTALL_TIMEOUT = 120.0
+_RELAUNCH_GRACE_SECONDS = 1.5
 
 
 @dataclass
@@ -79,6 +82,23 @@ def is_newer(latest: str, current: str) -> bool:
     return latest_parts > current_parts
 
 
+def _safe_extract(zf: zipfile.ZipFile, dest_dir: Path) -> None:
+    """extractall() with a per-member path check, guarding against "zip
+    slip" (a member whose name resolves outside dest_dir via `../` or an
+    absolute path, letting a malicious archive write anywhere on disk).
+    The archive is GitHub-generated from this project's own repo, not
+    attacker-uploaded, so practical risk is low -- but it costs nothing to
+    not trust unzip logic blindly for a step that runs with the current
+    user's full filesystem permissions.
+    """
+    dest_root = dest_dir.resolve()
+    for member in zf.namelist():
+        target = (dest_dir / member).resolve()
+        if target != dest_root and dest_root not in target.parents:
+            raise UpdateError(f"Refusing to extract unsafe archive entry: {member!r}")
+    zf.extractall(dest_dir)
+
+
 async def download_and_extract(zipball_url: str, dest_dir: Path) -> Path:
     """Download the release zip into dest_dir and extract it. Returns the
     path to the single top-level directory GitHub's generated source zips
@@ -103,7 +123,7 @@ async def download_and_extract(zipball_url: str, dest_dir: Path) -> Path:
 
     try:
         with zipfile.ZipFile(zip_path) as zf:
-            zf.extractall(dest_dir)
+            _safe_extract(zf, dest_dir)
     except zipfile.BadZipFile as exc:
         raise UpdateError(f"Downloaded file is not a valid zip: {exc}") from exc
 
@@ -139,7 +159,14 @@ async def install(source_dir: Path) -> None:
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    stdout, stderr = await proc.communicate()
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_INSTALL_TIMEOUT)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        raise UpdateError(
+            f"Install timed out after {_INSTALL_TIMEOUT:.0f}s -- keeping the current version"
+        ) from None
     if proc.returncode != 0:
         raise UpdateError(
             f"Install failed (exit {proc.returncode}): {stderr.decode(errors='replace')[:500]}"
@@ -156,10 +183,22 @@ async def apply_update(zipball_url: str) -> None:
 
 
 def relaunch() -> None:
-    """Spawn a new, detached sixpack process. Caller is responsible for
-    quitting the current process/QApplication immediately after -- this
-    function does not exit the current process itself, keeping it
+    """Spawn a new, detached sixpack process and verify it doesn't exit
+    immediately before returning. Caller is responsible for quitting the
+    current process/QApplication immediately after a successful call --
+    this function does not exit the current process itself, keeping it
     testable without tearing down the test process.
+
+    Raises UpdateError if the new process dies within the grace window
+    (e.g. a broken import in the new build) -- the caller must NOT quit
+    the current, still-working process in that case, or the app would be
+    left stranded with neither process running.
     """
     sixpack = _find_executable("sixpack")
-    subprocess.Popen([sixpack], start_new_session=True)
+    proc = subprocess.Popen([sixpack], start_new_session=True)
+    time.sleep(_RELAUNCH_GRACE_SECONDS)
+    if proc.poll() is not None:
+        raise UpdateError(
+            f"New version exited immediately (code {proc.returncode}) -- "
+            "keeping the current version running"
+        )
