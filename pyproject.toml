@@ -40,7 +40,7 @@ packages = ["src/sixpack"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-addopts = "-n auto --cov=sixpack --cov-report=term-missing --cov-fail-under=85"
+addopts = "--cov=sixpack --cov-report=term-missing --cov-fail-under=85"
 testpaths = ["tests"]
 
 [tool.coverage.run]
