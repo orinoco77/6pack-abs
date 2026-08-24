@@ -60,6 +60,7 @@ class DetailGridScreen(QWidget):
 
         self._finish_popup = ConfirmPopup(self)
         self._finish_popup.confirmed.connect(self._on_finish_confirmed)
+        self._finish_popup.cancelled.connect(self._on_finish_cancelled)
         self._pending_finish_index: int | None = None
 
         layout = QVBoxLayout(self)
@@ -132,6 +133,8 @@ class DetailGridScreen(QWidget):
         self._server_url = server_url
         self._token = token
         self._hero_backdrop.set_title(title)
+        self._finish_popup.hide()
+        self._pending_finish_index = None
 
         self._grid.clear()
         for item in items:
@@ -205,6 +208,11 @@ class DetailGridScreen(QWidget):
         if self._pending_finish_index is not None:
             self._toggle_finished(self._pending_finish_index)
         self._pending_finish_index = None
+        self._grid.setFocus()
+
+    def _on_finish_cancelled(self) -> None:
+        self._pending_finish_index = None
+        self._grid.setFocus()
 
     def _toggle_finished(self, index: int) -> None:
         if not (0 <= index < len(self._items)):
@@ -215,7 +223,12 @@ class DetailGridScreen(QWidget):
         _fraction, finished = self._item_progress(item, self._progress)
         new_finished = not finished
         duration = item.duration
-        current_time = duration if new_finished else (prog.current_time if prog else 0.0)
+        if new_finished:
+            current_time = duration
+        elif prog is not None and prog.current_time < duration:
+            current_time = prog.current_time
+        else:
+            current_time = 0.0
         item_id, episode_id = self._item_progress_ids(item)
         self.finished_changed.emit(item_id, current_time, duration, new_finished, episode_id or "")
         # Optimistic local update -- reflects immediately, no round trip wait.
@@ -304,9 +317,6 @@ class DetailGridScreen(QWidget):
         from sixpack.input.keyboard import key_to_action
 
         action = key_to_action(event.key())
-        if self._finish_popup.isVisible():
-            self._finish_popup.handle_key(action)
-            return
         if action == InputAction.BACK:
             self.back_requested.emit()
         else:

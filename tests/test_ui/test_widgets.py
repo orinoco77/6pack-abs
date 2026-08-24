@@ -1140,7 +1140,47 @@ def test_cancelling_finish_popup_does_not_stop_or_emit(qtbot):
     assert ended == []
 
 
+def test_confirming_player_finish_restores_focus_to_screen(qtbot):
+    from PyQt6.QtTest import QTest
+
+    from sixpack.ui.screens.player import PlayerScreen
+    mock_player = MockAudioPlayer()
+    screen = PlayerScreen(mock_player)
+    qtbot.addWidget(screen)
+    screen.show()
+    qtbot.waitExposed(screen)
+    screen.activateWindow()
+    QTest.qWaitForWindowActive(screen)
+
+    screen._finish_btn.click()
+    screen._finish_popup.confirmed.emit()
+
+    assert screen.hasFocus()
+
+
+def test_cancelling_player_finish_restores_focus_to_screen(qtbot):
+    from PyQt6.QtTest import QTest
+
+    from sixpack.ui.screens.player import PlayerScreen
+    mock_player = MockAudioPlayer()
+    screen = PlayerScreen(mock_player)
+    qtbot.addWidget(screen)
+    screen.show()
+    qtbot.waitExposed(screen)
+    screen.activateWindow()
+    QTest.qWaitForWindowActive(screen)
+
+    screen._finish_btn.click()
+    screen._finish_popup.cancelled.emit()
+
+    assert screen.hasFocus()
+
+
 def test_keypress_while_finish_popup_visible_does_not_fall_through(qtbot):
+    """Regression: ConfirmPopup takes real Qt focus while visible (see its
+    show_confirm()'s own setFocus() call) -- once the finish popup is open
+    it, not the screen, is production's real focus holder, so BACK must be
+    sent there to match how a real key event would actually be routed."""
     from PyQt6.QtCore import Qt
 
     from sixpack.ui.screens.player import PlayerScreen
@@ -1150,10 +1190,11 @@ def test_keypress_while_finish_popup_visible_does_not_fall_through(qtbot):
     screen.show()
     screen.setFocus()
     screen._finish_btn.click()
+    screen._finish_popup.setFocus()  # matches show_confirm()'s own setFocus() call
 
     back_received = []
     screen.back_requested.connect(lambda: back_received.append(True))
-    qtbot.keyClick(screen, Qt.Key.Key_Backspace)
+    qtbot.keyClick(screen._finish_popup, Qt.Key.Key_Backspace)
 
     assert back_received == []
     assert not screen._finish_popup.isVisible()

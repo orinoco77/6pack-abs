@@ -323,6 +323,7 @@ class PlayerScreen(QWidget):
 
         self._finish_popup = ConfirmPopup(self)
         self._finish_popup.confirmed.connect(self._on_finish_confirmed)
+        self._finish_popup.cancelled.connect(self._on_finish_cancelled)
 
     def resizeEvent(self, event) -> None:
         self._backdrop.setGeometry(self.rect())
@@ -655,6 +656,10 @@ class PlayerScreen(QWidget):
         )
         self._player.stop()
         self.track_ended.emit()
+        self.setFocus()
+
+    def _on_finish_cancelled(self) -> None:
+        self.setFocus()
 
     # ------------------------------------------------------------------
     # Chapter access overlay
@@ -712,10 +717,6 @@ class PlayerScreen(QWidget):
         from sixpack.input.keyboard import key_to_action
 
         action = key_to_action(event.key(), player_mode=True)
-
-        if self._finish_popup.isVisible():
-            self._finish_popup.handle_key(action)
-            return
 
         if self._chapter_overlay.isVisible():
             # While the overlay is open, it owns SELECT/UP/DOWN/BACK/MENU —

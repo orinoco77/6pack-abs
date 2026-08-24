@@ -350,10 +350,126 @@ def test_keypress_while_popup_visible_does_not_fall_through_to_back(qtbot):
     screen._populate("My Series", _items(), {}, "http://s", "t")
     screen.show()
     screen._grid.long_press_activated.emit(0)
+    screen._finish_popup.setFocus()  # matches show_confirm()'s own setFocus() call --
+    # once the popup is open, it (not the grid) is production's real focus holder.
 
     back_received = []
     screen.back_requested.connect(lambda: back_received.append(True))
-    qtbot.keyClick(screen, Qt.Key.Key_Backspace)  # BACK -- popup must consume it
+    # BACK, sent to the popup -- matches production focus.
+    qtbot.keyClick(screen._finish_popup, Qt.Key.Key_Backspace)
 
     assert back_received == []
     assert not screen._finish_popup.isVisible()  # BACK cancelled the popup instead
+
+
+def test_select_at_grid_while_popup_visible_confirms_not_plays(qtbot):
+    """Regression: FocusGrid holds real Qt focus in production, not the
+    host screen -- Select while the popup is open must confirm/toggle the
+    pending item, not play the currently-focused card underneath."""
+    from PyQt6.QtCore import Qt
+
+    screen = _TestScreen()
+    qtbot.addWidget(screen)
+    screen._populate("My Series", _items(), {}, "http://s", "t")
+    screen.show()
+
+    activated = []
+    screen.item_activated.connect(lambda item: activated.append(item))
+    finished_received = []
+    screen.finished_changed.connect(lambda *args: finished_received.append(args))
+
+    screen._grid.long_press_activated.emit(0)
+    screen._finish_popup.setFocus()  # matches show_confirm()'s own setFocus() call
+    qtbot.keyClick(screen._finish_popup, Qt.Key.Key_Right)  # move to Confirm
+    qtbot.keyClick(screen._finish_popup, Qt.Key.Key_Return)  # confirm
+
+    assert finished_received == [("a", 100.0, 100.0, True, "")]
+    assert activated == []  # must NOT have played the card underneath
+
+
+def test_right_at_grid_while_popup_visible_does_not_move_card_focus(qtbot):
+    """Regression: LEFT/RIGHT while the popup is open must move the
+    popup's own Cancel/Confirm selection, not the grid's card focus
+    underneath (which FocusGrid would otherwise consume first)."""
+    from PyQt6.QtCore import Qt
+
+    screen = _TestScreen()
+    qtbot.addWidget(screen)
+    screen._populate("My Series", _items(), {}, "http://s", "t")
+    screen.show()
+    grid_focus_before = screen._grid._focused_index
+
+    screen._grid.long_press_activated.emit(0)
+    screen._finish_popup.setFocus()
+    qtbot.keyClick(screen._finish_popup, Qt.Key.Key_Right)
+
+    assert screen._grid._focused_index == grid_focus_before  # unchanged
+    assert screen._finish_popup._focus_index == 1  # popup's own selection moved
+
+
+def test_confirming_popup_restores_focus_to_grid(qtbot):
+    from PyQt6.QtTest import QTest
+
+    screen = _TestScreen()
+    qtbot.addWidget(screen)
+    screen._populate("My Series", _items(), {}, "http://s", "t")
+    screen.show()
+    qtbot.waitExposed(screen)
+    screen.activateWindow()
+    QTest.qWaitForWindowActive(screen)
+
+    screen._grid.long_press_activated.emit(0)
+    screen._finish_popup.confirmed.emit()
+
+    assert screen._grid.hasFocus()
+
+
+def test_cancelling_popup_clears_pending_index_and_restores_grid_focus(qtbot):
+    from PyQt6.QtTest import QTest
+
+    screen = _TestScreen()
+    qtbot.addWidget(screen)
+    screen._populate("My Series", _items(), {}, "http://s", "t")
+    screen.show()
+    qtbot.waitExposed(screen)
+    screen.activateWindow()
+    QTest.qWaitForWindowActive(screen)
+
+    screen._grid.long_press_activated.emit(0)
+    assert screen._pending_finish_index == 0
+    screen._finish_popup.cancelled.emit()
+
+    assert screen._pending_finish_index is None
+    assert screen._grid.hasFocus()
+
+
+def test_repopulating_hides_stale_popup_and_clears_pending_index(qtbot):
+    screen = _TestScreen()
+    qtbot.addWidget(screen)
+    screen._populate("My Series", _items(), {}, "http://s", "t")
+    screen.show()
+    screen._grid.long_press_activated.emit(0)
+    assert screen._finish_popup.isVisible()
+
+    screen._populate("Different Series", _items(), {}, "http://s", "t")
+
+    assert not screen._finish_popup.isVisible()
+    assert screen._pending_finish_index is None
+
+
+def test_toggle_finished_reverting_from_full_duration_resets_to_zero(qtbot):
+    """Regression: un-finishing an item whose recorded position is already
+    at/past duration (set that way by this exact feature's own 'mark
+    finished' action, or by a natural ABS auto-finish) must not leave a
+    100%-progress-bar-but-unfinished contradiction -- reset to 0.0 instead
+    of preserving the stale full-duration value."""
+    screen = _TestScreen()
+    qtbot.addWidget(screen)
+    progress = {"a": MediaProgress(currentTime=100.0, duration=100.0, isFinished=True)}
+    screen._populate("My Series", _items(), progress, "http://s", "t")
+
+    received = []
+    screen.finished_changed.connect(lambda *args: received.append(args))
+    screen._toggle_finished(0)
+
+    assert received == [("a", 0.0, 100.0, False, "")]
