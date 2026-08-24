@@ -5,11 +5,15 @@ import asyncio
 import logging
 from typing import Any
 
-from PyQt6.QtCore import QEvent, QObject, QThread, QTimer, pyqtSignal, pyqtSlot, Qt
-from PyQt6.QtGui import QCursor
+from PyQt6.QtCore import (
+    QEvent, QMetaObject, QObject, Qt, QThread, QTimer, Q_ARG, pyqtSignal, pyqtSlot,
+)
+from PyQt6.QtGui import QCursor, QKeyEvent
 from PyQt6.QtWidgets import QMainWindow, QStackedWidget, QApplication
 
 from sixpack.api.client import ABSClient, AuthenticationError, APIError
+from sixpack.input.actions import InputAction
+from sixpack.input.gamepad import GamepadListener
 from sixpack.api.models import (
     Library,
     LibraryItem,
@@ -45,6 +49,25 @@ from sixpack.updater import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Gamepad actions are delivered to the app by synthesizing the equivalent
+# keyboard key event and sending it to whatever widget currently has focus
+# -- reusing every screen's existing keyPressEvent/key_to_action handling
+# instead of duplicating per-screen gamepad dispatch logic. Only keys that
+# key_to_action maps identically in both _NAV_MAP and _PLAYER_MAP (see
+# keyboard.py) are safe representatives here, since the receiving screen's
+# mode isn't known from this side.
+_GAMEPAD_ACTION_TO_KEY: dict[InputAction, Qt.Key] = {
+    InputAction.UP: Qt.Key.Key_Up,
+    InputAction.DOWN: Qt.Key.Key_Down,
+    InputAction.LEFT: Qt.Key.Key_Left,
+    InputAction.RIGHT: Qt.Key.Key_Right,
+    InputAction.SELECT: Qt.Key.Key_Return,
+    InputAction.BACK: Qt.Key.Key_Backspace,
+    InputAction.PLAY_PAUSE: Qt.Key.Key_MediaTogglePlayPause,
+    InputAction.PREV_CHAPTER: Qt.Key.Key_Comma,
+    InputAction.NEXT_CHAPTER: Qt.Key.Key_Period,
+}
 
 
 class AsyncWorker(QObject):
@@ -115,6 +138,7 @@ class MainWindow(QMainWindow):
 
         self._init_player()
         self._init_worker()
+        self._init_gamepad()
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -136,6 +160,36 @@ class MainWindow(QMainWindow):
         self._worker.result.connect(self._on_result)
         self._worker.error.connect(self._on_error)
         self._thread.start()
+
+    def _init_gamepad(self) -> None:
+        # GamepadListener.start() fails soft (logs and returns) if evdev
+        # or no gamepad is available -- safe to construct/start
+        # unconditionally, matching _init_player()'s "degrade, don't
+        # crash" pattern for optional hardware.
+        self._gamepad = GamepadListener(self._on_gamepad_action)
+        self._gamepad.start()
+
+    def _on_gamepad_action(self, action: InputAction) -> None:
+        # Called from GamepadListener's background reader thread (one per
+        # detected device) -- must not touch any QWidget/QApplication state
+        # directly from here. Marshal to the GUI thread via a queued
+        # invokeMethod, mirroring PlayerScreen's mpv-callback pattern.
+        key = _GAMEPAD_ACTION_TO_KEY.get(action)
+        if key is None:
+            return
+        QMetaObject.invokeMethod(
+            self, "_dispatch_gamepad_key",
+            Qt.ConnectionType.QueuedConnection,
+            Q_ARG(int, key.value),
+        )
+
+    @pyqtSlot(int)
+    def _dispatch_gamepad_key(self, key_value: int) -> None:
+        target = QApplication.focusWidget()
+        if target is None:
+            return
+        event = QKeyEvent(QEvent.Type.KeyPress, Qt.Key(key_value), Qt.KeyboardModifier.NoModifier)
+        QApplication.sendEvent(target, event)
 
     def _build_ui(self) -> None:
         self.setWindowTitle("SixPack — Audiobookshelf")
@@ -1135,6 +1189,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self._login_screen.stop_pairing()
+        self._gamepad.stop()
         if self._player:
             self._player.shutdown()
         self._worker.stop_loop()

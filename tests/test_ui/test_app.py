@@ -113,6 +113,58 @@ def test_main_window_constructs_without_error(window):
     assert window._player_screen is not None
 
 
+# ---- gamepad dispatch ----
+#
+# GamepadListener's callback fires from a background per-device thread in
+# real use; _on_gamepad_action must marshal to the GUI thread rather than
+# touching any QWidget/QApplication state directly. These tests call it
+# from the test's own (GUI) thread, which still goes through the real
+# QueuedConnection dispatch -- qtbot.waitUntil pumps the event loop so the
+# queued slot actually runs before asserting.
+
+def test_gamepad_listener_started_on_construction(window):
+    assert window._gamepad is not None
+
+
+def test_gamepad_action_dispatches_synthetic_key_to_focused_widget(window, qtbot):
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtWidgets import QLineEdit
+
+    from sixpack.input.actions import InputAction
+
+    target = QLineEdit()
+    qtbot.addWidget(target)
+    target.show()
+    target.setFocus()
+    qtbot.waitUntil(lambda: target.hasFocus(), timeout=2000)
+
+    received = []
+    target.keyPressEvent = lambda event: received.append(event.key())
+
+    window._on_gamepad_action(InputAction.SELECT)
+
+    qtbot.waitUntil(lambda: len(received) == 1, timeout=2000)
+    assert received[0] == Qt.Key.Key_Return
+
+
+def test_gamepad_action_unmapped_is_noop(window, qtbot):
+    """MENU has no synthesizable key (see gamepad.py's _build_button_map
+    comment) -- dispatching it must not raise or affect focus."""
+    from sixpack.input.actions import InputAction
+
+    window._on_gamepad_action(InputAction.MENU)
+    qtbot.wait(50)  # let any (unexpected) queued dispatch settle
+    # No assertion beyond "did not raise" -- there is nothing to observe
+    # for a correctly-dropped unmapped action.
+
+
+def test_gamepad_stopped_on_close(window, monkeypatch):
+    stopped = []
+    monkeypatch.setattr(window._gamepad, "stop", lambda: stopped.append(True))
+    window.close()
+    assert stopped == [True]
+
+
 # ---- _async_get_libraries: exclude libraries with no playable audio ----
 
 def _library_payload(lib_id="lib1", name="Audiobooks"):
