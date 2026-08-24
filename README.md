@@ -54,7 +54,7 @@ Run the test suite:
 pytest
 ```
 
-Tests run headless (`QT_QPA_PLATFORM=offscreen`, set automatically by `tests/conftest.py`) and in parallel via `pytest-xdist` by default. Lint with:
+Tests run headless (`QT_QPA_PLATFORM=offscreen`, set automatically by `tests/conftest.py`). `pytest-xdist` is available if you want a faster local run (`pytest -n auto`), but it isn't the default or what CI uses -- PyQt6's offscreen platform plugin has shown occasional worker crashes under parallel execution, so CI runs sequentially for reliability. Lint with:
 
 ```bash
 ruff check src/ tests/
