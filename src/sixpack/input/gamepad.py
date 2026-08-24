@@ -66,19 +66,24 @@ def _build_hat_map() -> dict[tuple[int, int], InputAction]:
     }
 
 
+def _open_if_gamepad(path: str) -> evdev.InputDevice | None:
+    """None if `path` can't be opened, or opens but isn't a gamepad (no
+    BTN_SOUTH capability)."""
+    try:
+        dev = evdev.InputDevice(path)
+        caps = dev.capabilities()
+        if ecodes.EV_KEY in caps and ecodes.BTN_SOUTH in caps[ecodes.EV_KEY]:
+            return dev
+    except (OSError, PermissionError):
+        pass
+    return None
+
+
 def _find_gamepads() -> list:
     if not _EVDEV_AVAILABLE:
         return []
-    devices = []
-    for path in evdev.list_devices():
-        try:
-            dev = evdev.InputDevice(path)
-            caps = dev.capabilities()
-            if ecodes.EV_KEY in caps and ecodes.BTN_SOUTH in caps[ecodes.EV_KEY]:
-                devices.append(dev)
-        except (OSError, PermissionError):
-            pass
-    return devices
+    devices = [_open_if_gamepad(path) for path in evdev.list_devices()]
+    return [d for d in devices if d is not None]
 
 
 class GamepadListener:

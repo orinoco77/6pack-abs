@@ -96,7 +96,7 @@ def scan_for_servers(
         target_hosts = hosts if hosts is not None else _lan_subnet_hosts()
         try:
             found = asyncio.run(_scan(target_hosts))
-        except Exception:  # noqa: BLE001 — on_result must fire exactly once
+        except Exception:
             logger.exception("LAN scan failed")
             found = []
         on_result(found)

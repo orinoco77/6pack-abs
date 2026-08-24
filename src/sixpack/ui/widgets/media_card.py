@@ -1,6 +1,8 @@
 """Focusable media card widget for grid browsing."""
 from __future__ import annotations
 
+from typing import ClassVar
+
 from PyQt6.QtCore import QEvent, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QPainter, QPixmap
 from PyQt6.QtWidgets import (
@@ -52,7 +54,7 @@ class _Scrim(QWidget):
     @staticmethod
     def color_for_opacity(opacity: float) -> QColor:
         """Black with the alpha that visually matches rendering at `opacity`."""
-        alpha = int(round(255 * (1.0 - max(0.0, min(1.0, opacity)))))
+        alpha = round(255 * (1.0 - max(0.0, min(1.0, opacity))))
         return QColor(0, 0, 0, alpha)
 
     def setColor(self, color: QColor) -> None:
@@ -92,7 +94,7 @@ class _FinishedBadge(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setFixedSize(self._SIZE, self._SIZE)
 
-    def paintEvent(self, event) -> None:  # noqa: ARG002
+    def paintEvent(self, event) -> None:
         try:
             painter = QPainter(self)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -119,7 +121,7 @@ class MediaCard(QFrame):
 
     activated = pyqtSignal()
 
-    _PLACEHOLDER_GLYPH = {"book": "📖", "podcast": "🎙"}
+    _PLACEHOLDER_GLYPH: ClassVar[dict[str, str]] = {"book": "📖", "podcast": "🎙"}
 
     def __init__(
         self,

@@ -327,7 +327,7 @@ class LoginScreen(QWidget):
                 return
         super().keyPressEvent(event)
 
-    def eventFilter(self, obj, event) -> bool:  # noqa: N802 — Qt-mandated name
+    def eventFilter(self, obj, event) -> bool:
         if event.type() == QEvent.Type.FocusIn and obj in (
             self._url_input,
             self._user_input,

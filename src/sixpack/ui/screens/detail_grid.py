@@ -149,7 +149,7 @@ class DetailGridScreen(QWidget):
         left it.
         """
         self._progress = progress
-        for item, card in zip(self._items, self._grid._items):
+        for item, card in zip(self._items, self._grid._items, strict=True):
             fraction, finished = self._item_progress(item, progress)
             card.set_progress(fraction)
             card.set_finished(finished)

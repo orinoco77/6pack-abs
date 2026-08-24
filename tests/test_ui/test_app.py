@@ -1131,7 +1131,7 @@ def test_async_fetch_podcast_detail_reuses_one_client(window):
     window._token = "tok"
     window._client = fake
 
-    full, progress = asyncio.run(window._async_fetch_podcast_detail(show))
+    full, _progress = asyncio.run(window._async_fetch_podcast_detail(show))
 
     assert full is full_show
     assert ("get_library_item", "show1") in calls

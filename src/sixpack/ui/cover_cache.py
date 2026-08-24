@@ -1,6 +1,7 @@
 """Disk-backed cover art cache."""
 from __future__ import annotations
 
+import contextlib
 import hashlib
 from collections.abc import Callable
 from pathlib import Path
@@ -173,10 +174,8 @@ class CoverCache(QObject):
 
     def clear(self) -> None:
         for f in self._cache_dir.iterdir():
-            try:
+            with contextlib.suppress(OSError):
                 f.unlink()
-            except OSError:
-                pass
 
     # ------------------------------------------------------------------
     # Internals
@@ -293,7 +292,5 @@ class CoverCache(QObject):
         except OSError:
             return
         while len(files) > self._max_entries:
-            try:
+            with contextlib.suppress(OSError):
                 files.pop(0).unlink()
-            except OSError:
-                pass

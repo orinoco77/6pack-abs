@@ -32,6 +32,16 @@ class APIError(Exception):
         self.status_code = status_code
 
 
+def _validate_shelf(item: dict) -> PersonalizedShelf | None:
+    """None on a malformed shelf entry, logged and skipped rather than
+    failing the whole personalized-shelves fetch over one bad entry."""
+    try:
+        return PersonalizedShelf.model_validate(item)
+    except Exception as exc:
+        logger.warning("Skipping malformed personalized shelf: %s", exc)
+        return None
+
+
 class ABSClient:
     """Async client for the Audiobookshelf API."""
 
@@ -213,13 +223,8 @@ class ABSClient:
         response = await self._http.get(f"/api/libraries/{library_id}/personalized")
         self._raise_for_status(response)
         data = response.json()
-        shelves = []
-        for item in data:
-            try:
-                shelves.append(PersonalizedShelf.model_validate(item))
-            except Exception as exc:
-                logger.warning("Skipping malformed personalized shelf: %s", exc)
-        return shelves
+        shelves = [_validate_shelf(item) for item in data]
+        return [s for s in shelves if s is not None]
 
     async def get_library_items_recent(self, library_id: str, limit: int = 20) -> list[LibraryItem]:
         """Fetch recently added items for a library, sorted by addedAt descending."""

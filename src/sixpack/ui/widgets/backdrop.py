@@ -65,7 +65,7 @@ class Backdrop(QWidget):
         super().resizeEvent(event)
         self.update()
 
-    def paintEvent(self, event) -> None:  # noqa: ARG002
+    def paintEvent(self, event) -> None:
         painter = QPainter(self)
         if self._current_pixmap is not None and not self._current_pixmap.isNull():
             painter.drawPixmap(self.rect(), self._current_pixmap)
