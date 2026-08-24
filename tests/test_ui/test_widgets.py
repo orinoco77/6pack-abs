@@ -223,6 +223,108 @@ def test_focus_grid_scroll_area_is_transparent(qtbot):
     assert "transparent" in grid._container.styleSheet()
 
 
+def test_short_tap_fires_item_activated_not_long_press(qtbot):
+    grid = FocusGrid(columns=3)
+    qtbot.addWidget(grid)
+    grid.add_item(MediaCard(title="A"))
+    grid.show()
+    grid.setFocus()
+
+    activated = []
+    long_pressed = []
+    grid.item_activated.connect(lambda idx: activated.append(idx))
+    grid.long_press_activated.connect(lambda idx: long_pressed.append(idx))
+
+    qtbot.keyClick(grid, Qt.Key.Key_Return)  # press+release, near-instant
+    qtbot.wait(50)  # Ensure all events are processed
+
+    assert activated == [0]
+    assert long_pressed == []
+
+
+def test_held_select_fires_long_press_not_item_activated(qtbot):
+    grid = FocusGrid(columns=3)
+    qtbot.addWidget(grid)
+    grid.add_item(MediaCard(title="A"))
+    grid.show()
+    grid.setFocus()
+
+    activated = []
+    long_pressed = []
+    grid.item_activated.connect(lambda idx: activated.append(idx))
+    grid.long_press_activated.connect(lambda idx: long_pressed.append(idx))
+
+    qtbot.keyPress(grid, Qt.Key.Key_Return)
+    qtbot.wait(600)  # past the 500ms hold threshold
+    qtbot.keyRelease(grid, Qt.Key.Key_Return)
+    qtbot.wait(50)  # Ensure all events are processed
+
+    assert long_pressed == [0]
+    assert activated == []
+
+
+def test_release_before_threshold_does_not_double_fire(qtbot):
+    """Releasing just under the threshold must fire exactly one signal
+    (item_activated), never both."""
+    grid = FocusGrid(columns=3)
+    qtbot.addWidget(grid)
+    grid.add_item(MediaCard(title="A"))
+    grid.show()
+    grid.setFocus()
+
+    activated = []
+    long_pressed = []
+    grid.item_activated.connect(lambda idx: activated.append(idx))
+    grid.long_press_activated.connect(lambda idx: long_pressed.append(idx))
+
+    qtbot.keyPress(grid, Qt.Key.Key_Return)
+    qtbot.wait(100)
+    qtbot.keyRelease(grid, Qt.Key.Key_Return)
+    qtbot.wait(600)  # let any (incorrect) pending timer fire, if it exists
+    qtbot.wait(50)  # Ensure all events are processed
+
+    assert activated == [0]
+    assert long_pressed == []
+
+
+def test_long_press_uses_currently_focused_index(qtbot):
+    grid = FocusGrid(columns=3)
+    qtbot.addWidget(grid)
+    for title in ("A", "B", "C"):
+        grid.add_item(MediaCard(title=title))
+    grid.show()
+    grid.setFocus()
+    grid.focus_item(2)
+
+    long_pressed = []
+    grid.long_press_activated.connect(lambda idx: long_pressed.append(idx))
+
+    qtbot.keyPress(grid, Qt.Key.Key_Return)
+    qtbot.wait(600)
+    qtbot.keyRelease(grid, Qt.Key.Key_Return)
+    qtbot.wait(50)  # Ensure all events are processed
+
+    assert long_pressed == [2]
+
+
+def test_non_select_keys_still_work_during_a_pending_hold(qtbot):
+    """Left/Right navigation must not be blocked by an in-progress Select
+    hold timer -- only release/hold detection is special-cased."""
+    grid = FocusGrid(columns=3)
+    qtbot.addWidget(grid)
+    for title in ("A", "B"):
+        grid.add_item(MediaCard(title=title))
+    grid.show()
+    grid.setFocus()
+
+    qtbot.keyPress(grid, Qt.Key.Key_Return)
+    qtbot.keyClick(grid, Qt.Key.Key_Right)
+    qtbot.keyRelease(grid, Qt.Key.Key_Return)
+    qtbot.wait(50)  # Ensure all events are processed
+
+    assert grid._focused_index == 1
+
+
 # ===========================================================================
 # MediaCard tests
 # ===========================================================================
