@@ -35,12 +35,19 @@ def _build_button_map() -> dict[int, InputAction]:
     return {
         ecodes.BTN_SOUTH: InputAction.SELECT,       # A / Cross
         ecodes.BTN_EAST: InputAction.BACK,           # B / Circle
-        ecodes.BTN_NORTH: InputAction.MENU,          # Y / Triangle
         ecodes.BTN_WEST: InputAction.PLAY_PAUSE,     # X / Square
         ecodes.BTN_TL: InputAction.PREV_CHAPTER,     # LB
         ecodes.BTN_TR: InputAction.NEXT_CHAPTER,     # RB
         ecodes.BTN_SELECT: InputAction.BACK,
-        ecodes.BTN_START: InputAction.MENU,
+        # Y/Triangle and Start were mapped to InputAction.MENU, but no
+        # keyboard key produces MENU anymore (this app's keyboard model
+        # retired it in favour of SELECT -- see keyboard.py's _PLAYER_MAP
+        # comments). Since gamepad actions are dispatched by synthesizing
+        # the equivalent keyboard key event (see app.py's
+        # _dispatch_gamepad_key), MENU has no synthesizable key to route
+        # through and is left unmapped; the chapter overlay it used to
+        # open directly is still reachable via the universal path (D-pad
+        # to the chapters button, then Select), same as any basic remote.
     }
 
 

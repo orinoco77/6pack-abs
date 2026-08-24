@@ -140,13 +140,15 @@ def test_rb_maps_to_next_chapter(listener):
     assert action == InputAction.NEXT_CHAPTER
 
 
-def test_start_maps_to_menu(listener):
+def test_start_is_unmapped(listener):
+    """MENU has no synthesizable keyboard key to route through anymore
+    (see gamepad.py's _build_button_map comment) -- Start is intentionally
+    left unmapped rather than firing a dead action."""
     gl, actions = listener
     ec = _make_ecodes()
     event = _make_event(ec.EV_KEY, ec.BTN_START, 1)
     action = gl._map_event(event)
-    from sixpack.input.actions import InputAction
-    assert action == InputAction.MENU
+    assert action is None
 
 
 def test_unmapped_button_returns_none(listener):
