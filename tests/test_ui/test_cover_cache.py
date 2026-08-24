@@ -36,9 +36,25 @@ def test_cache_path_uses_md5(tmp_path, qtbot):
     assert cache._cache_path(url) == expected
 
 
-# ---- disk hit ----
+def test_cache_path_stable_across_token_rotation(tmp_path, qtbot):
+    """cover_url() builders embed ?token=... in the URL -- the cache key
+    must be based on the path alone, so a re-login (new token) doesn't
+    invalidate every cached cover for images that haven't changed."""
+    cache = CoverCache(cache_dir=tmp_path)
+    base = "http://abs.test/api/items/x/cover"
+    assert cache._cache_path(f"{base}?token=old") == cache._cache_path(f"{base}?token=new")
+    assert cache._backdrop_path(f"{base}?token=old") == cache._backdrop_path(f"{base}?token=new")
 
-def test_cache_hit_fires_callback_synchronously(tmp_path, qtbot):
+
+# ---- disk hit ----
+#
+# A cache hit now reads and decodes the file on a background thread
+# (QThreadPool) rather than blocking the GUI thread inline -- the callback
+# fires once that completes and the result is queued back, not before
+# fetch() returns. qtbot.waitUntil pumps the event loop so the queued
+# signal actually gets delivered.
+
+def test_cache_hit_delivers_callback(tmp_path, qtbot):
     url = "http://example.com/cover.jpg"
     cache = CoverCache(cache_dir=tmp_path)
     _write_pixmap(cache._cache_path(url))
@@ -46,7 +62,7 @@ def test_cache_hit_fires_callback_synchronously(tmp_path, qtbot):
     received = []
     cache.fetch(url, "tok", received.append)
 
-    assert len(received) == 1
+    qtbot.waitUntil(lambda: len(received) == 1, timeout=2000)
     assert not received[0].isNull()
 
 
@@ -55,7 +71,9 @@ def test_cache_hit_no_pending_entry(tmp_path, qtbot):
     cache = CoverCache(cache_dir=tmp_path)
     _write_pixmap(cache._cache_path(url))
 
-    cache.fetch(url, "tok", lambda p: None)
+    received = []
+    cache.fetch(url, "tok", received.append)
+    qtbot.waitUntil(lambda: len(received) == 1, timeout=2000)
     assert url not in cache._pending
 
 
@@ -69,7 +87,9 @@ def test_corrupt_cache_file_deleted_and_fetch_queued(tmp_path, qtbot):
 
     cache.fetch(url, "tok", lambda p: None)
 
-    assert not bad.exists()
+    # Once the background read confirms the file is unreadable, it's
+    # deleted and a real (network) fetch is queued in its place.
+    qtbot.waitUntil(lambda: not bad.exists(), timeout=2000)
     assert url in cache._pending
 
 
@@ -119,6 +139,23 @@ def test_evict_no_op_under_limit(tmp_path, qtbot):
     cache._evict_if_needed()
 
     assert len(list(tmp_path.iterdir())) == 3
+
+
+def test_evict_under_limit_skips_stat_and_sort(tmp_path, qtbot, monkeypatch):
+    """Under the cap, _evict_if_needed must not pay for a stat()-per-file
+    sort at all -- only the cheap directory listing. Regression guard for
+    the full-scan-on-every-fetch inefficiency."""
+    from pathlib import Path
+
+    cache = CoverCache(cache_dir=tmp_path, max_entries=5)
+    for name in ["a", "b", "c"]:
+        (tmp_path / name).write_bytes(b"x")
+
+    def _boom(self, *args, **kwargs):
+        raise AssertionError("stat() must not run on any file when under the cap")
+
+    monkeypatch.setattr(Path, "stat", _boom)
+    cache._evict_if_needed()  # must not raise
 
 
 # ---- clear ----
@@ -178,7 +215,8 @@ def test_fetch_backdrop_uses_disk_cache(tmp_path, qtbot):
     )
     got = {}
     cache.fetch_backdrop(url, "t", lambda pm: got.setdefault("pm", pm))
-    assert "pm" in got and not got["pm"].isNull()
+    qtbot.waitUntil(lambda: "pm" in got, timeout=2000)
+    assert not got["pm"].isNull()
 
 
 def test_fetch_backdrop_saves_as_jpeg_not_png(tmp_path, qtbot):
@@ -194,7 +232,8 @@ def test_fetch_backdrop_saves_as_jpeg_not_png(tmp_path, qtbot):
     got = {}
     cache.fetch_backdrop(url, "t", lambda pm: got.setdefault("pm", pm))
 
-    assert "pm" in got and not got["pm"].isNull()
+    qtbot.waitUntil(lambda: "pm" in got, timeout=2000)
+    assert not got["pm"].isNull()
     bpath = cache._backdrop_path(url)
     assert bpath.exists()
     # QImageReader sniffs format from file content, not extension (the

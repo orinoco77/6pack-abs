@@ -5,8 +5,8 @@ import hashlib
 from pathlib import Path
 from typing import Callable
 
-from PyQt6.QtCore import QObject, QSize, QUrl, Qt
-from PyQt6.QtGui import QBrush, QColor, QLinearGradient, QPainter, QPixmap
+from PyQt6.QtCore import QObject, QRunnable, QSize, QThreadPool, QUrl, Qt, pyqtSignal
+from PyQt6.QtGui import QBrush, QColor, QImage, QLinearGradient, QPainter, QPixmap
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
 from sixpack.ui import theme
@@ -71,17 +71,59 @@ def make_backdrop(pixmap: QPixmap, size: QSize) -> QPixmap:
 
 _DEFAULT_CACHE_DIR = Path.home() / ".cache" / "sixpack" / "covers"
 _MAX_ENTRIES = 1000
+_NETWORK_TIMEOUT_MS = 15_000
+
+
+def _cache_key_url(url: str) -> str:
+    """`url` minus its `?token=...` query string. cover_url() builders
+    embed the bearer token in the URL, and hashing the full URL as the
+    cache key means every re-login (token rotation) invalidates every
+    cached cover even though the underlying images haven't changed --
+    strip it so the key is stable across a token rotation."""
+    return url.split("?", 1)[0]
+
+
+class _CacheReadSignals(QObject):
+    """Lives on CoverCache (i.e. the GUI thread) so its `finished` signal
+    auto-marshals a QThreadPool worker's result back to the GUI thread as
+    a QueuedConnection -- Qt's own mechanism for this, no manual
+    QMetaObject.invokeMethod needed."""
+
+    finished = pyqtSignal(str, QImage)  # url, decoded image (null if unreadable)
+
+
+class _CacheReadTask(QRunnable):
+    """Reads and decodes a cached cover off the GUI thread. QImage (unlike
+    QPixmap) is safe to construct/decode on a non-GUI thread; the result is
+    converted to a QPixmap back on the GUI thread, in the `finished` slot."""
+
+    def __init__(self, path: Path, url: str, signals: _CacheReadSignals) -> None:
+        super().__init__()
+        self._path = path
+        self._url = url
+        self._signals = signals
+
+    def run(self) -> None:
+        img = QImage()
+        try:
+            data = self._path.read_bytes()
+        except OSError:
+            self._signals.finished.emit(self._url, img)
+            return
+        img.loadFromData(data)
+        self._signals.finished.emit(self._url, img)
 
 
 class CoverCache(QObject):
     """
     Disk-backed cover art cache.
 
-    fetch(url, token, callback) — if the image is already on disk the
-    callback fires synchronously; otherwise a network request is made and
-    the callback fires when the download completes.  Concurrent fetch()
-    calls for the same URL while a request is in flight are coalesced: only
-    one HTTP request is made and all callbacks fire when it finishes.
+    fetch(url, token, callback) — a cache hit reads and decodes the file on
+    a background thread (QThreadPool), delivering the callback once that
+    completes; a cache miss makes a network request and the callback fires
+    when the download completes. Concurrent fetch() calls for the same URL
+    while a read or request is in flight are coalesced: only one disk read
+    or HTTP request happens and all callbacks fire when it finishes.
     """
 
     def __init__(
@@ -96,26 +138,38 @@ class CoverCache(QObject):
         self._max_entries = max_entries
         self._nam = QNetworkAccessManager(self)
         self._pending: dict[str, list[Callable[[QPixmap], None]]] = {}
+        # Token per in-flight URL, kept only so a corrupt-cache-file
+        # recovery (_on_cache_read's fallback to a real fetch) can retry
+        # with the same auth token fetch() was originally called with.
+        self._pending_tokens: dict[str, str] = {}
+        self._read_signals = _CacheReadSignals(self)
+        self._read_signals.finished.connect(self._on_cache_read)
+        # A second, independent pending/signals pair for fetch_backdrop()'s
+        # own on-disk cache of already-processed (blurred/scrimmed) backdrop
+        # images -- a separate cache from the raw-cover one above, keyed by
+        # the same URLs, so it needs its own coalescing dict to avoid
+        # colliding with fetch()'s.
+        self._backdrop_pending: dict[str, list[Callable[[QPixmap], None]]] = {}
+        self._backdrop_read_signals = _CacheReadSignals(self)
+        self._backdrop_read_signals.finished.connect(self._on_backdrop_cache_read)
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
     def fetch(self, url: str, token: str, callback: Callable[[QPixmap], None]) -> None:
-        path = self._cache_path(url)
-        if path.exists():
-            pix = QPixmap()
-            if pix.load(str(path)) and not pix.isNull():
-                callback(pix)
-                return
-            path.unlink(missing_ok=True)  # corrupt — delete and re-fetch
-
         if url in self._pending:
             self._pending[url].append(callback)
             return
 
+        path = self._cache_path(url)
         self._pending[url] = [callback]
-        self._start_fetch(url, token)
+        self._pending_tokens[url] = token
+        if path.exists():
+            task = _CacheReadTask(path, url, self._read_signals)
+            QThreadPool.globalInstance().start(task)
+        else:
+            self._start_fetch(url, token)
 
     def clear(self) -> None:
         for f in self._cache_dir.iterdir():
@@ -129,20 +183,59 @@ class CoverCache(QObject):
     # ------------------------------------------------------------------
 
     def _cache_path(self, url: str) -> Path:
-        return self._cache_dir / hashlib.md5(url.encode()).hexdigest()
+        return self._cache_dir / hashlib.md5(_cache_key_url(url).encode()).hexdigest()
 
     def _backdrop_path(self, url: str) -> Path:
-        return self._cache_dir / hashlib.md5(("backdrop:" + url).encode()).hexdigest()
+        key = "backdrop:" + _cache_key_url(url)
+        return self._cache_dir / hashlib.md5(key.encode()).hexdigest()
+
+    def _on_cache_read(self, url: str, image: QImage) -> None:
+        callbacks = self._pending.pop(url, [])
+        token = self._pending_tokens.pop(url, "")
+        if not image.isNull():
+            pix = QPixmap.fromImage(image)
+            if not pix.isNull():
+                for cb in callbacks:
+                    cb(pix)
+                return
+        # Corrupt/unreadable cache entry -- delete and fall through to a
+        # real fetch, restoring the callbacks that were waiting on it.
+        self._cache_path(url).unlink(missing_ok=True)
+        if callbacks:
+            self._pending[url] = callbacks
+            self._pending_tokens[url] = token
+            self._start_fetch(url, token)
 
     def fetch_backdrop(self, url: str, token: str, callback: Callable[[QPixmap], None]) -> None:
+        if url in self._backdrop_pending:
+            self._backdrop_pending[url].append(callback)
+            return
+
         bpath = self._backdrop_path(url)
         if bpath.exists():
-            pix = QPixmap()
-            if pix.load(str(bpath)) and not pix.isNull():
-                callback(pix)
-                return
-            bpath.unlink(missing_ok=True)
+            self._backdrop_pending[url] = [callback]
+            task = _CacheReadTask(bpath, url, self._backdrop_read_signals)
+            QThreadPool.globalInstance().start(task)
+            return
 
+        self._make_and_deliver_backdrop(url, token, callback)
+
+    def _on_backdrop_cache_read(self, url: str, image: QImage) -> None:
+        callbacks = self._backdrop_pending.pop(url, [])
+        if not image.isNull():
+            pix = QPixmap.fromImage(image)
+            if not pix.isNull():
+                for cb in callbacks:
+                    cb(pix)
+                return
+        self._backdrop_path(url).unlink(missing_ok=True)
+        for cb in callbacks:
+            self._make_and_deliver_backdrop(url, "", cb)
+
+    def _make_and_deliver_backdrop(
+        self, url: str, token: str, callback: Callable[[QPixmap], None]
+    ) -> None:
+        bpath = self._backdrop_path(url)
         size = QSize(theme.BACKDROP_W, theme.BACKDROP_H)
 
         def _process(raw: QPixmap) -> None:
@@ -166,11 +259,13 @@ class CoverCache(QObject):
         request = QNetworkRequest(QUrl(url))
         if token:
             request.setRawHeader(b"Authorization", f"Bearer {token}".encode())
+        request.setTransferTimeout(_NETWORK_TIMEOUT_MS)
         reply = self._nam.get(request)
         reply.finished.connect(lambda r=reply, u=url: self._on_reply(r, u))
 
     def _on_reply(self, reply: QNetworkReply, url: str) -> None:
         callbacks = self._pending.pop(url, [])
+        self._pending_tokens.pop(url, None)
         if reply.error() == QNetworkReply.NetworkError.NoError:
             data = reply.readAll()
             path = self._cache_path(url)
@@ -185,10 +280,16 @@ class CoverCache(QObject):
 
     def _evict_if_needed(self) -> None:
         try:
-            files = sorted(
-                self._cache_dir.iterdir(),
-                key=lambda f: f.stat().st_mtime,
-            )
+            entries = list(self._cache_dir.iterdir())
+        except OSError:
+            return
+        # Cheap unconditional listing first -- the expensive part (a
+        # stat() per file, to sort by mtime) only runs when actually over
+        # the cap, not on every single completed fetch.
+        if len(entries) <= self._max_entries:
+            return
+        try:
+            files = sorted(entries, key=lambda f: f.stat().st_mtime)
         except OSError:
             return
         while len(files) > self._max_entries:
