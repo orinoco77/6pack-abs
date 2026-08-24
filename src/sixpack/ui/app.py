@@ -176,7 +176,7 @@ class MainWindow(QMainWindow):
         self._gamepad = GamepadListener(self._on_gamepad_action)
         self._gamepad.start()
 
-    def _on_gamepad_action(self, action: InputAction) -> None:
+    def _on_gamepad_action(self, action: InputAction, is_press: bool) -> None:
         # Called from GamepadListener's background reader thread (one per
         # detected device) -- must not touch any QWidget/QApplication state
         # directly from here. Marshal to the GUI thread via a queued
@@ -188,14 +188,16 @@ class MainWindow(QMainWindow):
             self, "_dispatch_gamepad_key",
             Qt.ConnectionType.QueuedConnection,
             Q_ARG(int, key.value),
+            Q_ARG(bool, is_press),
         )
 
-    @pyqtSlot(int)
-    def _dispatch_gamepad_key(self, key_value: int) -> None:
+    @pyqtSlot(int, bool)
+    def _dispatch_gamepad_key(self, key_value: int, is_press: bool) -> None:
         target = QApplication.focusWidget()
         if target is None:
             return
-        event = QKeyEvent(QEvent.Type.KeyPress, Qt.Key(key_value), Qt.KeyboardModifier.NoModifier)
+        event_type = QEvent.Type.KeyPress if is_press else QEvent.Type.KeyRelease
+        event = QKeyEvent(event_type, Qt.Key(key_value), Qt.KeyboardModifier.NoModifier)
         QApplication.sendEvent(target, event)
 
     def _build_ui(self) -> None:

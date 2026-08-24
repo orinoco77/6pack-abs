@@ -141,7 +141,28 @@ def test_gamepad_action_dispatches_synthetic_key_to_focused_widget(window, qtbot
     received = []
     target.keyPressEvent = lambda event: received.append(event.key())
 
-    window._on_gamepad_action(InputAction.SELECT)
+    window._on_gamepad_action(InputAction.SELECT, True)
+
+    qtbot.waitUntil(lambda: len(received) == 1, timeout=2000)
+    assert received[0] == Qt.Key.Key_Return
+
+
+def test_gamepad_action_release_dispatches_key_release(window, qtbot):
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtWidgets import QLineEdit
+
+    from sixpack.input.actions import InputAction
+
+    target = QLineEdit()
+    qtbot.addWidget(target)
+    target.show()
+    target.setFocus()
+    qtbot.waitUntil(lambda: target.hasFocus(), timeout=2000)
+
+    received = []
+    target.keyReleaseEvent = lambda event: received.append(event.key())
+
+    window._on_gamepad_action(InputAction.SELECT, False)
 
     qtbot.waitUntil(lambda: len(received) == 1, timeout=2000)
     assert received[0] == Qt.Key.Key_Return
@@ -152,7 +173,7 @@ def test_gamepad_action_unmapped_is_noop(window, qtbot):
     comment) -- dispatching it must not raise or affect focus."""
     from sixpack.input.actions import InputAction
 
-    window._on_gamepad_action(InputAction.MENU)
+    window._on_gamepad_action(InputAction.MENU, True)
     qtbot.wait(50)  # let any (unexpected) queued dispatch settle
     # No assertion beyond "did not raise" -- there is nothing to observe
     # for a correctly-dropped unmapped action.
