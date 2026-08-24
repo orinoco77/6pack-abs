@@ -415,7 +415,7 @@ class PairingServer:
             self._thread = None
 
     def is_code_valid(self, code: str) -> bool:
-        if self._used or not code or code != self.code:
+        if self._used or not code or not secrets.compare_digest(code, self.code):
             return False
         return (time.monotonic() - self._issued_at) < self.EXPIRY_SECONDS
 

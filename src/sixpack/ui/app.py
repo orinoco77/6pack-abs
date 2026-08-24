@@ -37,6 +37,7 @@ from sixpack.ui.screens.update_prompt import UpdatePromptScreen
 from sixpack.updater import (
     CURRENT_VERSION,
     ReleaseInfo,
+    UpdateError,
     apply_update,
     fetch_latest_release,
     is_newer,
@@ -1023,7 +1024,11 @@ class MainWindow(QMainWindow):
                 self._try_autologin()
 
         elif tag == "apply_update":
-            relaunch()
+            try:
+                relaunch()
+            except UpdateError as exc:
+                logger.error("Relaunch failed, staying on current version: %s", exc)
+                return
             QApplication.instance().quit()
 
     @pyqtSlot(str, str)
