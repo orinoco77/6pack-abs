@@ -115,6 +115,29 @@ class _CacheReadTask(QRunnable):
         self._signals.finished.emit(self._url, img)
 
 
+class _WriteAndDecodeTask(QRunnable):
+    """Writes freshly-downloaded bytes to the cache file and decodes them,
+    off the GUI thread -- the network-fetch-completion counterpart to
+    _CacheReadTask, closing the other synchronous disk I/O + decode path
+    in this class (previously done inline in _on_reply)."""
+
+    def __init__(self, path: Path, url: str, data: bytes, signals: _CacheReadSignals) -> None:
+        super().__init__()
+        self._path = path
+        self._url = url
+        self._data = data
+        self._signals = signals
+
+    def run(self) -> None:
+        try:
+            self._path.write_bytes(self._data)
+        except OSError:
+            pass  # decode-from-memory below still works even if the disk write failed
+        img = QImage()
+        img.loadFromData(self._data)
+        self._signals.finished.emit(self._url, img)
+
+
 class CoverCache(QObject):
     """
     Disk-backed cover art cache.
@@ -145,12 +168,20 @@ class CoverCache(QObject):
         self._pending_tokens: dict[str, str] = {}
         self._read_signals = _CacheReadSignals(self)
         self._read_signals.finished.connect(self._on_cache_read)
+        # Separate signals for the network-fetch-completion path (_on_reply
+        # -> _WriteAndDecodeTask) -- distinct from _read_signals above so a
+        # freshly-downloaded file's write+decode doesn't share a slot with
+        # (and pick up eviction-triggering semantics from) reading an
+        # already-cached one.
+        self._write_signals = _CacheReadSignals(self)
+        self._write_signals.finished.connect(self._on_network_write_complete)
         # A second, independent pending/signals pair for fetch_backdrop()'s
         # own on-disk cache of already-processed (blurred/scrimmed) backdrop
         # images -- a separate cache from the raw-cover one above, keyed by
         # the same URLs, so it needs its own coalescing dict to avoid
         # colliding with fetch()'s.
         self._backdrop_pending: dict[str, list[Callable[[QPixmap], None]]] = {}
+        self._backdrop_pending_tokens: dict[str, str] = {}
         self._backdrop_read_signals = _CacheReadSignals(self)
         self._backdrop_read_signals.finished.connect(self._on_backdrop_cache_read)
 
@@ -213,6 +244,7 @@ class CoverCache(QObject):
         bpath = self._backdrop_path(url)
         if bpath.exists():
             self._backdrop_pending[url] = [callback]
+            self._backdrop_pending_tokens[url] = token
             task = _CacheReadTask(bpath, url, self._backdrop_read_signals)
             QThreadPool.globalInstance().start(task)
             return
@@ -221,6 +253,7 @@ class CoverCache(QObject):
 
     def _on_backdrop_cache_read(self, url: str, image: QImage) -> None:
         callbacks = self._backdrop_pending.pop(url, [])
+        token = self._backdrop_pending_tokens.pop(url, "")
         if not image.isNull():
             pix = QPixmap.fromImage(image)
             if not pix.isNull():
@@ -229,7 +262,7 @@ class CoverCache(QObject):
                 return
         self._backdrop_path(url).unlink(missing_ok=True)
         for cb in callbacks:
-            self._make_and_deliver_backdrop(url, "", cb)
+            self._make_and_deliver_backdrop(url, token, cb)
 
     def _make_and_deliver_backdrop(
         self, url: str, token: str, callback: Callable[[QPixmap], None]
@@ -263,19 +296,25 @@ class CoverCache(QObject):
         reply.finished.connect(lambda r=reply, u=url: self._on_reply(r, u))
 
     def _on_reply(self, reply: QNetworkReply, url: str) -> None:
+        if reply.error() == QNetworkReply.NetworkError.NoError:
+            data = bytes(reply.readAll())
+            path = self._cache_path(url)
+            task = _WriteAndDecodeTask(path, url, data, self._write_signals)
+            QThreadPool.globalInstance().start(task)
+        else:
+            self._pending.pop(url, None)
+            self._pending_tokens.pop(url, None)
+        reply.deleteLater()
+
+    def _on_network_write_complete(self, url: str, image: QImage) -> None:
         callbacks = self._pending.pop(url, [])
         self._pending_tokens.pop(url, None)
-        if reply.error() == QNetworkReply.NetworkError.NoError:
-            data = reply.readAll()
-            path = self._cache_path(url)
-            path.write_bytes(bytes(data))
-            pix = QPixmap()
-            pix.loadFromData(data)
+        if not image.isNull():
+            pix = QPixmap.fromImage(image)
             if not pix.isNull():
                 for cb in callbacks:
                     cb(pix)
-            self._evict_if_needed()
-        reply.deleteLater()
+        self._evict_if_needed()
 
     def _evict_if_needed(self) -> None:
         try:
