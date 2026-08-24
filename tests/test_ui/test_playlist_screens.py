@@ -194,3 +194,10 @@ def test_playlist_detail_screen_item_progress_finished_is_zero_fraction(qtbot):
     fraction, finished = screen._item_progress(item, {"li1": prog})
     assert fraction == 0.0
     assert finished is True
+
+
+def test_playlist_detail_item_progress_ids(qtbot):
+    screen = PlaylistDetailScreen()
+    qtbot.addWidget(screen)
+    item = _make_playlist().items[0]
+    assert screen._item_progress_ids(item) == ("li1", None)

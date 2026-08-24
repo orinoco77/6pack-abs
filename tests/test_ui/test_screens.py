@@ -693,6 +693,13 @@ def test_detail_screen_back_signal(qtbot):
         qtbot.keyClick(screen, Qt.Key.Key_Backspace)
 
 
+def test_series_detail_item_progress_ids(qtbot):
+    screen = SeriesDetailScreen()
+    qtbot.addWidget(screen)
+    book = _make_series().books[0]
+    assert screen._item_progress_ids(book) == ("b1", None)
+
+
 def test_detail_screen_item_emits_episode_activated(qtbot):
     screen = SeriesDetailScreen()
     qtbot.addWidget(screen)

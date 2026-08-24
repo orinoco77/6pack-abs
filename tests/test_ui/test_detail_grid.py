@@ -1,15 +1,17 @@
 """Tests for the DetailGridScreen base (series/playlist item grid shell)."""
 from __future__ import annotations
 
+from sixpack.api.models import MediaProgress
 from sixpack.ui.screens.detail_grid import DetailGridScreen
 
 
 class _FakeItem:
-    def __init__(self, key, title, subtitle="", cover_url=None):
+    def __init__(self, key, title, subtitle="", cover_url=None, duration=100.0):
         self.key = key
         self.title_ = title
         self.subtitle_ = subtitle
         self.cover_url = cover_url
+        self.duration = duration
 
 
 class _TestScreen(DetailGridScreen):
@@ -19,10 +21,15 @@ class _TestScreen(DetailGridScreen):
         return item.key
 
     def _item_progress(self, item, progress):
-        p = progress.get(item.key)
-        if p is None:
+        p: MediaProgress | None = progress.get(item.key)
+        if p is None or not item.duration:
             return 0.0, False
-        return p.get("fraction", 0.0), p.get("finished", False)
+        finished = bool(p.is_finished)
+        fraction = 0.0 if finished else max(0.0, min(1.0, p.current_time / item.duration))
+        return fraction, finished
+
+    def _item_progress_ids(self, item):
+        return item.key, None
 
     def _item_title(self, item):
         return item.title_
@@ -67,7 +74,7 @@ def test_detail_grid_populate_sets_hero_title_and_cards(qtbot):
 def test_detail_grid_populate_focuses_resume_index(qtbot):
     screen = _TestScreen()
     qtbot.addWidget(screen)
-    progress = {"a": {"fraction": 1.0, "finished": True}}
+    progress = {"a": MediaProgress(currentTime=100.0, duration=100.0, isFinished=True)}
     screen._populate("My Series", _items(), progress, "http://s", "t")
     # item "a" is finished, "b" should be the resume point
     assert screen._grid._focused_index == 1
@@ -94,7 +101,9 @@ def test_detail_grid_refresh_progress_updates_in_place_without_rebuild(qtbot):
     qtbot.addWidget(screen)
     screen._populate("My Series", _items(), {}, "http://s", "t")
     card_before = screen._grid._items[0]
-    screen._refresh_progress({"a": {"fraction": 1.0, "finished": True}})
+    screen._refresh_progress(
+        {"a": MediaProgress(currentTime=100.0, duration=100.0, isFinished=True)}
+    )
     assert screen._grid._items[0] is card_before  # same card instances, not rebuilt
     assert screen._grid.item_count == 3
 
@@ -109,7 +118,9 @@ def test_detail_grid_refresh_progress_sets_finished_badge(qtbot):
     screen._populate("My Series", _items(), {}, "http://s", "t")
     card = screen._grid._items[0]
     assert card._finished is False  # sanity: starts unfinished
-    screen._refresh_progress({"a": {"fraction": 1.0, "finished": True}})
+    screen._refresh_progress(
+        {"a": MediaProgress(currentTime=100.0, duration=100.0, isFinished=True)}
+    )
     assert card._finished is True
     assert card._finished_badge.isVisibleTo(card._body)
 
@@ -171,7 +182,9 @@ def test_detail_grid_refresh_progress_preserves_navigated_focus(qtbot):
 
     screen._grid.focus_item(2)  # user navigates to item C
 
-    screen._refresh_progress({"a": {"fraction": 1.0, "finished": True}})
+    screen._refresh_progress(
+        {"a": MediaProgress(currentTime=100.0, duration=100.0, isFinished=True)}
+    )
     assert screen._grid._focused_index == 2  # untouched, not reset to "b"
 
 
@@ -185,7 +198,9 @@ def test_detail_grid_refresh_progress_still_focuses_resume_if_untouched(qtbot):
     screen._populate("My Series", _items(), {}, "http://s", "t")
     assert screen._grid._focused_index == 0  # untouched since populate
 
-    screen._refresh_progress({"a": {"fraction": 1.0, "finished": True}})
+    screen._refresh_progress(
+        {"a": MediaProgress(currentTime=100.0, duration=100.0, isFinished=True)}
+    )
     assert screen._grid._focused_index == 1  # now resumes at item B
 
 
@@ -208,3 +223,137 @@ def test_detail_grid_populate_fetches_backdrop_exactly_once(qtbot):
     ]
     screen._populate("My Series", items, {}, "http://s", "t")
     assert len(fake_cache.fetch_backdrop_calls) == 1
+
+
+def test_item_progress_ids_default_from_test_screen(qtbot):
+    screen = _TestScreen()
+    qtbot.addWidget(screen)
+    item_id, episode_id = screen._item_progress_ids(_FakeItem("a", "Item A"))
+    assert item_id == "a"
+    assert episode_id is None
+
+
+def test_toggle_finished_on_unfinished_item_marks_finished_at_full_duration(qtbot):
+    screen = _TestScreen()
+    qtbot.addWidget(screen)
+    screen._populate("My Series", _items(), {}, "http://s", "t")
+
+    received = []
+    screen.finished_changed.connect(lambda *args: received.append(args))
+    screen._toggle_finished(0)
+
+    assert received == [("a", 100.0, 100.0, True, "")]
+    _fraction, finished = screen._item_progress(_items()[0], screen._progress)
+    assert finished is True
+    assert screen._grid._items[0]._finished is True
+
+
+def test_toggle_finished_on_finished_item_marks_unfinished_preserving_position(qtbot):
+    screen = _TestScreen()
+    qtbot.addWidget(screen)
+    progress = {"a": MediaProgress(currentTime=42.0, duration=100.0, isFinished=True)}
+    screen._populate("My Series", _items(), progress, "http://s", "t")
+
+    received = []
+    screen.finished_changed.connect(lambda *args: received.append(args))
+    screen._toggle_finished(0)
+
+    assert received == [("a", 42.0, 100.0, False, "")]
+    assert screen._grid._items[0]._finished is False
+
+
+def test_toggle_finished_reverting_with_no_recorded_position_uses_zero(qtbot):
+    """Marking an item unfinished when its recorded position is already
+    0.0 (e.g. it was finished without ever really being played) must not
+    fabricate a nonzero position -- distinct from the "preserving position"
+    test above, which covers a nonzero recorded position."""
+    screen = _TestScreen()
+    qtbot.addWidget(screen)
+    progress = {"a": MediaProgress(currentTime=0.0, duration=100.0, isFinished=True)}
+    screen._populate("My Series", _items(), progress, "http://s", "t")
+
+    received = []
+    screen.finished_changed.connect(lambda *args: received.append(args))
+    screen._toggle_finished(0)
+
+    assert received == [("a", 0.0, 100.0, False, "")]
+
+
+def test_toggle_finished_out_of_range_index_is_noop(qtbot):
+    screen = _TestScreen()
+    qtbot.addWidget(screen)
+    screen._populate("My Series", _items(), {}, "http://s", "t")
+    received = []
+    screen.finished_changed.connect(lambda *args: received.append(args))
+    screen._toggle_finished(99)
+    assert received == []
+
+
+def test_grid_long_press_opens_popup_with_correct_message(qtbot):
+    screen = _TestScreen()
+    qtbot.addWidget(screen)
+    screen._populate("My Series", _items(), {}, "http://s", "t")
+    screen.show()
+
+    screen._grid.long_press_activated.emit(0)
+
+    assert screen._finish_popup.isVisible()
+    assert "Item A" in screen._finish_popup._message_label.text()
+    assert "finished" in screen._finish_popup._message_label.text().lower()
+
+
+def test_grid_long_press_on_finished_item_offers_unfinish_wording(qtbot):
+    screen = _TestScreen()
+    qtbot.addWidget(screen)
+    progress = {"a": MediaProgress(currentTime=100.0, duration=100.0, isFinished=True)}
+    screen._populate("My Series", _items(), progress, "http://s", "t")
+    screen.show()
+
+    screen._grid.long_press_activated.emit(0)
+
+    assert "unfinished" in screen._finish_popup._message_label.text().lower()
+
+
+def test_confirming_popup_toggles_finished_state(qtbot):
+    screen = _TestScreen()
+    qtbot.addWidget(screen)
+    screen._populate("My Series", _items(), {}, "http://s", "t")
+    screen.show()
+
+    received = []
+    screen.finished_changed.connect(lambda *args: received.append(args))
+    screen._grid.long_press_activated.emit(0)
+    screen._finish_popup.confirmed.emit()
+
+    assert received == [("a", 100.0, 100.0, True, "")]
+
+
+def test_cancelling_popup_does_not_toggle(qtbot):
+    screen = _TestScreen()
+    qtbot.addWidget(screen)
+    screen._populate("My Series", _items(), {}, "http://s", "t")
+    screen.show()
+
+    received = []
+    screen.finished_changed.connect(lambda *args: received.append(args))
+    screen._grid.long_press_activated.emit(0)
+    screen._finish_popup.cancelled.emit()
+
+    assert received == []
+
+
+def test_keypress_while_popup_visible_does_not_fall_through_to_back(qtbot):
+    from PyQt6.QtCore import Qt
+
+    screen = _TestScreen()
+    qtbot.addWidget(screen)
+    screen._populate("My Series", _items(), {}, "http://s", "t")
+    screen.show()
+    screen._grid.long_press_activated.emit(0)
+
+    back_received = []
+    screen.back_requested.connect(lambda: back_received.append(True))
+    qtbot.keyClick(screen, Qt.Key.Key_Backspace)  # BACK -- popup must consume it
+
+    assert back_received == []
+    assert not screen._finish_popup.isVisible()  # BACK cancelled the popup instead
