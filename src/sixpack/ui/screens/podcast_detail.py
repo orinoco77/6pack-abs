@@ -28,6 +28,9 @@ class PodcastDetailScreen(DetailGridScreen):
         fraction = 0.0 if finished else max(0.0, min(1.0, prog.current_time / item.duration))
         return fraction, finished
 
+    def _item_progress_ids(self, item: PodcastEpisode) -> tuple[str, str | None]:
+        return item.library_item_id, item.id
+
     def _item_title(self, item: PodcastEpisode) -> str:
         return item.title
 

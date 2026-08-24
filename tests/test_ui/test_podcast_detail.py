@@ -104,3 +104,10 @@ def test_podcast_detail_screen_back_signal(qtbot):
     screen.back_requested.connect(lambda: received.append(True))
     screen.back_requested.emit()
     assert received == [True]
+
+
+def test_podcast_detail_item_progress_ids(qtbot):
+    screen = PodcastDetailScreen()
+    qtbot.addWidget(screen)
+    episode = _episode("ep1", "Episode One")
+    assert screen._item_progress_ids(episode) == ("show1", "ep1")

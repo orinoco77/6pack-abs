@@ -15,8 +15,10 @@ from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QVBoxLayout, QWidget
 
+from sixpack.api.models import MediaProgress
 from sixpack.ui import theme
 from sixpack.ui.cover_cache import CoverCache, dominant_color
+from sixpack.ui.widgets.confirm_popup import ConfirmPopup
 from sixpack.ui.widgets.focus_grid import FocusGrid
 from sixpack.ui.widgets.hero_backdrop import HeroBackdrop
 from sixpack.ui.widgets.media_card import MediaCard
@@ -26,11 +28,12 @@ class DetailGridScreen(QWidget):
     """Base shell for a Backdrop + hero + FocusGrid detail screen.
 
     Subclasses must override _item_key, _item_progress, _item_title,
-    _item_subtitle, _item_cover_url. _item_media_type has a "book"
-    default and is optional to override.
+    _item_subtitle, _item_cover_url, _item_progress_ids. _item_media_type
+    has a "book" default and is optional to override.
     """
 
     item_activated = pyqtSignal(object)
+    finished_changed = pyqtSignal(str, float, float, bool, str)
     back_requested = pyqtSignal()
 
     def __init__(self, cover_cache: CoverCache | None = None, parent=None) -> None:
@@ -53,6 +56,11 @@ class DetailGridScreen(QWidget):
         self._grid = FocusGrid(columns=5)
         self._grid.item_activated.connect(self._on_item_activated)
         self._grid.focus_changed.connect(self._on_grid_focus_changed)
+        self._grid.long_press_activated.connect(self._on_grid_long_press)
+
+        self._finish_popup = ConfirmPopup(self)
+        self._finish_popup.confirmed.connect(self._on_finish_confirmed)
+        self._pending_finish_index: int | None = None
 
         layout = QVBoxLayout(self)
         # Top margin pushes the grid below the hero band, applied here to
@@ -72,6 +80,8 @@ class DetailGridScreen(QWidget):
 
     def resizeEvent(self, event) -> None:
         self._hero_backdrop.setGeometry(self.rect())
+        w, h = int(self.width() * 0.5), 180
+        self._finish_popup.setGeometry((self.width() - w) // 2, (self.height() - h) // 2, w, h)
         super().resizeEvent(event)
 
     # ------------------------------------------------------------------
@@ -91,6 +101,15 @@ class DetailGridScreen(QWidget):
         raise NotImplementedError
 
     def _item_cover_url(self, item: Any, server_url: str, token: str) -> str | None:
+        raise NotImplementedError
+
+    def _item_progress_ids(self, item: Any) -> tuple[str, str | None]:
+        """(item_id, episode_id) for the update_progress() API call --
+        distinct from _item_key(), which is the progress-dict lookup key
+        and (for podcast episodes specifically) holds a different value:
+        _item_key returns the episode's own id, but update_progress needs
+        the show's library-item id as item_id and the episode's id
+        separately as episode_id."""
         raise NotImplementedError
 
     def _item_media_type(self, item: Any) -> str:
@@ -164,6 +183,49 @@ class DetailGridScreen(QWidget):
             if not finished:
                 return i
         return 0
+
+    def _on_grid_long_press(self, index: int) -> None:
+        if not (0 <= index < len(self._items)):
+            return
+        item = self._items[index]
+        _fraction, finished = self._item_progress(item, self._progress)
+        self._pending_finish_index = index
+        if finished:
+            self._finish_popup.show_confirm(
+                f"Mark '{self._item_title(item)}' as unfinished?",
+                confirm_label="Mark Unfinished",
+            )
+        else:
+            self._finish_popup.show_confirm(
+                f"Mark '{self._item_title(item)}' as finished?",
+                confirm_label="Mark Finished",
+            )
+
+    def _on_finish_confirmed(self) -> None:
+        if self._pending_finish_index is not None:
+            self._toggle_finished(self._pending_finish_index)
+        self._pending_finish_index = None
+
+    def _toggle_finished(self, index: int) -> None:
+        if not (0 <= index < len(self._items)):
+            return
+        item = self._items[index]
+        key = self._item_key(item)
+        prog: MediaProgress | None = self._progress.get(key)
+        _fraction, finished = self._item_progress(item, self._progress)
+        new_finished = not finished
+        duration = item.duration
+        current_time = duration if new_finished else (prog.current_time if prog else 0.0)
+        item_id, episode_id = self._item_progress_ids(item)
+        self.finished_changed.emit(item_id, current_time, duration, new_finished, episode_id or "")
+        # Optimistic local update -- reflects immediately, no round trip wait.
+        self._progress[key] = MediaProgress(
+            libraryItemId=item_id, episodeId=episode_id,
+            currentTime=current_time, duration=duration, isFinished=new_finished,
+        )
+        fraction, finished = self._item_progress(item, self._progress)
+        self._grid._items[index].set_progress(fraction)
+        self._grid._items[index].set_finished(finished)
 
     def _make_card(self, item: Any) -> MediaCard:
         card = MediaCard(
@@ -242,6 +304,9 @@ class DetailGridScreen(QWidget):
         from sixpack.input.keyboard import key_to_action
 
         action = key_to_action(event.key())
+        if self._finish_popup.isVisible():
+            self._finish_popup.handle_key(action)
+            return
         if action == InputAction.BACK:
             self.back_requested.emit()
         else:
