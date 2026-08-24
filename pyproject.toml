@@ -24,6 +24,7 @@ dev = [
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=5.0.0",
     "pytest-qt>=4.4.0",
+    "pytest-xdist>=3.5.0",
     "ruff>=0.4.0",
     "respx>=0.21.0",
 ]
@@ -36,7 +37,7 @@ packages = ["src/sixpack"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-addopts = "--cov=sixpack --cov-report=term-missing --cov-fail-under=80"
+addopts = "-n auto --cov=sixpack --cov-report=term-missing --cov-fail-under=90"
 testpaths = ["tests"]
 
 [tool.coverage.run]
