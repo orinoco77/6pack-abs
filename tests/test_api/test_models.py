@@ -1,8 +1,6 @@
 """Tests for Pydantic API models."""
 from __future__ import annotations
 
-import pytest
-
 from sixpack.api.models import (
     AudioTrack,
     Chapter,
@@ -17,7 +15,6 @@ from sixpack.api.models import (
     SeriesBook,
     User,
 )
-
 
 # ---- Chapter ----
 
@@ -139,7 +136,8 @@ def test_series_book_sequence_none():
 def test_series_book_cover_url(server_url, auth_token):
     media = LibraryItemMedia()
     book = SeriesBook(id="b1", media=media)
-    assert book.cover_url(server_url, auth_token) == f"{server_url}/api/items/b1/cover?token={auth_token}"
+    expected = f"{server_url}/api/items/b1/cover?token={auth_token}"
+    assert book.cover_url(server_url, auth_token) == expected
 
 
 # ---- Series ----

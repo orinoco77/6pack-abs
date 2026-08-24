@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import QWidget, QGridLayout, QScrollArea, QVBoxLayout
+from PyQt6.QtWidgets import QGridLayout, QScrollArea, QVBoxLayout, QWidget
 
 
 class FocusGrid(QWidget):
@@ -16,7 +16,9 @@ class FocusGrid(QWidget):
     item_activated = pyqtSignal(int)
     focus_changed = pyqtSignal(int)
 
-    def __init__(self, columns: int = 4, h_spacing: int = 16, v_spacing: int = 16, parent=None) -> None:
+    def __init__(
+        self, columns: int = 4, h_spacing: int = 16, v_spacing: int = 16, parent=None
+    ) -> None:
         super().__init__(parent)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._columns = columns
@@ -94,8 +96,8 @@ class FocusGrid(QWidget):
     # ------------------------------------------------------------------
 
     def keyPressEvent(self, event) -> None:
-        from sixpack.input.keyboard import key_to_action
         from sixpack.input.actions import InputAction
+        from sixpack.input.keyboard import key_to_action
 
         count = len(self._items)
         if count == 0:

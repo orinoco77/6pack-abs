@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 import sys
-from unittest.mock import MagicMock, patch, PropertyMock, call
-import pytest
+from unittest.mock import MagicMock, patch
 
+import pytest
 
 # ---- Mock mpv module ----
 

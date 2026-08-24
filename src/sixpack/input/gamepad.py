@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Callable
+from collections.abc import Callable
 
 from .actions import InputAction
 
@@ -116,7 +116,7 @@ class GamepadListener:
     def stop(self) -> None:
         self._stop_event.set()
 
-    def _listen(self, device: "evdev.InputDevice") -> None:
+    def _listen(self, device: evdev.InputDevice) -> None:
         try:
             for event in device.read_loop():
                 if self._stop_event.is_set():
@@ -124,10 +124,10 @@ class GamepadListener:
                 action = self._map_event(event)
                 if action is not None:
                     self._callback(action)
-        except (OSError, IOError) as exc:
+        except OSError as exc:
             logger.warning("Gamepad %s disconnected: %s", device.name, exc)
 
-    def _map_event(self, event: "evdev.InputEvent") -> InputAction | None:
+    def _map_event(self, event: evdev.InputEvent) -> InputAction | None:
         if not _EVDEV_AVAILABLE:
             return None
         if event.type == ecodes.EV_KEY and event.value == 1:

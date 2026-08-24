@@ -1,16 +1,15 @@
 """Tests for the Kodi-style BrowseScreen."""
 from __future__ import annotations
 
-import pytest
 from PyQt6.QtCore import Qt
 
 from sixpack.api.models import (
     Library,
     LibraryItem,
     LibraryItemMedia,
-    PodcastEpisode,
     Playlist,
     PlaylistItem,
+    PodcastEpisode,
     Series,
     SeriesBook,
 )
@@ -22,7 +21,6 @@ from sixpack.ui.screens.browse import (
     _RowWidget,
     _SidebarItem,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

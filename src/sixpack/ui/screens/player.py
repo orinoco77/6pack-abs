@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import math
 
-from PyQt6.QtCore import Qt, QTimer, QSize, Q_ARG, QMetaObject, pyqtSignal, pyqtSlot
-from PyQt6.QtGui import QPixmap, QKeyEvent
+from PyQt6.QtCore import Q_ARG, QMetaObject, QSize, Qt, QTimer, pyqtSignal, pyqtSlot
+from PyQt6.QtGui import QKeyEvent, QPixmap
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -19,7 +19,6 @@ from PyQt6.QtWidgets import (
 from sixpack.api.models import (
     Chapter,
     LibraryItem,
-    MediaProgress,
     Playlist,
     PlaylistItem,
     PodcastEpisode,
@@ -29,9 +28,8 @@ from sixpack.api.models import (
 from sixpack.player.player import AudioPlayer
 from sixpack.ui import theme
 from sixpack.ui.cover_cache import CoverCache
-from sixpack.ui.screens.chapter_select import ChapterItem, _chapter_status, _chapter_fraction
+from sixpack.ui.screens.chapter_select import ChapterItem, _chapter_fraction, _chapter_status
 from sixpack.ui.widgets.backdrop import Backdrop
-
 
 _SPEED_STEPS = [1.0, 1.25, 1.5, 1.75, 2.0]
 
@@ -79,7 +77,9 @@ class PlayerScreen(QWidget):
     # item_id, current_time, duration, is_finished, episode_id
     progress_update = pyqtSignal(str, float, float, bool, str)
 
-    def __init__(self, player: AudioPlayer, cover_cache: CoverCache | None = None, parent=None) -> None:
+    def __init__(
+        self, player: AudioPlayer, cover_cache: CoverCache | None = None, parent=None
+    ) -> None:
         super().__init__(parent)
         self._player = player
         self._cover_cache = cover_cache
@@ -681,8 +681,8 @@ class PlayerScreen(QWidget):
         self.setFocus()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        from sixpack.input.keyboard import key_to_action
         from sixpack.input.actions import InputAction
+        from sixpack.input.keyboard import key_to_action
 
         action = key_to_action(event.key(), player_mode=True)
 

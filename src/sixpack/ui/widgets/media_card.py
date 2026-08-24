@@ -1,11 +1,16 @@
 """Focusable media card widget for grid browsing."""
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal, QSize, QEvent
-from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont
+from PyQt6.QtCore import QEvent, QSize, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QPainter, QPixmap
 from PyQt6.QtWidgets import (
-    QFrame, QLabel, QVBoxLayout, QWidget,
+    QFrame,
+    QLabel,
+    QVBoxLayout,
+    QWidget,
 )
+
+from sixpack.ui import theme
 
 
 class _ElideLabel(QLabel):
@@ -26,8 +31,6 @@ class _ElideLabel(QLabel):
         except RuntimeError:
             # Widget was deleted on the C++ side during teardown; skip painting.
             pass
-
-from sixpack.ui import theme
 
 
 class _Scrim(QWidget):
@@ -200,7 +203,8 @@ class MediaCard(QFrame):
         self._art_label.setFixedSize(theme.CARD_WIDTH, theme.CARD_ART_HEIGHT)
         self._art_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._art_label.setStyleSheet(
-            f"background-color: {theme.SURFACE_HIGH}; border-radius: {theme.CARD_RADIUS}px {theme.CARD_RADIUS}px 0 0;"
+            f"background-color: {theme.SURFACE_HIGH}; "
+            f"border-radius: {theme.CARD_RADIUS}px {theme.CARD_RADIUS}px 0 0;"
         )
         self._render_placeholder()
 
@@ -225,7 +229,8 @@ class MediaCard(QFrame):
         if self._subtitle:
             sub_label = QLabel(self._subtitle)
             sub_label.setStyleSheet(
-                f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_META - 2}pt; background: transparent;"
+                f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_META - 2}pt; "
+                f"background: transparent;"
             )
             sub_label.setMaximumHeight(20)
             info_layout.addWidget(sub_label)
@@ -234,7 +239,8 @@ class MediaCard(QFrame):
         layout.addWidget(info_frame)
 
         self.setStyleSheet(
-            f"#media_card {{ border-radius: {theme.CARD_RADIUS}px; border: {theme.FOCUS_BORDER}px solid transparent; }}"
+            f"#media_card {{ border-radius: {theme.CARD_RADIUS}px; "
+            f"border: {theme.FOCUS_BORDER}px solid transparent; }}"
         )
 
     def _render_placeholder(self) -> None:
@@ -307,8 +313,8 @@ class MediaCard(QFrame):
         self._scrim.setVisible(not focused)
 
     def keyPressEvent(self, event) -> None:
-        from sixpack.input.keyboard import key_to_action
         from sixpack.input.actions import InputAction
+        from sixpack.input.keyboard import key_to_action
 
         if key_to_action(event.key()) == InputAction.SELECT:
             self.activated.emit()

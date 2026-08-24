@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import locale
 import threading
-from typing import Callable
+from collections.abc import Callable
 
 try:
     import mpv as _mpv

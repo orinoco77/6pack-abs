@@ -1,7 +1,6 @@
 """Tests for playlist UI screens using pytest-qt (headless)."""
 from __future__ import annotations
 
-import pytest
 from PyQt6.QtCore import Qt
 
 from sixpack.api.models import (
@@ -12,7 +11,6 @@ from sixpack.api.models import (
     PlaylistItem,
 )
 from sixpack.ui.screens.playlist_detail import PlaylistDetailScreen
-
 
 # ---- Fixtures ----
 
@@ -138,9 +136,11 @@ def test_playlist_detail_update_progress_refreshes_in_place(qtbot):
     playlist = _make_playlist()
     screen.load(playlist, {}, "http://abs.test:13378", "test-token")
     card_before = screen._grid._items[0]
-    screen.update_progress(
-        {"li1": MediaProgress(libraryItemId="li1", currentTime=1800.0, duration=1800.0, isFinished=True)}
-    )
+    screen.update_progress({
+        "li1": MediaProgress(
+            libraryItemId="li1", currentTime=1800.0, duration=1800.0, isFinished=True
+        )
+    })
     assert screen._grid._items[0] is card_before
 
 

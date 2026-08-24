@@ -6,14 +6,16 @@ import logging
 import os
 import sys
 
-# libmpv requires LC_NUMERIC=C (decimal point must be '.' not ',')
+# libmpv requires LC_NUMERIC=C (decimal point must be '.' not ',') -- this
+# must run before importing anything that might touch Qt/libmpv, so the
+# imports below are deliberately not at the top of the file.
 locale.setlocale(locale.LC_NUMERIC, "C")
 
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication  # noqa: E402
 
-from sixpack.config import AppConfig
-from sixpack.ui import theme
-from sixpack.ui.app import MainWindow
+from sixpack.config import AppConfig  # noqa: E402
+from sixpack.ui import theme  # noqa: E402
+from sixpack.ui.app import MainWindow  # noqa: E402
 
 
 def main() -> int:

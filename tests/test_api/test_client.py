@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import json
+
+import httpx
 import pytest
 import respx
-import httpx
 
-from sixpack.api.client import ABSClient, AuthenticationError, APIError
-
+from sixpack.api.client import ABSClient, APIError, AuthenticationError
 
 # ---- Fixtures ----
 
@@ -261,7 +261,10 @@ async def test_get_library_items(server_url, auth_token):
                     "id": "item1",
                     "libraryId": "lib1",
                     "mediaType": "book",
-                    "media": {"metadata": {"title": "Book 1"}, "chapters": [], "audioFiles": [], "tracks": []},
+                    "media": {
+                        "metadata": {"title": "Book 1"},
+                        "chapters": [], "audioFiles": [], "tracks": [],
+                    },
                 }
             ]})
         )
@@ -277,7 +280,10 @@ async def test_get_library_item(server_url, auth_token):
         "id": "item1",
         "libraryId": "lib1",
         "mediaType": "book",
-        "media": {"metadata": {"title": "Solo Book"}, "chapters": [], "audioFiles": [], "tracks": []},
+        "media": {
+            "metadata": {"title": "Solo Book"},
+            "chapters": [], "audioFiles": [], "tracks": [],
+        },
     }
     async with respx.mock(base_url=server_url) as mock:
         mock.get("/api/items/item1").mock(return_value=httpx.Response(200, json=payload))
