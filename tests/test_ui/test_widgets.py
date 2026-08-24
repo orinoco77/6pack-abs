@@ -605,6 +605,7 @@ class MockAudioPlayer:
         self.seek_forward_long_count = 0
         self.seek_back_long_count = 0
         self.stop_count = 0
+        self.stop_called = False
         self.next_chapter_count = 0
         self.prev_chapter_count = 0
 
@@ -625,6 +626,7 @@ class MockAudioPlayer:
 
     def stop(self):
         self.stop_count += 1
+        self.stop_called = True
 
     def seek_forward(self):
         self.seek_forward_count += 1
@@ -1042,6 +1044,119 @@ def test_player_screen_set_audio_tracks(qtbot):
     qtbot.addWidget(screen)
     screen.set_audio_tracks("http://abs.test/file.mp3", 0.0, "token")
     assert screen._play_btn.text() == theme.ICON_PAUSE
+
+
+def test_finish_button_is_last_control_button(qtbot):
+    from sixpack.ui.screens.player import PlayerScreen
+    mock_player = MockAudioPlayer()
+    screen = PlayerScreen(mock_player)
+    qtbot.addWidget(screen)
+    assert screen._control_buttons[-1] is screen._finish_btn
+
+
+def test_finish_button_reachable_via_left_right_select(qtbot):
+    from PyQt6.QtCore import Qt
+
+    from sixpack.ui.screens.player import PlayerScreen
+    mock_player = MockAudioPlayer()
+    screen = PlayerScreen(mock_player)
+    qtbot.addWidget(screen)
+    screen.show()
+    screen.setFocus()
+
+    for _ in range(len(screen._control_buttons) - 1):
+        qtbot.keyClick(screen, Qt.Key.Key_Right)
+
+    assert screen._control_focus_idx == screen._control_buttons.index(screen._finish_btn)
+    qtbot.keyClick(screen, Qt.Key.Key_Return)
+
+    assert screen._finish_popup.isVisible()
+
+
+def test_finish_button_click_opens_popup_with_title(qtbot):
+    from sixpack.ui.screens.player import PlayerScreen
+    mock_player = MockAudioPlayer()
+    screen = PlayerScreen(mock_player)
+    qtbot.addWidget(screen)
+    # isVisible() reflects effective on-screen visibility, which requires
+    # the whole ancestor chain (not just the popup itself) to have been
+    # shown -- see every other isVisible()-based PlayerScreen test in this
+    # suite (e.g. tests/test_ui/test_player_screen.py's chapter-overlay
+    # tests), which all call .show() first for the same reason.
+    screen.show()
+    screen._title_label.setText("My Book")
+
+    screen._finish_btn.click()
+
+    assert screen._finish_popup.isVisible()
+    assert "My Book" in screen._finish_popup._message_label.text()
+
+
+def test_confirming_finish_emits_progress_update_with_real_position(qtbot):
+    from sixpack.ui.screens.player import PlayerScreen
+    mock_player = MockAudioPlayer()
+    screen = PlayerScreen(mock_player)
+    qtbot.addWidget(screen)
+    screen._item_id = "item1"
+    screen._episode_id = "ep1"
+    screen._position = 123.0
+    screen._duration = 999.0
+
+    received = []
+    screen.progress_update.connect(lambda *args: received.append(args))
+    screen._finish_btn.click()
+    screen._finish_popup.confirmed.emit()
+
+    assert received == [("item1", 123.0, 999.0, True, "ep1")]
+
+
+def test_confirming_finish_stops_player_and_emits_track_ended(qtbot):
+    from sixpack.ui.screens.player import PlayerScreen
+    mock_player = MockAudioPlayer()
+    screen = PlayerScreen(mock_player)
+    qtbot.addWidget(screen)
+
+    ended = []
+    screen.track_ended.connect(lambda: ended.append(True))
+    screen._finish_btn.click()
+    screen._finish_popup.confirmed.emit()
+
+    assert mock_player.stop_called is True
+    assert ended == [True]
+
+
+def test_cancelling_finish_popup_does_not_stop_or_emit(qtbot):
+    from sixpack.ui.screens.player import PlayerScreen
+    mock_player = MockAudioPlayer()
+    screen = PlayerScreen(mock_player)
+    qtbot.addWidget(screen)
+
+    ended = []
+    screen.track_ended.connect(lambda: ended.append(True))
+    screen._finish_btn.click()
+    screen._finish_popup.cancelled.emit()
+
+    assert mock_player.stop_called is False
+    assert ended == []
+
+
+def test_keypress_while_finish_popup_visible_does_not_fall_through(qtbot):
+    from PyQt6.QtCore import Qt
+
+    from sixpack.ui.screens.player import PlayerScreen
+    mock_player = MockAudioPlayer()
+    screen = PlayerScreen(mock_player)
+    qtbot.addWidget(screen)
+    screen.show()
+    screen.setFocus()
+    screen._finish_btn.click()
+
+    back_received = []
+    screen.back_requested.connect(lambda: back_received.append(True))
+    qtbot.keyClick(screen, Qt.Key.Key_Backspace)
+
+    assert back_received == []
+    assert not screen._finish_popup.isVisible()
 
 
 def test_player_fmt_time_seconds():
