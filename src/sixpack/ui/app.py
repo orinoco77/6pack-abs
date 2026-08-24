@@ -78,6 +78,7 @@ class AsyncWorker(QObject):
             result = await coro
             self.result.emit(tag, result)
         except Exception as exc:
+            logger.exception("Async task '%s' failed", tag)
             self.error.emit(tag, str(exc))
 
 
