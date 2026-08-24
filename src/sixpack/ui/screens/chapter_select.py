@@ -94,7 +94,7 @@ class _ProgressStrip(QWidget):
         self._fraction = max(0.0, min(1.0, fraction))
         self.update()
 
-    def paintEvent(self, event) -> None:  # noqa: ARG002
+    def paintEvent(self, event) -> None:
         try:
             painter = QPainter(self)
             painter.fillRect(self.rect(), QColor(theme.SURFACE_HIGH))
@@ -123,7 +123,7 @@ class _FinishedCheck(QWidget):
         super().__init__(parent)
         self.setFixedSize(self._SIZE, self._SIZE)
 
-    def paintEvent(self, event) -> None:  # noqa: ARG002
+    def paintEvent(self, event) -> None:
         try:
             painter = QPainter(self)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)

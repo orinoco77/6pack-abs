@@ -111,13 +111,15 @@ async def download_and_extract(zipball_url: str, dest_dir: Path) -> Path:
     """
     zip_path = dest_dir / "release.zip"
     try:
-        async with httpx.AsyncClient(timeout=_DOWNLOAD_TIMEOUT, follow_redirects=True) as client:
-            async with client.stream("GET", zipball_url) as response:
-                if response.status_code != 200:
-                    raise UpdateError(f"Download failed: HTTP {response.status_code}")
-                with open(zip_path, "wb") as f:
-                    async for chunk in response.aiter_bytes():
-                        f.write(chunk)
+        async with (
+            httpx.AsyncClient(timeout=_DOWNLOAD_TIMEOUT, follow_redirects=True) as client,
+            client.stream("GET", zipball_url) as response,
+        ):
+            if response.status_code != 200:
+                raise UpdateError(f"Download failed: HTTP {response.status_code}")
+            with open(zip_path, "wb") as f:
+                async for chunk in response.aiter_bytes():
+                    f.write(chunk)
     except httpx.HTTPError as exc:
         raise UpdateError(f"Download failed: {exc}") from exc
 
@@ -160,7 +162,7 @@ async def install(source_dir: Path) -> None:
         stderr=asyncio.subprocess.PIPE,
     )
     try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_INSTALL_TIMEOUT)
+        _stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_INSTALL_TIMEOUT)
     except asyncio.TimeoutError:
         proc.kill()
         await proc.wait()

@@ -455,7 +455,7 @@ class MainWindow(QMainWindow):
         stats = await asyncio.gather(*(_fetch_stats(client, lib.id) for lib in libraries))
         return [
             lib
-            for lib, s in zip(libraries, stats)
+            for lib, s in zip(libraries, stats, strict=True)
             if s is None or s.total_duration > 0 or s.num_audio_tracks > 0
         ]
 

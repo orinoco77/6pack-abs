@@ -376,7 +376,7 @@ def test_media_card_no_graphics_effect_ever_installed(qtbot):
 
 def _expected_scrim_alpha():
     from sixpack.ui import theme
-    return int(round(255 * (1.0 - theme.UNFOCUSED_OPACITY)))
+    return round(255 * (1.0 - theme.UNFOCUSED_OPACITY))
 
 
 def test_media_card_no_graphics_effect_used_for_dim(qtbot):

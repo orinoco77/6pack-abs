@@ -278,10 +278,10 @@ class _Handler(BaseHTTPRequestHandler):
     # Silence BaseHTTPRequestHandler's default per-request stderr logging —
     # this is a short-lived local server, not something that needs an
     # access log.
-    def log_message(self, format: str, *args) -> None:  # noqa: A002
+    def log_message(self, format: str, *args) -> None:
         pass
 
-    def do_GET(self) -> None:  # noqa: N802 — stdlib-mandated method name
+    def do_GET(self) -> None:
         server: PairingServer = self.server.pairing_server  # type: ignore[attr-defined]
         parsed = urllib.parse.urlparse(self.path)
         query = urllib.parse.parse_qs(parsed.query)
@@ -311,7 +311,7 @@ class _Handler(BaseHTTPRequestHandler):
         else:
             self._respond(200, _EXPIRED_PAGE)
 
-    def do_POST(self) -> None:  # noqa: N802
+    def do_POST(self) -> None:
         server: PairingServer = self.server.pairing_server  # type: ignore[attr-defined]
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length).decode("utf-8")
@@ -327,7 +327,7 @@ class _Handler(BaseHTTPRequestHandler):
 
         try:
             token = asyncio.run(self._login(server_url, username, password))
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             # exc's message can embed attacker-controlled content (e.g. an
             # APIError built from a malicious server_url's raw response
             # body), so it MUST be HTML-escaped before landing in the page.

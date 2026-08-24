@@ -1,6 +1,7 @@
 """mpv-based audio player with Qt signal integration."""
 from __future__ import annotations
 
+import contextlib
 import locale
 import threading
 from collections.abc import Callable
@@ -133,10 +134,8 @@ class AudioPlayer:
             if start_time > 0:
                 # Wait briefly for mpv to start before seeking. Bounded so a
                 # stall here can't freeze the whole GUI thread.
-                try:
+                with contextlib.suppress(TimeoutError):
                     self._mpv.wait_until_playing(timeout=10)
-                except TimeoutError:
-                    pass
                 self._mpv.seek(start_time, reference="absolute")
 
     def pause(self) -> None:

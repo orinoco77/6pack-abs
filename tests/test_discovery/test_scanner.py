@@ -13,7 +13,7 @@ from sixpack.discovery.scanner import scan_for_servers
 
 
 class _FakeABSHandler(BaseHTTPRequestHandler):
-    def log_message(self, format, *args):  # noqa: A002
+    def log_message(self, format, *args):
         pass
 
     def do_GET(self):
@@ -30,7 +30,7 @@ class _FakeABSHandler(BaseHTTPRequestHandler):
 
 
 class _NotABSHandler(BaseHTTPRequestHandler):
-    def log_message(self, format, *args):  # noqa: A002
+    def log_message(self, format, *args):
         pass
 
     def do_GET(self):
@@ -50,7 +50,7 @@ def _make_json_body_handler(python_value):
     call would choke on with AttributeError."""
 
     class _Handler(BaseHTTPRequestHandler):
-        def log_message(self, format, *args):  # noqa: A002
+        def log_message(self, format, *args):
             pass
 
         def do_GET(self):

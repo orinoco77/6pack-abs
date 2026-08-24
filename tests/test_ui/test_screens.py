@@ -1020,7 +1020,7 @@ def test_chapter_screen_resume_index_in_progress(qtbot):
     screen = ChapterSelectScreen()
     qtbot.addWidget(screen)
     book = _make_box_set_book()
-    # current_time = 2000s → inside Part Two (1500–3000)
+    # current_time = 2000s → inside Part Two (1500-3000)
     prog = MediaProgress(libraryItemId="bx1", currentTime=2000.0, duration=4200.0)
     screen.load(book, _make_chapters(), prog)
     assert screen._list.currentRow() == 1
@@ -1154,7 +1154,7 @@ def test_chapter_screen_load_from_library_item_resume(qtbot):
     )
     prog = MediaProgress(libraryItemId="li1", currentTime=2000.0, duration=4200.0)
     screen.load_from_library_item(li, _make_chapters(), prog)
-    assert screen._list.currentRow() == 1  # chapter at 1500–3000
+    assert screen._list.currentRow() == 1  # chapter at 1500-3000
 
 
 def test_chapter_screen_load_from_podcast_episode(qtbot):

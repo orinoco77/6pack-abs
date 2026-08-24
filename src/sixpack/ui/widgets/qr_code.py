@@ -25,7 +25,7 @@ class QRCodeWidget(QWidget):
         self._matrix = qr.get_matrix()
         self.update()
 
-    def paintEvent(self, event) -> None:  # noqa: ARG002
+    def paintEvent(self, event) -> None:
         try:
             painter = QPainter(self)
             painter.fillRect(self.rect(), QColor("white"))
