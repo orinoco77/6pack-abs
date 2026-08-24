@@ -129,10 +129,9 @@ class _WriteAndDecodeTask(QRunnable):
         self._signals = signals
 
     def run(self) -> None:
-        try:
+        # decode-from-memory below still works even if the disk write failed
+        with contextlib.suppress(OSError):
             self._path.write_bytes(self._data)
-        except OSError:
-            pass  # decode-from-memory below still works even if the disk write failed
         img = QImage()
         img.loadFromData(self._data)
         self._signals.finished.emit(self._url, img)
