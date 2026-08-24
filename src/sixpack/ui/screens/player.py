@@ -30,6 +30,7 @@ from sixpack.ui import theme
 from sixpack.ui.cover_cache import CoverCache
 from sixpack.ui.screens.chapter_select import ChapterItem, _chapter_fraction, _chapter_status
 from sixpack.ui.widgets.backdrop import Backdrop
+from sixpack.ui.widgets.confirm_popup import ConfirmPopup
 
 _SPEED_STEPS = [1.0, 1.25, 1.5, 1.75, 2.0]
 
@@ -252,6 +253,10 @@ class PlayerScreen(QWidget):
         self._speed_btn.setFixedSize(44, 44)
         self._speed_btn.clicked.connect(self._cycle_speed)
 
+        self._finish_btn = QPushButton(theme.ICON_CHECK_CIRCLE)
+        self._finish_btn.setFixedSize(44, 44)
+        self._finish_btn.clicked.connect(self._on_finish_clicked)
+
         # This row is the screen's one, always-active focus zone (see
         # _move_control_focus/_reflect_control_focus/keyPressEvent) — real
         # Qt focus stays off every button (NoFocus), matching how every
@@ -259,7 +264,7 @@ class PlayerScreen(QWidget):
         # restyles instead of relying on real Qt focus traversal.
         self._control_buttons: list[QPushButton] = [
             self._chapters_btn, self._prev_btn, self._rew_btn, self._play_btn,
-            self._fwd_btn, self._next_btn, self._speed_btn,
+            self._fwd_btn, self._next_btn, self._speed_btn, self._finish_btn,
         ]
         for btn in self._control_buttons:
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -316,10 +321,15 @@ class PlayerScreen(QWidget):
         self._chapter_overlay.itemActivated.connect(self._on_overlay_chapter_activated)
         self._chapter_overlay.hide()
 
+        self._finish_popup = ConfirmPopup(self)
+        self._finish_popup.confirmed.connect(self._on_finish_confirmed)
+
     def resizeEvent(self, event) -> None:
         self._backdrop.setGeometry(self.rect())
         w, h = int(self.width() * 0.6), int(self.height() * 0.7)
         self._chapter_overlay.setGeometry((self.width() - w) // 2, (self.height() - h) // 2, w, h)
+        fw, fh = int(self.width() * 0.5), 180
+        self._finish_popup.setGeometry((self.width() - fw) // 2, (self.height() - fh) // 2, fw, fh)
         super().resizeEvent(event)
 
     def _connect_player(self) -> None:
@@ -614,7 +624,7 @@ class PlayerScreen(QWidget):
                     f"background-color: {theme.ACCENT}; border-radius: 40px; "
                     f"color: white; border: 3px solid {ring}; padding: 0;"
                 )
-            elif btn in (self._chapters_btn, self._speed_btn):
+            elif btn in (self._chapters_btn, self._speed_btn, self._finish_btn):
                 border = theme.ACCENT if focused else "transparent"
                 btn.setStyleSheet(
                     f"font-family: '{theme.ICON_FONT_FAMILY}'; background: transparent; "
@@ -628,6 +638,23 @@ class PlayerScreen(QWidget):
                     f"color: {theme.TEXT_SECONDARY}; border: 2px solid {border}; "
                     f"border-radius: 8px; font-size: 22pt; padding: 0;"
                 )
+
+    # ------------------------------------------------------------------
+    # Mark finished
+    # ------------------------------------------------------------------
+
+    def _on_finish_clicked(self) -> None:
+        title = self._title_label.text()
+        self._finish_popup.show_confirm(
+            f"Mark '{title}' as finished?", confirm_label="Mark Finished"
+        )
+
+    def _on_finish_confirmed(self) -> None:
+        self.progress_update.emit(
+            self._item_id, self._position, self._duration, True, self._episode_id
+        )
+        self._player.stop()
+        self.track_ended.emit()
 
     # ------------------------------------------------------------------
     # Chapter access overlay
@@ -685,6 +712,10 @@ class PlayerScreen(QWidget):
         from sixpack.input.keyboard import key_to_action
 
         action = key_to_action(event.key(), player_mode=True)
+
+        if self._finish_popup.isVisible():
+            self._finish_popup.handle_key(action)
+            return
 
         if self._chapter_overlay.isVisible():
             # While the overlay is open, it owns SELECT/UP/DOWN/BACK/MENU —

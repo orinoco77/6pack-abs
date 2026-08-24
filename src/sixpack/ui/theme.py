@@ -80,6 +80,7 @@ ICON_SPEED = ""
 ICON_PODCASTS = ""
 ICON_AUTO_STORIES = ""
 ICON_LOGOUT = ""
+ICON_CHECK_CIRCLE = ""
 
 
 def load_icon_font() -> str:

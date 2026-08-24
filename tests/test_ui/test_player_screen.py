@@ -340,12 +340,12 @@ def test_left_clamps_at_chapters_button(qtbot, screen):
     assert screen._control_buttons[screen._control_focus_idx] is screen._chapters_btn
 
 
-def test_right_clamps_at_speed_button(qtbot, screen):
+def test_right_clamps_at_last_control_button(qtbot, screen):
     screen.show()
     qtbot.waitExposed(screen)
     for _ in range(10):
         qtbot.keyClick(screen, Qt.Key.Key_Right)
-    assert screen._control_buttons[screen._control_focus_idx] is screen._speed_btn
+    assert screen._control_buttons[screen._control_focus_idx] is screen._control_buttons[-1]
 
 
 def test_select_on_next_item_emits_next_item(qtbot, screen):
