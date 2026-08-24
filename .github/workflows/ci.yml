@@ -1,0 +1,65 @@
+name: CI
+
+# Gates a PR (and, as a safety net, a direct admin push -- see
+# bump-version.yml's comments on who can push to main without a PR) with
+# the test suite and the linter. Neither ran anywhere before this workflow
+# existed -- bump-version.yml only bumps the version number, and
+# release.yml only tags/publishes -- so nothing previously verified a
+# change before it reached main.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # PyQt6's "offscreen" platform plugin (used below via
+      # QT_QPA_PLATFORM=offscreen, same as this project's local dev/test
+      # convention) still needs a handful of system shared libraries even
+      # without a real display -- not present on a bare ubuntu-latest
+      # runner by default.
+      - name: Install system Qt runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libxkbcommon-x11-0 libdbus-1-3 libfontconfig1
+
+      - name: Install the project (with dev + gamepad extras)
+        run: pip install -e ".[dev,gamepad]"
+
+      - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: pytest
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: pip install "ruff>=0.4.0"
+
+      - name: Run ruff
+        run: ruff check src/ tests/
