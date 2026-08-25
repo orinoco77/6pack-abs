@@ -83,6 +83,18 @@ def test_back_emits_back_requested(qtbot):
         qtbot.keyClick(kb, Qt.Key.Key_Escape)
 
 
+def test_key_labels_are_not_clipped_by_inherited_button_padding(qtbot):
+    # Regression test: the app-wide QPushButton stylesheet (theme.STYLESHEET)
+    # sets `padding: 10px 24px`. Since these keys are only 48px wide, that
+    # padding alone consumes the entire button and clips the label to
+    # nothing unless each key's own stylesheet resets padding to override
+    # the inherited rule.
+    kb = OnScreenKeyboard()
+    qtbot.addWidget(kb)
+    btn = kb._grid[1][0]  # "q"
+    assert "padding: 0px" in btn.styleSheet()
+
+
 def test_navigating_to_bottom_row_and_selecting_backspace(qtbot):
     kb = OnScreenKeyboard()
     qtbot.addWidget(kb)
