@@ -94,7 +94,7 @@ class OnScreenKeyboard(QWidget):
                 btn.setStyleSheet(
                     f"background: {theme.SURFACE_HIGH}; color: {theme.TEXT_PRIMARY}; "
                     f"border: 2px solid {border}; border-radius: 6px; "
-                    f"font-size: {theme.FONT_BODY}pt;"
+                    f"font-size: {theme.FONT_BODY}pt; padding: 0px;"
                 )
 
     def _move_focus_vertical(self, row: int) -> None:
