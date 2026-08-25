@@ -173,9 +173,14 @@ def test_focus_grid_card_visual_focus(qtbot):
 
 def test_focus_grid_keyboard_focus_stays_on_grid(qtbot):
     """Arrow-key navigation must not move Qt keyboard focus to individual cards."""
+    from PyQt6.QtTest import QTest
+
     grid = FocusGrid(columns=3)
     qtbot.addWidget(grid)
     grid.show()
+    qtbot.waitExposed(grid)
+    grid.activateWindow()
+    QTest.qWaitForWindowActive(grid)
     for i in range(6):
         grid.add_item(_make_card(f"Card {i}"))
     grid.set_focus_first()
@@ -183,7 +188,7 @@ def test_focus_grid_keyboard_focus_stays_on_grid(qtbot):
     # The grid itself must still hold focus, not a card widget
     from PyQt6.QtWidgets import QApplication
     focused = QApplication.focusWidget()
-    assert focused is grid or focused is None  # None acceptable in headless
+    assert focused is grid
 
 
 def test_focus_grid_card_activated_propagates(qtbot):
