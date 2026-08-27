@@ -1,7 +1,7 @@
 """A keyboard-navigable grid of focusable widgets."""
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QElapsedTimer, Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import QGridLayout, QScrollArea, QVBoxLayout, QWidget
 
 
@@ -32,12 +32,22 @@ class FocusGrid(QWidget):
         # Select-hold detection (see keyPressEvent/keyReleaseEvent below).
         # 500ms is the standard long-press threshold (matches Android's own
         # ViewConfiguration.getLongPressTimeout() default).
+        self._SELECT_HOLD_MS = 500
         self._select_hold_timer = QTimer(self)
         self._select_hold_timer.setSingleShot(True)
-        self._select_hold_timer.setInterval(500)
+        self._select_hold_timer.setInterval(self._SELECT_HOLD_MS)
         self._select_hold_timer.timeout.connect(self._on_select_hold_timeout)
         self._select_held = False
         self._select_resolved_as_hold = False
+        # Wall-clock backstop for the timer above -- if the GUI thread
+        # stalls for a stretch during the hold (e.g. heavier cover-art
+        # decode/paint for some items), the QTimer can't run during that
+        # stall even though the key is still genuinely held past the
+        # threshold. keyReleaseEvent checks elapsed time directly rather
+        # than trusting that the timer's own callback already fired,
+        # so a release processed late (after a stall) is still correctly
+        # recognized as a hold instead of silently falling back to a tap.
+        self._select_press_elapsed = QElapsedTimer()
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -141,6 +151,7 @@ class FocusGrid(QWidget):
                 self._select_held = True
                 self._select_resolved_as_hold = False
                 self._select_hold_timer.start()
+                self._select_press_elapsed.start()
         else:
             super().keyPressEvent(event)
 
@@ -156,6 +167,14 @@ class FocusGrid(QWidget):
             return
         self._select_held = False
         self._select_hold_timer.stop()
+        # Backstop for a GUI-thread stall during the hold -- see
+        # _select_press_elapsed's docstring in __init__.
+        if (
+            not self._select_resolved_as_hold
+            and self._select_press_elapsed.elapsed() >= self._SELECT_HOLD_MS
+        ):
+            self._select_resolved_as_hold = True
+            self.long_press_activated.emit(self._focused_index)
         if not self._select_resolved_as_hold:
             self.item_activated.emit(self._focused_index)
 

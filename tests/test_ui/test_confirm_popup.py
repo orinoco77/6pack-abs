@@ -2,8 +2,24 @@
 PlayerScreen and DetailGridScreen."""
 from __future__ import annotations
 
+from PyQt6.QtCore import QEvent, Qt
+from PyQt6.QtGui import QKeyEvent
+
 from sixpack.input.actions import InputAction
 from sixpack.ui.widgets.confirm_popup import ConfirmPopup
+
+
+def test_background_actually_paints_opaque(qtbot):
+    """Bug repro: ConfirmPopup subclasses plain QWidget, whose stylesheet
+    `background` property is silently NOT painted unless
+    WA_StyledBackground is set -- the same well-known Qt quirk this
+    codebase already works around in chapter_select.py and browse.py.
+    Without it, the popup's border still shows but its interior stays
+    whatever's behind it (the book grid), making the confirm/cancel text
+    hard to read exactly as reported."""
+    popup = ConfirmPopup()
+    qtbot.addWidget(popup)
+    assert popup.testAttribute(Qt.WidgetAttribute.WA_StyledBackground)
 
 
 def test_starts_hidden(qtbot):
@@ -103,6 +119,51 @@ def test_reopening_resets_focus_to_cancel(qtbot):
 
     popup.show_confirm("Second message")
     assert popup._focus_index == 0
+
+
+def test_autorepeat_select_keypress_is_ignored(qtbot):
+    """Bug repro: the popup is opened by a long-press-and-hold on Select
+    (FocusGrid's 500ms hold gesture), so the Select key is often still
+    physically down at the moment show_confirm() grabs real Qt focus. The
+    OS keeps sending auto-repeated KeyPress(Select) events for as long as
+    that key stays down, now delivered straight to this newly-focused
+    popup -- which must NOT treat one of those as a real activation, or
+    the still-held key instantly "clicks" whichever button is focused
+    (Cancel, by default) before the user ever sees the popup. Only a
+    genuine (non-autorepeat) press -- after the key has actually been
+    released and pressed again -- may activate a button."""
+    popup = ConfirmPopup()
+    qtbot.addWidget(popup)
+    popup.show_confirm("Are you sure?")
+    received = []
+    popup.cancelled.connect(lambda: received.append(True))
+    popup.confirmed.connect(lambda: received.append(True))
+
+    repeat_event = QKeyEvent(
+        QEvent.Type.KeyPress, Qt.Key.Key_Return, Qt.KeyboardModifier.NoModifier, "", True
+    )
+    popup.keyPressEvent(repeat_event)
+
+    assert received == []
+    assert popup.isVisible()
+
+
+def test_non_autorepeat_select_keypress_still_activates(qtbot):
+    """The real, deliberate press (after the long-press key was released)
+    must still work -- only autorepeat presses are ignored."""
+    popup = ConfirmPopup()
+    qtbot.addWidget(popup)
+    popup.show_confirm("Are you sure?")
+    received = []
+    popup.cancelled.connect(lambda: received.append(True))
+
+    fresh_event = QKeyEvent(
+        QEvent.Type.KeyPress, Qt.Key.Key_Return, Qt.KeyboardModifier.NoModifier, "", False
+    )
+    popup.keyPressEvent(fresh_event)
+
+    assert received == [True]
+    assert not popup.isVisible()
 
 
 def test_visible_popup_has_real_qt_focus_and_handles_keys_directly(qtbot):

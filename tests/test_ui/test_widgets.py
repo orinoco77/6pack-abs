@@ -312,6 +312,41 @@ def test_long_press_uses_currently_focused_index(qtbot):
     assert long_pressed == [2]
 
 
+def test_held_select_past_threshold_fires_long_press_even_if_timer_is_late(qtbot):
+    """Bug repro: hold-vs-tap must not depend on the QTimer callback
+    happening to fire before the key release is processed. If the GUI
+    thread is ever busy for a stretch during the hold (heavier cover art
+    decode/paint for some items, a slow synchronous call, etc.), the
+    500ms QTimer can't run during that stall -- but the physical key was
+    still genuinely held past the threshold, and keyReleaseEvent must
+    still recognize that from elapsed wall-clock time, not solely from
+    whether _select_resolved_as_hold was already set by the timer.
+
+    time.sleep() (unlike qtbot.wait()) blocks the thread without pumping
+    Qt's event loop, so it deterministically prevents the QTimer from
+    firing during the "hold" -- a faithful stand-in for a real stall."""
+    import time
+
+    grid = FocusGrid(columns=3)
+    qtbot.addWidget(grid)
+    grid.add_item(MediaCard(title="A"))
+    grid.show()
+    grid.setFocus()
+
+    activated = []
+    long_pressed = []
+    grid.item_activated.connect(lambda idx: activated.append(idx))
+    grid.long_press_activated.connect(lambda idx: long_pressed.append(idx))
+
+    qtbot.keyPress(grid, Qt.Key.Key_Return)
+    time.sleep(0.6)  # genuinely held past the 500ms threshold
+    qtbot.keyRelease(grid, Qt.Key.Key_Return)
+    qtbot.wait(50)
+
+    assert long_pressed == [0]
+    assert activated == []
+
+
 def test_non_select_keys_still_work_during_a_pending_hold(qtbot):
     """Left/Right navigation must not be blocked by an in-progress Select
     hold timer -- only release/hold detection is special-cased."""
