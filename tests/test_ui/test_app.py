@@ -477,6 +477,46 @@ def test_on_error_libraries_shows_recoverable_error_on_login_screen(window, qtbo
     assert window._login_screen._keyboard_form.isVisible()
 
 
+def test_on_result_start_session_multi_track_loads_edl_not_first_track_only(window, monkeypatch):
+    """Bug repro: a multi-file item (ABS splits some audiobooks into one
+    file per chapter) must have ALL its tracks concatenated into one mpv
+    EDL, not just the first track's file. Loading only audio_tracks[0]
+    and seeking a later chapter's absolute start time into it overshoots
+    that file's own (much shorter) duration, hits end-of-file almost
+    immediately, and the app's end-of-track handling then wrongly treats
+    the whole item as finished -- exactly the reported "second chapter
+    onward gets skipped, back to book list" bug."""
+    from sixpack.api.models import AudioTrack, PlaybackSession
+
+    played = []
+    monkeypatch.setattr(
+        window._player, "play",
+        lambda url, start_time=0.0, auth_token="": played.append((url, start_time)),
+    )
+
+    session = PlaybackSession(
+        id="sess1",
+        userId="user1",
+        libraryItemId="item1",
+        audioTracks=[
+            AudioTrack(index=1, startOffset=0.0, duration=248.0,
+                       contentUrl="/api/items/item1/file/aaa"),
+            AudioTrack(index=2, startOffset=248.0, duration=1097.0,
+                       contentUrl="/api/items/item1/file/bbb"),
+        ],
+        currentTime=1500.0,
+    )
+    window._server_url = "http://abs.test"
+    window._on_result("start_session", session)
+
+    assert len(played) == 1
+    url, start_time = played[0]
+    assert url.startswith("edl://")
+    assert "http://abs.test/api/items/item1/file/aaa,length=248.0" in url
+    assert "http://abs.test/api/items/item1/file/bbb,length=1097.0" in url
+    assert start_time == 1500.0
+
+
 def test_on_result_book_chapters_single_chapter_sets_chapters_after_play(window):
     """Round-2 regression test (Task 6 fix): the single-chapter direct-play
     path in _on_result("book_chapters", ...) must call set_chapters() AFTER

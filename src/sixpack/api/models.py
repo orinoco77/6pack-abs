@@ -325,6 +325,32 @@ class PlaybackSession(BaseModel):
 
     model_config = {"populate_by_name": True}
 
+    def playback_url(self, server_url: str) -> str:
+        """The URL AudioPlayer.play() should load for this session.
+
+        A single-file item's one AudioTrack already spans the item's whole
+        duration -- the server URL alone is enough. Multi-file items (ABS
+        splits some audiobooks into one file per chapter, each an
+        AudioTrack with its own start_offset marking its place in the
+        item's overall timeline) need every track concatenated into ONE
+        virtual timeline before playback -- built here as an mpv EDL
+        (https://mpv.io/manual/master/#edl) rather than tracked as
+        separate per-file state in this app, so every existing absolute-
+        time seek (chapter selection, the in-player chapter overlay,
+        position/duration reporting, end-of-track detection) keeps
+        working unchanged across chapter boundaries that live in
+        different underlying files.
+        """
+        if not self.audio_tracks:
+            return ""
+        if len(self.audio_tracks) == 1:
+            return f"{server_url}{self.audio_tracks[0].content_url}"
+        entries = ";".join(
+            f"{server_url}{track.content_url},length={track.duration}"
+            for track in self.audio_tracks
+        )
+        return f"edl://{entries}"
+
 
 class User(BaseModel):
     id: str

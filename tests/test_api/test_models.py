@@ -226,6 +226,51 @@ def test_playback_session():
     assert session.audio_tracks == []
 
 
+def test_playback_session_playback_url_single_track_is_plain_content_url():
+    """A single-file item's own file already spans its whole duration --
+    no need to wrap it in an EDL, just point mpv straight at the file."""
+    session = PlaybackSession(
+        id="sess1",
+        userId="user1",
+        libraryItemId="item1",
+        audioTracks=[
+            AudioTrack(index=1, startOffset=0.0, duration=3600.0,
+                       contentUrl="/api/items/item1/file/abc"),
+        ],
+    )
+    assert session.playback_url("http://abs.test") == "http://abs.test/api/items/item1/file/abc"
+
+
+def test_playback_session_playback_url_no_tracks_is_empty():
+    session = PlaybackSession(id="sess1", userId="user1", libraryItemId="item1", audioTracks=[])
+    assert session.playback_url("http://abs.test") == ""
+
+
+def test_playback_session_playback_url_multi_track_builds_edl():
+    """Multi-file items (ABS splits some audiobooks into one file per
+    chapter) must be concatenated into a single virtual mpv timeline --
+    an mpv EDL (https://mpv.io/manual/master/#edl) -- so every existing
+    absolute-time seek/position/duration/end-of-track code in this app
+    (which assumes one continuous file) keeps working unchanged across
+    chapter boundaries that live in different underlying files."""
+    session = PlaybackSession(
+        id="sess1",
+        userId="user1",
+        libraryItemId="item1",
+        audioTracks=[
+            AudioTrack(index=1, startOffset=0.0, duration=248.006531,
+                       contentUrl="/api/items/item1/file/aaa"),
+            AudioTrack(index=2, startOffset=248.006531, duration=1097.430204,
+                       contentUrl="/api/items/item1/file/bbb"),
+        ],
+    )
+    url = session.playback_url("http://abs.test")
+    assert url == (
+        "edl://http://abs.test/api/items/item1/file/aaa,length=248.006531;"
+        "http://abs.test/api/items/item1/file/bbb,length=1097.430204"
+    )
+
+
 # ---- User / LoginResponse ----
 
 def test_user_fields():
