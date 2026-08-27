@@ -39,6 +39,12 @@ class ConfirmPopup(QWidget):
         self.hide()
 
     def _build_ui(self) -> None:
+        # A plain QWidget's stylesheet `background` is silently not
+        # painted without this attribute (same quirk worked around in
+        # chapter_select.py/browse.py) -- without it this popup's
+        # interior shows whatever's behind it (the book grid) instead of
+        # theme.SURFACE, making its text hard to read.
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(
             f"background: {theme.SURFACE}; border: 2px solid {theme.ACCENT}; "
             f"border-radius: 8px;"
@@ -84,6 +90,17 @@ class ConfirmPopup(QWidget):
     def keyPressEvent(self, event) -> None:
         from sixpack.input.keyboard import key_to_action
 
+        # This popup is opened by FocusGrid's long-press-and-hold gesture
+        # (see focus_grid.py), so the Select key is usually still
+        # physically down at the moment show_confirm() grabs real Qt focus
+        # -- the OS then keeps delivering auto-repeated KeyPress events for
+        # that held key straight to this newly-focused popup. Acting on
+        # one would instantly "click" whichever button is focused (Cancel,
+        # by default) before the user ever sees the popup. Ignore repeats;
+        # only a genuine press -- after the key has actually been released
+        # -- may activate a button, matching FocusGrid's own convention.
+        if event.isAutoRepeat():
+            return
         action = key_to_action(event.key())
         self.handle_key(action)
 
