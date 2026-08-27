@@ -1078,11 +1078,15 @@ class MainWindow(QMainWindow):
                     self._player_screen.set_chapters(episode.chapters)
 
         elif tag == "start_session":
-            # result is a PlaybackSession — build URL and start playback
+            # result is a PlaybackSession — build URL and start playback.
+            # playback_url() concatenates every track into one mpv EDL for
+            # multi-file items (see its docstring) — loading only
+            # audio_tracks[0] here would overshoot that one file's own
+            # duration as soon as a later chapter's absolute start time is
+            # sought into it, firing a spurious end-of-track.
             session = result
             if session.audio_tracks and self._player_screen:
-                track = session.audio_tracks[0]
-                url = f"{self._server_url}{track.content_url}"
+                url = session.playback_url(self._server_url)
                 self._player_screen.set_audio_tracks(url, session.current_time, self._token)
 
         elif tag == "progress":
