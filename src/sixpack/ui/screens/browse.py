@@ -5,7 +5,7 @@ from enum import Enum
 from typing import Any
 
 from PyQt6 import sip
-from PyQt6.QtCore import QElapsedTimer, QRect, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QElapsedTimer, QEvent, QRect, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QGridLayout,
@@ -143,6 +143,12 @@ class _RowWidget(QWidget):
       cards    — shows the horizontal scroll of MediaCards
     """
 
+    card_hovered = pyqtSignal(int)
+    card_activated = pyqtSignal(int)
+    card_long_pressed = pyqtSignal(int)
+    see_all_hovered = pyqtSignal()
+    see_all_activated = pyqtSignal()
+
     def __init__(self, title: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._cards: list[MediaCard] = []
@@ -179,6 +185,8 @@ class _RowWidget(QWidget):
         self._see_all.setStyleSheet(
             f"color: {theme.TEXT_MUTED}; font-size: {theme.FONT_META}pt;"
         )
+        self._see_all.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._see_all.installEventFilter(self)
         tb_layout.addWidget(self._see_all)
         outer.addWidget(title_bar)
 
@@ -203,6 +211,14 @@ class _RowWidget(QWidget):
 
     # ------------------------------------------------------------------
 
+    def eventFilter(self, obj, event) -> bool:
+        if obj is self._see_all:
+            if event.type() == QEvent.Type.Enter:
+                self.see_all_hovered.emit()
+            elif event.type() == QEvent.Type.MouseButtonRelease:
+                self.see_all_activated.emit()
+        return super().eventFilter(obj, event)
+
     def clear(self) -> None:
         while self._strip_layout.count() > 1:
             it = self._strip_layout.takeAt(0)
@@ -213,6 +229,10 @@ class _RowWidget(QWidget):
 
     def add_card(self, card: MediaCard) -> None:
         card.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        idx = len(self._cards)
+        card.hovered.connect(lambda i=idx: self.card_hovered.emit(i))
+        card.activated.connect(lambda i=idx: self.card_activated.emit(i))
+        card.long_pressed.connect(lambda i=idx: self.card_long_pressed.emit(i))
         self._cards.append(card)
         self._strip_layout.insertWidget(self._strip_layout.count() - 1, card)
 
