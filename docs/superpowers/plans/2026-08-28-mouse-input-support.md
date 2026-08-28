@@ -1293,6 +1293,7 @@ Add these two new methods right after `_on_sidebar_item_hovered` (added in Task 
                 self._row_widgets[self._focused_row].unfocus()
             self._zone = "rows"
             self._focused_row = row_idx
+            self._update_sidebar_styles()
             self._update_row_styles()
         self._row_item_idxs[row_idx] = item_idx
         self._row_widgets[row_idx].focus_card(item_idx)
@@ -1304,6 +1305,7 @@ Add these two new methods right after `_on_sidebar_item_hovered` (added in Task 
                 self._row_widgets[self._focused_row].unfocus()
             self._zone = "rows"
             self._focused_row = row_idx
+            self._update_sidebar_styles()
             self._update_row_styles()
         self._set_see_all_focused(True)
         self._reflect_current()
