@@ -153,6 +153,35 @@ def test_sidebar_item_click_emits_activated(qtbot):
     assert activated == [True]
 
 
+def test_sidebar_item_double_click_emits_activated_once(qtbot):
+    """Regression: unlike MediaCard (which tracks a `_pressed` flag in
+    mousePressEvent and only emits from mouseReleaseEvent if it was set),
+    _SidebarItem has no mousePressEvent at all -- only mouseReleaseEvent,
+    unconditionally emitting on every left-button release inside its
+    bounds. A real double-click's second press arrives as a
+    MouseButtonDblClick event, a type mousePressEvent never receives (the
+    widget doesn't override mouseDoubleClickEvent) -- so a real double-
+    click is one mousePressEvent followed by TWO mouseReleaseEvents, with
+    no second mousePressEvent in between. Simulated that way here (rather
+    than via qtbot.mouseDClick, which sends only a bare
+    MouseButtonDblClick with no surrounding press/release in this Qt
+    version and so doesn't exercise mouseReleaseEvent at all) -- verified
+    against MediaCard's own already-correct behavior first, which emits
+    exactly once under this exact sequence."""
+    item = _SidebarItem("Audiobooks")
+    qtbot.addWidget(item)
+    item.show()
+
+    activated = []
+    item.activated.connect(lambda: activated.append(True))
+
+    qtbot.mousePress(item, Qt.MouseButton.LeftButton)
+    qtbot.mouseRelease(item, Qt.MouseButton.LeftButton)  # first click's release
+    qtbot.mouseRelease(item, Qt.MouseButton.LeftButton)  # second click's release
+
+    assert activated == [True]
+
+
 def test_sidebar_item_enter_emits_hovered(qtbot):
     from PyQt6.QtCore import QPointF
     from PyQt6.QtGui import QEnterEvent
@@ -295,6 +324,54 @@ def test_row_widget_see_all_hover_and_click(qtbot):
     )
     row.eventFilter(row._see_all, release)
     assert activated == [True]
+
+
+def test_row_widget_see_all_right_click_does_not_activate(qtbot):
+    """Regression: every other clickable widget in this app (MediaCard,
+    ChapterItem, _SidebarItem) guards its release handling with
+    `event.button() == Qt.MouseButton.LeftButton` before activating --
+    "See all"'s eventFilter was the only one missing that check, so a
+    right-click (or middle-click) would activate it too."""
+    from PyQt6.QtCore import QEvent, QPointF
+    from PyQt6.QtGui import QMouseEvent
+
+    row = _RowWidget("Continue Listening")
+    qtbot.addWidget(row)
+    row.show()
+
+    activated = []
+    row.see_all_activated.connect(lambda: activated.append(True))
+
+    release = QMouseEvent(
+        QEvent.Type.MouseButtonRelease, QPointF(1, 1), Qt.MouseButton.RightButton,
+        Qt.MouseButton.RightButton, Qt.KeyboardModifier.NoModifier,
+    )
+    row.eventFilter(row._see_all, release)
+
+    assert activated == []
+
+
+def test_row_widget_see_all_release_outside_rect_does_not_activate(qtbot):
+    """Regression: a release outside the "See all" chip's own bounds (e.g.
+    a press-then-drag-off) must cancel silently instead of activating --
+    every other clickable widget in this app already guards for this."""
+    from PyQt6.QtCore import QEvent, QPointF
+    from PyQt6.QtGui import QMouseEvent
+
+    row = _RowWidget("Continue Listening")
+    qtbot.addWidget(row)
+    row.show()
+
+    activated = []
+    row.see_all_activated.connect(lambda: activated.append(True))
+
+    release = QMouseEvent(
+        QEvent.Type.MouseButtonRelease, QPointF(-50, -50), Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+    )
+    row.eventFilter(row._see_all, release)
+
+    assert activated == []
 
 
 # ---------------------------------------------------------------------------
@@ -754,6 +831,113 @@ def test_exit_confirm_geometry_never_shorter_than_its_own_content(qtbot):
     assert geometry.height() >= screen._exit_overlay.sizeHint().height()
 
 
+# ---------------------------------------------------------------------------
+# BrowseScreen — Exit confirmation's modal mouse-input shield ("scrim")
+#
+# _exit_overlay is a small centered widget, not full-screen. Keyboard input
+# is already gated (keyPressEvent checks `_exit_overlay.isVisible()` before
+# any zone dispatch), but mouse input isn't gated by focus/state at all --
+# Qt delivers mouse/enter/leave events to whichever widget is topmost under
+# the cursor, regardless of what's "logically" open. Without a full-screen
+# shield underneath the overlay, a real click on a row card elsewhere on
+# screen would still reach it and fire book_selected, switching the whole
+# app to the player screen while leaving the (now hidden-behind-it) exit
+# confirmation still open underneath.
+# ---------------------------------------------------------------------------
+
+
+def test_exit_scrim_shows_and_covers_full_screen(qtbot):
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    screen.resize(1000, 700)
+    screen.load_libraries([_lib("l1", "A")], "http://s", "tok")
+    screen.show()
+
+    screen._show_exit_confirm()
+
+    assert screen._exit_scrim.isVisible()
+    assert screen._exit_scrim.geometry() == screen.rect()
+
+
+def test_exit_scrim_hidden_before_confirm_opens(qtbot):
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    assert not screen._exit_scrim.isVisible()
+
+
+def test_exit_scrim_hidden_after_back_cancels(qtbot):
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    screen.load_libraries([_lib("l1", "A")], "http://s", "tok")
+    screen.show()
+    _press(qtbot, screen, Qt.Key.Key_Up)
+    _press(qtbot, screen, Qt.Key.Key_Right)  # opens
+    assert screen._exit_scrim.isVisible()
+
+    _press(qtbot, screen, Qt.Key.Key_Backspace)  # Back cancels
+
+    assert not screen._exit_scrim.isVisible()
+
+
+def test_exit_scrim_hidden_after_selecting_no(qtbot):
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    screen.load_libraries([_lib("l1", "A")], "http://s", "tok")
+    screen.show()
+    _press(qtbot, screen, Qt.Key.Key_Up)
+    _press(qtbot, screen, Qt.Key.Key_Right)  # opens, defaults to No
+    assert screen._exit_scrim.isVisible()
+
+    _press(qtbot, screen, Qt.Key.Key_Return)  # selects No
+
+    assert not screen._exit_scrim.isVisible()
+
+
+def test_exit_scrim_shields_row_card_from_real_click(qtbot):
+    """End-to-end regression, mirroring the real bug: with the exit
+    confirmation open, a real click over a row card elsewhere on screen
+    must land on the shield, not on the card -- proving the card can never
+    receive that click (and so can never fire card_activated/book_selected)
+    while the confirmation is open, regardless of what a raw signal.emit()
+    on the card would otherwise trigger."""
+    screen = _make_screen_with_items(qtbot)
+    screen.resize(1200, 800)
+    screen.show_content()
+    screen.show()
+    qtbot.waitExposed(screen)
+    qtbot.wait(20)  # let the row/scroll layout settle before hit-testing it
+
+    card = screen._row_widgets[0]._cards[0]
+    pos = card.mapTo(screen, card.rect().center())
+    assert screen.childAt(pos) is card or card.isAncestorOf(screen.childAt(pos))
+
+    screen._show_exit_confirm()
+
+    assert screen.childAt(pos) is screen._exit_scrim
+
+
+def test_exit_scrim_no_longer_shields_card_once_confirm_closes(qtbot):
+    """Complementary to the above: closing the confirmation must restore
+    normal clickability -- the shield isn't left stuck covering the
+    screen."""
+    screen = _make_screen_with_items(qtbot)
+    screen.resize(1200, 800)
+    screen.show_content()
+    screen.show()
+    qtbot.waitExposed(screen)
+    qtbot.wait(20)
+
+    card = screen._row_widgets[0]._cards[0]
+    pos = card.mapTo(screen, card.rect().center())
+
+    screen._show_exit_confirm()
+    assert screen.childAt(pos) is screen._exit_scrim
+
+    screen._activate_exit_confirm(1)  # No
+
+    assert screen.childAt(pos) is card or card.isAncestorOf(screen.childAt(pos))
+
+
 def test_sidebar_icons_use_the_bundled_icon_font_not_raw_emoji(qtbot):
     """Regression: sidebar icons used to be raw emoji (📚🎙📖🚪), which
     don't share a consistent visual style across platforms and, per an
@@ -1203,6 +1387,27 @@ def test_row_see_all_click_triggers_see_all(qtbot):
 
     assert blocker.args[0] == RowType.CONTINUE_LISTENING
     assert screen._zone == "grid"
+
+
+def test_see_all_hover_on_new_row_clears_previous_rows_stale_highlight(qtbot):
+    """Regression: hovering row 0's "See all" then row 1's "See all" used
+    to leave BOTH rows' chips accent-highlighted simultaneously --
+    _on_see_all_hovered() reassigned _focused_row before calling
+    _set_see_all_focused(True), so the OLD row's _RowWidget never got its
+    own _see_all_is_focused flag reset (unlike _on_sidebar_item_hovered and
+    _on_row_card_hovered, which both reset it up front). Unreachable via
+    keyboard (which always clears the flag before moving rows), but
+    directly reachable via mouse since the "See all" chips sit vertically
+    stacked."""
+    screen = _make_screen_with_items(qtbot)
+
+    screen._row_widgets[0].see_all_hovered.emit()
+    assert screen._row_widgets[0]._see_all_is_focused is True
+
+    screen._row_widgets[1].see_all_hovered.emit()
+
+    assert screen._row_widgets[0]._see_all_is_focused is False
+    assert screen._row_widgets[1]._see_all_is_focused is True
 
 
 # ---------------------------------------------------------------------------

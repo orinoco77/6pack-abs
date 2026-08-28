@@ -331,6 +331,7 @@ class PlayerScreen(QWidget):
         self._chapter_overlay.setGeometry((self.width() - w) // 2, (self.height() - h) // 2, w, h)
         fw, fh = int(self.width() * 0.5), 180
         self._finish_popup.setGeometry((self.width() - fw) // 2, (self.height() - fh) // 2, fw, fh)
+        self._finish_popup.update_scrim_geometry()
         super().resizeEvent(event)
 
     def _connect_player(self) -> None:

@@ -1058,6 +1058,39 @@ def test_chapter_item_click_emits_activated(qtbot):
     assert activated == [True]
 
 
+def test_chapter_item_double_click_emits_activated_once(qtbot):
+    """Regression: unlike MediaCard (which tracks a `_pressed` flag in
+    mousePressEvent and only emits from mouseReleaseEvent if it was set),
+    ChapterItem has no mousePressEvent at all -- only mouseReleaseEvent,
+    unconditionally emitting on every left-button release inside its
+    bounds. A real double-click's second press arrives as a
+    MouseButtonDblClick event, a type mousePressEvent never receives (the
+    widget doesn't override mouseDoubleClickEvent) -- so a real double-
+    click is one mousePressEvent followed by TWO mouseReleaseEvents, with
+    no second mousePressEvent in between. Simulated that way here (rather
+    than via qtbot.mouseDClick, which sends only a bare
+    MouseButtonDblClick with no surrounding press/release in this Qt
+    version and so doesn't exercise mouseReleaseEvent at all) -- verified
+    against MediaCard's own already-correct behavior first, which emits
+    exactly once under this exact sequence."""
+    from PyQt6.QtCore import Qt
+
+    from sixpack.ui.screens.chapter_select import ChapterItem
+
+    item = ChapterItem(0, _make_chapters()[0], status="unstarted")
+    qtbot.addWidget(item)
+    item.show()
+
+    activated = []
+    item.activated.connect(lambda: activated.append(True))
+
+    qtbot.mousePress(item, Qt.MouseButton.LeftButton)
+    qtbot.mouseRelease(item, Qt.MouseButton.LeftButton)  # first click's release
+    qtbot.mouseRelease(item, Qt.MouseButton.LeftButton)  # second click's release
+
+    assert activated == [True]
+
+
 def test_chapter_item_enter_emits_hovered(qtbot):
     from PyQt6.QtCore import QPointF
     from PyQt6.QtGui import QEnterEvent

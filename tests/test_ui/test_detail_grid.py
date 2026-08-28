@@ -362,6 +362,89 @@ def test_keypress_while_popup_visible_does_not_fall_through_to_back(qtbot):
     assert not screen._finish_popup.isVisible()  # BACK cancelled the popup instead
 
 
+# ---------------------------------------------------------------------------
+# Mark-finished popup's modal mouse-input shield ("scrim")
+#
+# Real bug: opening the mark-finished ConfirmPopup and then hovering any
+# OTHER card calls FocusGrid.focus_item() -> self.setFocus() for that other
+# card (widget.hovered is wired directly in FocusGrid.add_item()), stealing
+# real Qt focus away from the still-visible popup -- after which arrow
+# keys/Enter act on the grid underneath the open popup instead of the popup
+# itself. The popup takes real focus but is a small centered widget, not
+# full-screen, so mouse routing (which Qt resolves purely by widget
+# stacking, not by who currently has focus) can still reach the other
+# cards unless something covers them too.
+# ---------------------------------------------------------------------------
+
+
+def test_finish_popup_scrim_shows_and_covers_host_screen(qtbot):
+    screen = _TestScreen()
+    qtbot.addWidget(screen)
+    screen.resize(900, 600)
+    screen._populate("My Series", _items(), {}, "http://s", "t")
+    screen.show()
+
+    screen._grid.long_press_activated.emit(0)
+
+    assert screen._finish_popup._scrim.isVisible()
+    assert screen._finish_popup._scrim.geometry() == screen.rect()
+
+
+def test_finish_popup_scrim_hidden_before_popup_opens(qtbot):
+    screen = _TestScreen()
+    qtbot.addWidget(screen)
+    screen._populate("My Series", _items(), {}, "http://s", "t")
+    assert not screen._finish_popup._scrim.isVisible()
+
+
+def test_finish_popup_scrim_hidden_after_cancel(qtbot):
+    """Uses handle_key() (Cancel is focused by default), not a raw
+    `cancelled.emit()` -- the latter would skip straight to whatever's
+    connected to the signal without going through _activate_cancel(),
+    which is what actually hides the popup and its scrim in production."""
+    from sixpack.input.actions import InputAction
+
+    screen = _TestScreen()
+    qtbot.addWidget(screen)
+    screen._populate("My Series", _items(), {}, "http://s", "t")
+    screen.show()
+    screen._grid.long_press_activated.emit(0)
+    assert screen._finish_popup._scrim.isVisible()
+
+    screen._finish_popup.handle_key(InputAction.SELECT)
+
+    assert not screen._finish_popup._scrim.isVisible()
+
+
+def test_finish_popup_scrim_shields_a_different_card_from_real_hover(qtbot):
+    """End-to-end regression proving the exact reported bug is fixed: with
+    the mark-finished popup open on item 2, a real hover over a DIFFERENT
+    card (item 0, deliberately chosen to sit outside the popup's own
+    centered rect so this test isolates the shield's own coverage rather
+    than incidental overlap with the popup itself) must land on the
+    shield, not on that card -- so FocusGrid never receives its hovered
+    signal, and self.setFocus() (the actual focus-stealing call) is never
+    reached at all."""
+    screen = _TestScreen()
+    qtbot.addWidget(screen)
+    screen.resize(900, 600)
+    screen.show()
+    qtbot.waitExposed(screen)
+    screen._populate("My Series", _items(), {}, "http://s", "t")
+    qtbot.wait(20)  # let the grid layout settle before hit-testing it
+
+    other_card = screen._grid._items[0]
+    pos = other_card.mapTo(screen, other_card.rect().center())
+    assert screen.childAt(pos) is other_card or other_card.isAncestorOf(screen.childAt(pos))
+    # Sanity: the popup's own rect must NOT already cover this point, or
+    # this test wouldn't actually be exercising the shield.
+    assert not screen._finish_popup.geometry().contains(pos)
+
+    screen._grid.long_press_activated.emit(2)  # opens the popup for item 2
+
+    assert screen.childAt(pos) is screen._finish_popup._scrim
+
+
 def test_select_at_grid_while_popup_visible_confirms_not_plays(qtbot):
     """Regression: FocusGrid holds real Qt focus in production, not the
     host screen -- Select while the popup is open must confirm/toggle the

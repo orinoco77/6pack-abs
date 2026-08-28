@@ -83,6 +83,7 @@ class DetailGridScreen(QWidget):
         self._hero_backdrop.setGeometry(self.rect())
         w, h = int(self.width() * 0.5), 180
         self._finish_popup.setGeometry((self.width() - w) // 2, (self.height() - h) // 2, w, h)
+        self._finish_popup.update_scrim_geometry()
         super().resizeEvent(event)
 
     # ------------------------------------------------------------------
