@@ -59,11 +59,15 @@ _LIB_ICONS = {
 
 
 class _SidebarItem(QWidget):
+    hovered = pyqtSignal()
+    activated = pyqtSignal()
+
     def __init__(
         self, text: str, media_type: str = "book", parent: QWidget | None = None
     ) -> None:
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(20, 12, 20, 12)
         layout.setSpacing(10)
@@ -113,6 +117,15 @@ class _SidebarItem(QWidget):
             f"font-family: '{theme.ICON_FONT_FAMILY}'; font-size: 18pt; "
             f"color: {icon_color}; background: transparent; border: none;"
         )
+
+    def enterEvent(self, event) -> None:
+        self.hovered.emit()
+        super().enterEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.pos()):
+            self.activated.emit()
+        super().mouseReleaseEvent(event)
 
 
 # ---------------------------------------------------------------------------
