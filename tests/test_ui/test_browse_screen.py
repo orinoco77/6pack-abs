@@ -449,6 +449,41 @@ def test_sidebar_right_no_libraries_stays_in_sidebar(qtbot):
     assert screen._exit_overlay.isVisible()
 
 
+def test_sidebar_item_hover_moves_sidebar_index(qtbot):
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    screen.load_libraries([_lib("l1", "A"), _lib("l2", "B")], "http://s", "tok")
+    screen.show()
+    screen._zone = "rows"  # start somewhere other than sidebar
+
+    screen._sidebar_items[2].hovered.emit()
+
+    assert screen._zone == "sidebar"
+    assert screen._sidebar_idx == 2
+
+
+def test_sidebar_item_click_on_library_enters_rows(qtbot):
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    screen.load_libraries([_lib("l1", "A")], "http://s", "tok")
+    screen.show()
+
+    screen._sidebar_items[1].activated.emit()
+
+    assert screen._zone == "rows"
+
+
+def test_sidebar_item_click_on_exit_shows_exit_confirm(qtbot):
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    screen.load_libraries([_lib("l1", "A")], "http://s", "tok")
+    screen.show()
+
+    screen._sidebar_items[0].activated.emit()
+
+    assert screen._exit_overlay.isVisible()
+
+
 # ---------------------------------------------------------------------------
 # BrowseScreen — Exit sidebar item + confirmation
 # ---------------------------------------------------------------------------

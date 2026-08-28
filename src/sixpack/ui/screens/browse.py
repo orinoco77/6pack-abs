@@ -447,6 +447,8 @@ class BrowseScreen(QWidget):
         # exists even before any libraries have loaded, so there's always a
         # way to quit even if the library list never populates.
         self._exit_item = _SidebarItem("Exit", media_type="exit")
+        self._exit_item.hovered.connect(lambda: self._on_sidebar_item_hovered(0))
+        self._exit_item.activated.connect(lambda: self._activate_sidebar_item(0))
         self._sidebar_items.append(self._exit_item)
         self._sidebar_items_layout.addWidget(self._exit_item)
 
@@ -738,6 +740,9 @@ class BrowseScreen(QWidget):
         self._sidebar_items_layout.addWidget(self._sidebar_divider)
         for lib in self._libraries:
             item = _SidebarItem(lib.name, media_type=getattr(lib, "media_type", "book"))
+            idx = len(self._sidebar_items)
+            item.hovered.connect(lambda i=idx: self._on_sidebar_item_hovered(i))
+            item.activated.connect(lambda i=idx: self._activate_sidebar_item(i))
             self._sidebar_items.append(item)
             self._sidebar_items_layout.addWidget(item)
         # Without this, items expand to fill the column's remaining vertical
@@ -1057,10 +1062,26 @@ class BrowseScreen(QWidget):
             else:
                 self._start_loading_selected_library()
         elif action in (InputAction.RIGHT, InputAction.SELECT):
-            if self._sidebar_idx == 0:
-                self._show_exit_confirm()
-            elif self._libraries:
-                self._enter_rows()
+            self._activate_sidebar_item(self._sidebar_idx)
+
+    def _activate_sidebar_item(self, idx: int) -> None:
+        if idx == 0:
+            self._show_exit_confirm()
+        elif self._libraries:
+            self._enter_rows()
+
+    def _on_sidebar_item_hovered(self, idx: int) -> None:
+        if self._zone != "sidebar":
+            if self._zone == "rows":
+                self._row_widgets[self._focused_row].unfocus()
+            self._zone = "sidebar"
+            self._update_row_styles()
+        self._sidebar_idx = idx
+        self._update_sidebar_styles()
+        if idx == 0:
+            self._reflect_current()
+        else:
+            self._start_loading_selected_library()
 
     def _start_loading_selected_library(self) -> None:
         """Eagerly trigger a content fetch for the currently highlighted library."""
