@@ -1071,6 +1071,10 @@ class BrowseScreen(QWidget):
             self._enter_rows()
 
     def _on_sidebar_item_hovered(self, idx: int) -> None:
+        if self._see_all_focused:
+            self._set_see_all_focused(False)
+        if self._zone == "grid":
+            self._exit_grid()
         if self._zone != "sidebar":
             if self._zone == "rows":
                 self._row_widgets[self._focused_row].unfocus()
