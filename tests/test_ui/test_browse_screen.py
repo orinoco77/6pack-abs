@@ -140,6 +140,34 @@ def test_sidebar_item_set_state_selected_not_active(qtbot):
     assert item._label.text() == "Audiobooks"
 
 
+def test_sidebar_item_click_emits_activated(qtbot):
+    item = _SidebarItem("Audiobooks")
+    qtbot.addWidget(item)
+    item.show()
+
+    activated = []
+    item.activated.connect(lambda: activated.append(True))
+
+    qtbot.mouseClick(item, Qt.MouseButton.LeftButton)
+
+    assert activated == [True]
+
+
+def test_sidebar_item_enter_emits_hovered(qtbot):
+    from PyQt6.QtCore import QPointF
+    from PyQt6.QtGui import QEnterEvent
+
+    item = _SidebarItem("Audiobooks")
+    qtbot.addWidget(item)
+
+    hovered = []
+    item.hovered.connect(lambda: hovered.append(True))
+
+    item.enterEvent(QEnterEvent(QPointF(0, 0), QPointF(0, 0), QPointF(0, 0)))
+
+    assert hovered == [True]
+
+
 # ---------------------------------------------------------------------------
 # _RowWidget
 # ---------------------------------------------------------------------------
