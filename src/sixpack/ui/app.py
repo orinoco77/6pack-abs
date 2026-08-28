@@ -250,6 +250,10 @@ class MainWindow(QMainWindow):
         self._browse_screen.podcast_selected.connect(self._on_podcast_selected)
         self._browse_screen.podcast_episode_selected.connect(self._on_podcast_episode_selected)
         self._browse_screen.exit_requested.connect(self.close)
+        self._browse_screen.finish_progress_requested.connect(
+            self._on_browse_finish_progress_requested
+        )
+        self._browse_screen.finished_changed.connect(self._on_progress_update)
         self._detail_screen.episode_activated.connect(self._on_episode_activated)
         self._detail_screen.back_requested.connect(self._show_browse)
         self._detail_screen.finished_changed.connect(self._on_progress_update)
@@ -767,6 +771,22 @@ class MainWindow(QMainWindow):
         progress = await client.get_progress(show.id, episode.id)
         return show, episode, progress
 
+    def _on_browse_finish_progress_requested(self, item: LibraryItem) -> None:
+        self._worker.run("browse_finish_progress", self._async_get_browse_item_progress(item))
+
+    async def _async_get_browse_item_progress(
+        self, item: LibraryItem
+    ) -> tuple[LibraryItem, MediaProgress | None]:
+        # (item, progress) as a self-contained tuple, same reasoning as
+        # _async_get_podcast_progress above — BrowseScreen re-checks the
+        # item is still the one it's waiting on itself (see
+        # show_finish_confirm's docstring) rather than this handler
+        # guessing at still-current UI state.
+        client = self._client
+        episode_id = item.recent_episode.id if item.recent_episode else None
+        progress = await client.get_progress(item.id, episode_id)
+        return item, progress
+
     # ------------------------------------------------------------------
     # Chapter selection
     # ------------------------------------------------------------------
@@ -1076,6 +1096,10 @@ class MainWindow(QMainWindow):
                 self._on_podcast_episode_play_requested(episode, start_time)
                 if self._player_screen:
                     self._player_screen.set_chapters(episode.chapters)
+
+        elif tag == "browse_finish_progress":
+            item, progress = result
+            self._browse_screen.show_finish_confirm(item, progress)
 
         elif tag == "start_session":
             # result is a PlaybackSession — build URL and start playback.

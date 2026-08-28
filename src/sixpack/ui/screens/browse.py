@@ -5,7 +5,7 @@ from enum import Enum
 from typing import Any
 
 from PyQt6 import sip
-from PyQt6.QtCore import QRect, Qt, pyqtSignal
+from PyQt6.QtCore import QElapsedTimer, QRect, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QGridLayout,
@@ -24,6 +24,7 @@ from sixpack.input.keyboard import key_to_action
 from sixpack.ui import theme
 from sixpack.ui.cover_cache import CoverCache, dominant_color
 from sixpack.ui.widgets.backdrop import Backdrop
+from sixpack.ui.widgets.confirm_popup import ConfirmPopup
 from sixpack.ui.widgets.media_card import MediaCard
 
 _SIDEBAR_W = 220
@@ -279,6 +280,12 @@ class BrowseScreen(QWidget):
     library_changed = pyqtSignal(object)                  # Library — new library selected
     see_all_requested = pyqtSignal(object)                # RowType — full uncapped dataset wanted
     exit_requested = pyqtSignal()                         # user confirmed Exit in the sidebar
+    # LibraryItem — a long-press wants to mark/unmark it finished, but its
+    # current progress isn't known here (unlike DetailGridScreen, rows are
+    # never preloaded with progress) -- app.py fetches it and calls back
+    # via show_finish_confirm().
+    finish_progress_requested = pyqtSignal(object)
+    finished_changed = pyqtSignal(str, float, float, bool, str)
 
     def __init__(
         self,
@@ -311,6 +318,24 @@ class BrowseScreen(QWidget):
         self._grid_cards: list[MediaCard] = []
 
         self._sidebar_items: list[_SidebarItem] = []
+
+        # Select-hold detection for the mark-finished long-press gesture —
+        # mirrors FocusGrid's identical mechanism (see its docstring/comments
+        # for why both a QTimer and a QElapsedTimer backstop are needed).
+        # BrowseScreen has no FocusGrid of its own (rows/grid are plain
+        # MediaCards under its own zone-based key handling), so the same
+        # gesture has to be reimplemented here rather than inherited.
+        self._SELECT_HOLD_MS = 500
+        self._select_hold_timer = QTimer(self)
+        self._select_hold_timer.setSingleShot(True)
+        self._select_hold_timer.setInterval(self._SELECT_HOLD_MS)
+        self._select_hold_timer.timeout.connect(self._on_select_hold_timeout)
+        self._select_held = False
+        self._select_resolved_as_hold = False
+        self._select_press_elapsed = QElapsedTimer()
+        self._pending_finish_item: Any | None = None
+        self._pending_finish_progress: Any | None = None
+
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -332,6 +357,12 @@ class BrowseScreen(QWidget):
         root.addWidget(self._build_content(), stretch=1)
         self._build_hero()  # overlay child on the content pane
         self._build_exit_confirm()  # overlay child, hidden until Exit is selected
+        self._build_finish_confirm()  # overlay child, hidden until a long-press fires
+
+    def _build_finish_confirm(self) -> None:
+        self._finish_popup = ConfirmPopup(self)
+        self._finish_popup.confirmed.connect(self._on_finish_confirmed)
+        self._finish_popup.cancelled.connect(self._on_finish_cancelled)
 
     def resizeEvent(self, event) -> None:
         self._backdrop.setGeometry(self.rect())
@@ -339,6 +370,9 @@ class BrowseScreen(QWidget):
             self._hero.setGeometry(self._hero_geometry())
         if hasattr(self, "_exit_overlay"):
             self._exit_overlay.setGeometry(self._exit_confirm_geometry())
+        if hasattr(self, "_finish_popup"):
+            w, h = int(self.width() * 0.5), 180
+            self._finish_popup.setGeometry((self.width() - w) // 2, (self.height() - h) // 2, w, h)
         super().resizeEvent(event)
 
     def _build_hero(self) -> None:
@@ -795,6 +829,92 @@ class BrowseScreen(QWidget):
             return
         self._reflect_focus(self._current_focused_item())
 
+    def _current_row_type(self) -> RowType | None:
+        if self._zone == "rows":
+            return self._row_types[self._focused_row]
+        if self._zone == "grid":
+            return self._row_types[self._grid_row_idx]
+        return None
+
+    def _current_focused_card(self) -> MediaCard | None:
+        if self._zone == "rows":
+            idx = self._row_item_idxs[self._focused_row]
+            cards = self._row_widgets[self._focused_row]._cards
+            if 0 <= idx < len(cards):
+                return cards[idx]
+        elif self._zone == "grid":
+            if 0 <= self._grid_focus_idx < len(self._grid_cards):
+                return self._grid_cards[self._grid_focus_idx]
+        return None
+
+    # ------------------------------------------------------------------
+    # Mark finished (long-press on a Continue Listening / Recently Added
+    # card — Series/Playlists rows hold Series/Playlist objects, not
+    # individual items, so "finished" has no meaning there; drilling into
+    # SeriesDetailScreen/PlaylistDetailScreen is how those get marked)
+    # ------------------------------------------------------------------
+
+    def _on_select_long_press(self) -> None:
+        if self._current_row_type() not in (RowType.CONTINUE_LISTENING, RowType.RECENTLY_ADDED):
+            return
+        item = self._current_focused_item()
+        if item is None:
+            return
+        self._pending_finish_item = item
+        self._pending_finish_progress = None
+        self.finish_progress_requested.emit(item)
+
+    def show_finish_confirm(self, item: Any, progress: Any) -> None:
+        """Called back by app.py once the on-demand progress fetch for
+        `item` (requested via finish_progress_requested) resolves."""
+        if self._pending_finish_item is not item:
+            return  # superseded by a later long-press before this one landed
+        if self._current_row_type() not in (
+            RowType.CONTINUE_LISTENING, RowType.RECENTLY_ADDED
+        ) or self._current_focused_item() is not item:
+            # User navigated away while the fetch was in flight.
+            self._pending_finish_item = None
+            return
+        self._pending_finish_progress = progress
+        finished = bool(progress.is_finished) if progress else False
+        title = getattr(item, "title", "")
+        if finished:
+            self._finish_popup.show_confirm(
+                f"Mark '{title}' as unfinished?", confirm_label="Mark Unfinished"
+            )
+        else:
+            self._finish_popup.show_confirm(
+                f"Mark '{title}' as finished?", confirm_label="Mark Finished"
+            )
+
+    def _on_finish_confirmed(self) -> None:
+        item = self._pending_finish_item
+        progress = self._pending_finish_progress
+        self._pending_finish_item = None
+        self._pending_finish_progress = None
+        self.setFocus()
+        if item is None:
+            return
+        finished = bool(progress.is_finished) if progress else False
+        new_finished = not finished
+        duration = item.duration
+        if new_finished:
+            current_time = duration
+        elif progress is not None and progress.current_time < duration:
+            current_time = progress.current_time
+        else:
+            current_time = 0.0
+        episode_id = item.recent_episode.id if getattr(item, "recent_episode", None) else None
+        self.finished_changed.emit(item.id, current_time, duration, new_finished, episode_id or "")
+        card = self._current_focused_card()
+        if card is not None:
+            card.set_finished(new_finished)
+
+    def _on_finish_cancelled(self) -> None:
+        self._pending_finish_item = None
+        self._pending_finish_progress = None
+        self.setFocus()
+
     def _reflect_library(self) -> None:
         """Sidebar zone: nothing in the content area is selected yet, so
         the hero shows the current library's name instead of previewing
@@ -851,12 +971,57 @@ class BrowseScreen(QWidget):
         if self._exit_overlay.isVisible():
             self._handle_exit_confirm(action)
             return
+        # Select in rows/grid is resolved on release (tap vs. hold — see
+        # keyReleaseEvent) so a long hold can trigger mark-finished instead
+        # of activating the item. The "See all" pseudo-item is excluded:
+        # it isn't a real media item, and test_see_all_select_emits_signal
+        # (plus real remote UX) expects it to activate immediately on press,
+        # like it always has.
+        if (
+            action == InputAction.SELECT
+            and self._zone in ("rows", "grid")
+            and not (self._zone == "rows" and self._see_all_focused)
+        ):
+            if not event.isAutoRepeat() and not self._select_held:
+                self._select_held = True
+                self._select_resolved_as_hold = False
+                self._select_hold_timer.start()
+                self._select_press_elapsed.start()
+            return
         if self._zone == "sidebar":
             self._handle_sidebar(action)
         elif self._zone == "rows":
             self._handle_rows(action)
         elif self._zone == "grid":
             self._handle_grid(action)
+
+    def keyReleaseEvent(self, event) -> None:
+        if event.isAutoRepeat():
+            super().keyReleaseEvent(event)
+            return
+        action = key_to_action(event.key())
+        if action != InputAction.SELECT or not self._select_held:
+            super().keyReleaseEvent(event)
+            return
+        self._select_held = False
+        self._select_hold_timer.stop()
+        # Wall-clock backstop for a GUI-thread stall during the hold — see
+        # FocusGrid._select_press_elapsed's docstring for the full reasoning.
+        if (
+            not self._select_resolved_as_hold
+            and self._select_press_elapsed.elapsed() >= self._SELECT_HOLD_MS
+        ):
+            self._select_resolved_as_hold = True
+            self._on_select_long_press()
+        if not self._select_resolved_as_hold:
+            if self._zone == "rows":
+                self._handle_rows(InputAction.SELECT)
+            elif self._zone == "grid":
+                self._handle_grid(InputAction.SELECT)
+
+    def _on_select_hold_timeout(self) -> None:
+        self._select_resolved_as_hold = True
+        self._on_select_long_press()
 
     def _handle_sidebar(self, action: InputAction) -> None:
         n = len(self._sidebar_items)
