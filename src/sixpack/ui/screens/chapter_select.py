@@ -420,6 +420,10 @@ class ChapterSelectScreen(QWidget):
             list_item.setData(Qt.ItemDataRole.UserRole, chapter)
             self._list.addItem(list_item)
             self._list.setItemWidget(list_item, ch_widget)
+            ch_widget.hovered.connect(lambda i=i: self._list.setCurrentRow(i))
+            ch_widget.activated.connect(
+                lambda li=list_item: self._on_item_activated(li)
+            )
 
         if self._list.count():
             idx = self._find_resume_index(current_time, is_finished)
