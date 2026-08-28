@@ -120,6 +120,7 @@ class MediaCard(QFrame):
     """
 
     activated = pyqtSignal()
+    hovered = pyqtSignal()
 
     _PLACEHOLDER_GLYPH: ClassVar[dict[str, str]] = {"book": "📖", "podcast": "🎙"}
 
@@ -313,6 +314,10 @@ class MediaCard(QFrame):
             _Scrim.color_for_opacity(1.0 if focused else theme.UNFOCUSED_OPACITY)
         )
         self._scrim.setVisible(not focused)
+
+    def enterEvent(self, event) -> None:
+        self.hovered.emit()
+        super().enterEvent(event)
 
     def keyPressEvent(self, event) -> None:
         from sixpack.input.actions import InputAction

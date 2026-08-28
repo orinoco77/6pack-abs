@@ -483,6 +483,21 @@ def test_media_card_mouse_press_no_crash(qtbot):
     qtbot.mouseClick(card, Qt.MouseButton.LeftButton)  # should not crash
 
 
+def test_media_card_enter_emits_hovered(qtbot):
+    from PyQt6.QtCore import QPointF
+    from PyQt6.QtGui import QEnterEvent
+
+    card = MediaCard(title="Test")
+    qtbot.addWidget(card)
+
+    hovered = []
+    card.hovered.connect(lambda: hovered.append(True))
+
+    card.enterEvent(QEnterEvent(QPointF(0, 0), QPointF(0, 0), QPointF(0, 0)))
+
+    assert hovered == [True]
+
+
 def test_media_card_subtitle(qtbot):
     card = MediaCard(title="Drama", subtitle="Season 1")
     qtbot.addWidget(card)
