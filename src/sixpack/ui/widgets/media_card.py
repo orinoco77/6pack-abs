@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from PyQt6.QtCore import QEvent, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QElapsedTimer, QEvent, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QFrame,
@@ -121,8 +121,10 @@ class MediaCard(QFrame):
 
     activated = pyqtSignal()
     hovered = pyqtSignal()
+    long_pressed = pyqtSignal()
 
     _PLACEHOLDER_GLYPH: ClassVar[dict[str, str]] = {"book": "📖", "podcast": "🎙"}
+    _HOLD_MS = 500
 
     def __init__(
         self,
@@ -145,6 +147,19 @@ class MediaCard(QFrame):
         self._media_type = media_type
         self._pixmap: QPixmap | None = None
         self._focused = False
+
+        # Mouse-hold detection, mirroring FocusGrid's own 500ms
+        # hold-vs-click pattern (QTimer + QElapsedTimer wall-clock
+        # backstop, so a GUI-thread stall during the hold can't make a
+        # genuine hold silently resolve as a click -- see FocusGrid's
+        # keyReleaseEvent docstring for the full reasoning this mirrors).
+        self._pressed = False
+        self._press_resolved_as_hold = False
+        self._hold_timer = QTimer(self)
+        self._hold_timer.setSingleShot(True)
+        self._hold_timer.setInterval(self._HOLD_MS)
+        self._hold_timer.timeout.connect(self._on_hold_timeout)
+        self._press_elapsed = QElapsedTimer()
 
         self._build_ui()
 
@@ -328,5 +343,35 @@ class MediaCard(QFrame):
         else:
             super().keyPressEvent(event)
 
-    def mouseDoubleClickEvent(self, event) -> None:
-        self.activated.emit()
+    def mousePressEvent(self, event) -> None:
+        if event.button() != Qt.MouseButton.LeftButton:
+            super().mousePressEvent(event)
+            return
+        self._pressed = True
+        self._press_resolved_as_hold = False
+        self._hold_timer.start()
+        self._press_elapsed.start()
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() != Qt.MouseButton.LeftButton or not self._pressed:
+            super().mouseReleaseEvent(event)
+            return
+        self._pressed = False
+        self._hold_timer.stop()
+        if (
+            not self._press_resolved_as_hold
+            and self._press_elapsed.elapsed() >= self._HOLD_MS
+        ):
+            self._press_resolved_as_hold = True
+            self.long_pressed.emit()
+        if self._press_resolved_as_hold:
+            return
+        # A release outside the card (dragged off before letting go)
+        # cancels silently, matching normal button behavior -- mouse-only,
+        # there's no keyboard equivalent of "drag off" to keep in sync with.
+        if self.rect().contains(event.pos()):
+            self.activated.emit()
+
+    def _on_hold_timeout(self) -> None:
+        self._press_resolved_as_hold = True
+        self.long_pressed.emit()

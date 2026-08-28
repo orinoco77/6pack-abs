@@ -498,6 +498,67 @@ def test_media_card_enter_emits_hovered(qtbot):
     assert hovered == [True]
 
 
+def test_media_card_single_click_emits_activated(qtbot):
+    card = MediaCard(title="Test")
+    qtbot.addWidget(card)
+    card.show()
+
+    activated = []
+    long_pressed = []
+    card.activated.connect(lambda: activated.append(True))
+    card.long_pressed.connect(lambda: long_pressed.append(True))
+
+    qtbot.mouseClick(card, Qt.MouseButton.LeftButton)
+
+    assert activated == [True]
+    assert long_pressed == []
+
+
+def test_media_card_held_click_emits_long_pressed_not_activated(qtbot):
+    import time
+
+    card = MediaCard(title="Test")
+    qtbot.addWidget(card)
+    card.show()
+
+    activated = []
+    long_pressed = []
+    card.activated.connect(lambda: activated.append(True))
+    card.long_pressed.connect(lambda: long_pressed.append(True))
+
+    qtbot.mousePress(card, Qt.MouseButton.LeftButton)
+    # A plain time.sleep (unlike qtbot.wait) blocks the thread without
+    # pumping Qt's event loop, so it deterministically prevents the
+    # 500ms hold QTimer from firing during the "hold" -- proving the
+    # wall-clock elapsed-time backstop (not just the timer callback)
+    # is what resolves this as a hold, mirroring FocusGrid's own
+    # stalled-main-thread regression test.
+    time.sleep(0.6)
+    qtbot.mouseRelease(card, Qt.MouseButton.LeftButton)
+
+    assert long_pressed == [True]
+    assert activated == []
+
+
+def test_media_card_release_outside_rect_cancels_silently(qtbot):
+    from PyQt6.QtCore import QPoint
+
+    card = MediaCard(title="Test")
+    qtbot.addWidget(card)
+    card.show()
+
+    activated = []
+    long_pressed = []
+    card.activated.connect(lambda: activated.append(True))
+    card.long_pressed.connect(lambda: long_pressed.append(True))
+
+    qtbot.mousePress(card, Qt.MouseButton.LeftButton)
+    qtbot.mouseRelease(card, Qt.MouseButton.LeftButton, pos=QPoint(-10, -10))
+
+    assert activated == []
+    assert long_pressed == []
+
+
 def test_media_card_subtitle(qtbot):
     card = MediaCard(title="Drama", subtitle="Season 1")
     qtbot.addWidget(card)
