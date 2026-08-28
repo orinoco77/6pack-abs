@@ -1090,6 +1090,56 @@ def test_on_podcast_episode_selected_calls_progress_fetch_with_show_and_episode(
     assert calls == [(show, episode)]
 
 
+def test_on_browse_finish_progress_requested_calls_progress_fetch_with_item(
+    window, monkeypatch
+):
+    """BrowseScreen.finish_progress_requested must be wired to a real
+    progress fetch — this is the fix for mark-as-finished silently doing
+    nothing for Continue Listening / Recently Added books (BrowseScreen
+    never had the long-press gesture, let alone this fetch, before)."""
+    from sixpack.api.models import LibraryItem, LibraryItemMedia
+
+    item = LibraryItem(
+        id="i1", libraryId="lib1", mediaType="book",
+        media=LibraryItemMedia(metadata={"title": "A Book"}, duration=3600.0),
+    )
+
+    async def _fake_result():
+        return item, None
+
+    calls = []
+    monkeypatch.setattr(
+        window, "_async_get_browse_item_progress",
+        lambda *args: calls.append(args) or _fake_result(),
+    )
+
+    window._browse_screen.finish_progress_requested.emit(item)
+
+    assert calls == [(item,)]
+
+
+def test_on_result_browse_finish_progress_calls_show_finish_confirm(window, monkeypatch):
+    from sixpack.api.models import LibraryItem, LibraryItemMedia, MediaProgress
+
+    item = LibraryItem(
+        id="i1", libraryId="lib1", mediaType="book",
+        media=LibraryItemMedia(metadata={"title": "A Book"}, duration=3600.0),
+    )
+    progress = MediaProgress(
+        libraryItemId="i1", isFinished=True, currentTime=3600.0, duration=3600.0,
+    )
+
+    received = []
+    monkeypatch.setattr(
+        window._browse_screen, "show_finish_confirm",
+        lambda i, p: received.append((i, p)),
+    )
+
+    window._on_result("browse_finish_progress", (item, progress))
+
+    assert received == [(item, progress)]
+
+
 def test_on_result_podcast_continue_progress_none_show_is_noop(window):
     """Defensive guard (final whole-plan review, Fix 12): a None show in
     the result tuple must not crash — mirrors the existing None-check in

@@ -7,6 +7,7 @@ from sixpack.api.models import (
     Library,
     LibraryItem,
     LibraryItemMedia,
+    MediaProgress,
     Playlist,
     PlaylistItem,
     PodcastEpisode,
@@ -73,6 +74,13 @@ def _podcast_show_with_recent_episode(item_id="show1", name="My Show"):
         id=item_id, libraryId="lib1", mediaType="podcast",
         media=LibraryItemMedia(metadata={"title": name}),
         recentEpisode=episode,
+    )
+
+
+def _li_dur(item_id, title, duration):
+    return LibraryItem(
+        id=item_id, libraryId="lib1", mediaType="book",
+        media=LibraryItemMedia(metadata={"title": title}, duration=duration),
     )
 
 
@@ -1504,3 +1512,222 @@ def test_emit_item_plain_book_still_emits_book_selected(qtbot):
     screen.book_selected.connect(received.append)
     screen._emit_item(RowType.RECENTLY_ADDED, item)
     assert received == [item]
+
+
+# ---------------------------------------------------------------------------
+# Mark finished — long-press on a Continue Listening / Recently Added card
+#
+# Regression coverage for: mark-as-finished only worked from
+# SeriesDetailScreen (via DetailGridScreen's FocusGrid long-press), not for
+# standalone books/podcasts encountered directly in BrowseScreen's own rows
+# or "See all" grid, because BrowseScreen never implemented the long-press
+# gesture at all.
+# ---------------------------------------------------------------------------
+
+def _make_screen_with_durationed_item(qtbot, item=None):
+    item = item or _li_dur("i1", "CL1", 3600.0)
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    screen.load_libraries([_lib("l1", "A")], "http://s", "tok")
+    screen.set_row_items(RowType.CONTINUE_LISTENING, [item])
+    screen.set_row_items(RowType.RECENTLY_ADDED, [])
+    screen.set_row_items(RowType.SERIES, [])
+    screen.set_row_items(RowType.PLAYLISTS, [])
+    screen.show()
+    screen._zone = "rows"
+    screen._focused_row = 0
+    screen._update_row_styles()
+    return screen, item
+
+
+def test_long_press_on_continue_listening_card_requests_finish_progress(qtbot):
+    screen = _make_screen_with_items(qtbot)
+    screen.setFocus()
+    requested = []
+    screen.finish_progress_requested.connect(requested.append)
+
+    qtbot.keyPress(screen, Qt.Key.Key_Return)
+    qtbot.wait(600)  # past the 500ms hold threshold
+    qtbot.keyRelease(screen, Qt.Key.Key_Return)
+    qtbot.wait(50)
+
+    assert len(requested) == 1
+    assert requested[0].id == "i1"
+
+
+def test_short_tap_on_continue_listening_card_still_activates_it(qtbot):
+    """Regression guard: adding the long-press gesture must not break the
+    existing short-tap-to-play behavior."""
+    screen = _make_screen_with_items(qtbot)
+    screen.setFocus()
+    selected = []
+    requested = []
+    screen.book_selected.connect(selected.append)
+    screen.finish_progress_requested.connect(requested.append)
+
+    qtbot.keyClick(screen, Qt.Key.Key_Return)  # press+release, near-instant
+    qtbot.wait(50)
+
+    assert len(selected) == 1
+    assert selected[0].id == "i1"
+    assert requested == []
+
+
+def test_long_press_on_series_row_does_not_request_finish_progress(qtbot):
+    """Series/Playlists rows hold Series/Playlist objects, not individual
+    items -- long-press there must be a no-op, not crash or misfire."""
+    screen = _make_screen_with_items(qtbot)
+    screen._handle_rows(InputAction.DOWN)
+    screen._handle_rows(InputAction.DOWN)  # row 2 = SERIES
+    screen.setFocus()
+    requested = []
+    screen.finish_progress_requested.connect(requested.append)
+
+    qtbot.keyPress(screen, Qt.Key.Key_Return)
+    qtbot.wait(600)
+    qtbot.keyRelease(screen, Qt.Key.Key_Return)
+    qtbot.wait(50)
+
+    assert requested == []
+
+
+def test_long_press_in_grid_zone_requests_finish_progress(qtbot):
+    screen = _make_screen_in_grid(qtbot, row_idx=0)  # Continue Listening
+    requested = []
+    screen.finish_progress_requested.connect(requested.append)
+
+    qtbot.keyPress(screen, Qt.Key.Key_Return)
+    qtbot.wait(600)
+    qtbot.keyRelease(screen, Qt.Key.Key_Return)
+    qtbot.wait(50)
+
+    assert len(requested) == 1
+    assert requested[0].id == "i1"
+
+
+def test_long_press_on_see_all_pseudo_item_does_not_request_finish_progress(qtbot):
+    screen = _make_screen_with_items(qtbot)
+    screen._row_item_idxs[0] = 1
+    screen.setFocus()
+    _press(qtbot, screen, Qt.Key.Key_Right)  # focus "See all"
+    assert screen._see_all_focused is True
+    requested = []
+    screen.finish_progress_requested.connect(requested.append)
+
+    qtbot.keyPress(screen, Qt.Key.Key_Return)
+    qtbot.wait(600)
+    qtbot.keyRelease(screen, Qt.Key.Key_Return)
+    qtbot.wait(50)
+
+    assert requested == []
+
+
+def test_show_finish_confirm_unstarted_item_offers_mark_finished(qtbot):
+    screen, item = _make_screen_with_durationed_item(qtbot)
+    screen.setFocus()
+    screen._pending_finish_item = item
+
+    screen.show_finish_confirm(item, None)
+
+    assert screen._finish_popup.isVisible()
+    assert "as finished?" in screen._finish_popup._message_label.text()
+
+
+def test_show_finish_confirm_finished_item_offers_mark_unfinished(qtbot):
+    screen, item = _make_screen_with_durationed_item(qtbot)
+    screen.setFocus()
+    screen._pending_finish_item = item
+    progress = MediaProgress(
+        libraryItemId=item.id, isFinished=True, currentTime=3600.0, duration=3600.0,
+    )
+
+    screen.show_finish_confirm(item, progress)
+
+    assert "as unfinished?" in screen._finish_popup._message_label.text()
+
+
+def test_show_finish_confirm_ignores_response_superseded_by_a_later_long_press(qtbot):
+    screen = _make_screen_with_items(qtbot)
+    screen.setFocus()
+    old_item = screen._row_items[0][0]
+    new_item = screen._row_items[0][1]
+    screen._pending_finish_item = new_item  # a second long-press already landed
+
+    screen.show_finish_confirm(old_item, None)
+
+    assert not screen._finish_popup.isVisible()
+
+
+def test_show_finish_confirm_ignores_response_after_navigating_away(qtbot):
+    screen = _make_screen_with_items(qtbot)
+    screen.setFocus()
+    item = screen._row_items[0][0]
+    screen._pending_finish_item = item
+    screen._handle_rows(InputAction.DOWN)  # user moved on before the fetch landed
+
+    screen.show_finish_confirm(item, None)
+
+    assert not screen._finish_popup.isVisible()
+    assert screen._pending_finish_item is None
+
+
+def test_confirming_mark_finished_emits_finished_changed_and_updates_card_badge(qtbot):
+    screen, item = _make_screen_with_durationed_item(qtbot)
+    screen.setFocus()
+    screen._pending_finish_item = item
+    screen._pending_finish_progress = None
+
+    changes = []
+    screen.finished_changed.connect(lambda *args: changes.append(args))
+    screen._on_finish_confirmed()
+
+    assert changes == [(item.id, item.duration, item.duration, True, "")]
+    card = screen._row_widgets[0]._cards[0]
+    assert card._finished is True
+    assert screen._pending_finish_item is None
+
+
+def test_confirming_mark_unfinished_restores_current_time_and_clears_badge(qtbot):
+    screen, item = _make_screen_with_durationed_item(qtbot)
+    screen.setFocus()
+    progress = MediaProgress(
+        libraryItemId=item.id, isFinished=True, currentTime=1200.0, duration=item.duration,
+    )
+    screen._pending_finish_item = item
+    screen._pending_finish_progress = progress
+
+    changes = []
+    screen.finished_changed.connect(lambda *args: changes.append(args))
+    screen._on_finish_confirmed()
+
+    assert changes == [(item.id, 1200.0, item.duration, False, "")]
+    card = screen._row_widgets[0]._cards[0]
+    assert card._finished is False
+
+
+def test_confirming_mark_finished_on_podcast_uses_recent_episode_id(qtbot):
+    show = _podcast_show_with_recent_episode()
+    screen, _item = _make_screen_with_durationed_item(qtbot, item=show)
+    screen.setFocus()
+    screen._pending_finish_item = show
+    screen._pending_finish_progress = None
+
+    changes = []
+    screen.finished_changed.connect(lambda *args: changes.append(args))
+    screen._on_finish_confirmed()
+
+    assert changes[0][0] == show.id
+    assert changes[0][4] == "ep1"
+
+
+def test_cancelling_finish_popup_does_not_emit_finished_changed(qtbot):
+    screen, item = _make_screen_with_durationed_item(qtbot)
+    screen.setFocus()
+    screen._pending_finish_item = item
+
+    changes = []
+    screen.finished_changed.connect(lambda *args: changes.append(args))
+    screen._on_finish_cancelled()
+
+    assert changes == []
+    assert screen._pending_finish_item is None
