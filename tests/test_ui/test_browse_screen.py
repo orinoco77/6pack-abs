@@ -484,6 +484,46 @@ def test_sidebar_item_click_on_exit_shows_exit_confirm(qtbot):
     assert screen._exit_overlay.isVisible()
 
 
+def test_sidebar_item_hover_clears_stale_see_all_focus(qtbot):
+    """Regression: mousing over a sidebar item while "See all" is focused
+    (e.g. after pressing RIGHT at the end of a row) must clear
+    _see_all_focused, exactly like the keyboard's _enter_sidebar() does —
+    otherwise the "See all" chip stays highlighted and _handle_rows's own
+    `if self._see_all_focused:` guard can later swallow a RIGHT keypress."""
+    screen = _make_screen_with_items(qtbot)
+    screen._row_item_idxs[0] = 1  # already at last item (2 items)
+    screen.setFocus()
+    _press(qtbot, screen, Qt.Key.Key_Right)  # focus see-all
+    assert screen._see_all_focused is True
+
+    screen._sidebar_items[1].hovered.emit()
+
+    assert screen._see_all_focused is False
+
+
+def test_sidebar_item_hover_exits_grid_zone(qtbot):
+    """Regression: mousing over a sidebar item while _zone == "grid" must
+    exit the grid (like keyboard's LEFT/BACKSPACE path through
+    _exit_grid()) rather than just flipping _zone to "sidebar" directly,
+    which would leave _content_stack still showing the grid page."""
+    screen = _make_screen_with_items(qtbot)
+    # _make_screen_with_items() populates rows directly without going
+    # through _start_loading_selected_library(), so mark the library as
+    # already loaded -- otherwise the post-_exit_grid() hover would also
+    # kick off a fresh library load (a real, separate, already-covered
+    # code path) whose _reset_rows() legitimately re-shows the loading
+    # page, which isn't what this test is isolating.
+    screen._loaded_library = screen._libraries[0]
+    screen._focused_row = 2  # SERIES row, has items
+    screen._enter_grid(2)
+    assert screen._zone == "grid"
+
+    screen._sidebar_items[1].hovered.emit()
+
+    assert screen._zone == "sidebar"
+    assert screen._content_stack.currentIndex() == 0
+
+
 # ---------------------------------------------------------------------------
 # BrowseScreen — Exit sidebar item + confirmation
 # ---------------------------------------------------------------------------
