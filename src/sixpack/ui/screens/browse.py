@@ -799,6 +799,16 @@ class BrowseScreen(QWidget):
             self._fetch_cover(card, cover, getattr(item, "id", "") or cover)
         return card
 
+    def _add_grid_card(self, item: Any, idx: int) -> None:
+        card = self._make_card(item)
+        card.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        card.hovered.connect(lambda i=idx: self._set_grid_focus(i))
+        card.activated.connect(lambda i=idx: self._activate_grid_item(i))
+        card.long_pressed.connect(self._on_select_long_press)
+        row, col = divmod(idx, _GRID_COLS)
+        self._grid_layout.addWidget(card, row, col)
+        self._grid_cards.append(card)
+
     def _populate_row(self, row_idx: int) -> None:
         rw = self._row_widgets[row_idx]
         items = self._row_items[row_idx]
@@ -1358,11 +1368,7 @@ class BrowseScreen(QWidget):
             card.deleteLater()
         self._grid_cards.clear()
         for i, item in enumerate(items):
-            card = self._make_card(item)
-            card.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            row, col = divmod(i, _GRID_COLS)
-            self._grid_layout.addWidget(card, row, col)
-            self._grid_cards.append(card)
+            self._add_grid_card(item, i)
         self._grid_body_stack.setCurrentIndex(1)  # content page
         if self._grid_cards:
             self._set_grid_focus(0)
@@ -1391,11 +1397,7 @@ class BrowseScreen(QWidget):
         self._grid_cards.clear()
 
         for i, item in enumerate(items):
-            card = self._make_card(item)
-            card.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            row, col = divmod(i, _GRID_COLS)
-            self._grid_layout.addWidget(card, row, col)
-            self._grid_cards.append(card)
+            self._add_grid_card(item, i)
 
         self._grid_items = list(items)
         self._grid_body_stack.setCurrentIndex(1)  # content page

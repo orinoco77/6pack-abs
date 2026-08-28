@@ -1236,6 +1236,34 @@ def test_grid_page_top_margin_clears_the_hero(qtbot):
     assert margins.top() == screen._HERO_H
 
 
+def test_grid_card_hover_moves_grid_focus(qtbot):
+    screen = _make_screen_in_grid(qtbot, row_idx=2)  # SERIES row -> 1 item
+
+    screen._grid_cards[0].hovered.emit()
+
+    assert screen._grid_focus_idx == 0
+
+
+def test_grid_card_click_activates_item(qtbot):
+    screen = _make_screen_in_grid(qtbot, row_idx=0)  # CONTINUE_LISTENING -> i1, i2
+
+    with qtbot.waitSignal(screen.book_selected, timeout=500) as blocker:
+        screen._grid_cards[1].activated.emit()
+
+    assert blocker.args[0].id == "i2"
+
+
+def test_grid_card_long_press_requests_finish_progress(qtbot):
+    screen = _make_screen_in_grid(qtbot, row_idx=0)  # CONTINUE_LISTENING -> i1, i2
+    requested = []
+    screen.finish_progress_requested.connect(requested.append)
+
+    screen._grid_cards[0].long_pressed.emit()
+
+    assert len(requested) == 1
+    assert requested[0].id == "i1"
+
+
 def test_grid_right_moves_focus(qtbot):
     screen = _make_screen_with_items(qtbot)
     # Give SERIES row 3 items
