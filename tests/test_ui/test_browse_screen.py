@@ -1237,11 +1237,11 @@ def test_grid_page_top_margin_clears_the_hero(qtbot):
 
 
 def test_grid_card_hover_moves_grid_focus(qtbot):
-    screen = _make_screen_in_grid(qtbot, row_idx=2)  # SERIES row -> 1 item
+    screen = _make_screen_in_grid(qtbot, row_idx=0)  # CONTINUE_LISTENING -> i1, i2
 
-    screen._grid_cards[0].hovered.emit()
+    screen._grid_cards[1].hovered.emit()
 
-    assert screen._grid_focus_idx == 0
+    assert screen._grid_focus_idx == 1
 
 
 def test_grid_card_click_activates_item(qtbot):
