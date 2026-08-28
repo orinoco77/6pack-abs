@@ -71,6 +71,12 @@ class _SidebarItem(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(20, 12, 20, 12)
         layout.setSpacing(10)
+        # Mirrors MediaCard's minimal press-tracking guard (media_card.py)
+        # so a real double-click's second release -- which arrives with no
+        # intervening mousePressEvent, since Qt delivers that click's press
+        # as a MouseButtonDblClick event this widget doesn't override --
+        # doesn't re-emit `activated` a second time.
+        self._pressed = False
         self._icon = QLabel(_LIB_ICONS.get(media_type, theme.ICON_MENU_BOOK))
         self._icon.setStyleSheet(
             f"font-family: '{theme.ICON_FONT_FAMILY}'; font-size: 18pt; background: transparent;"
@@ -122,8 +128,18 @@ class _SidebarItem(QWidget):
         self.hovered.emit()
         super().enterEvent(event)
 
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._pressed = True
+        else:
+            super().mousePressEvent(event)
+
     def mouseReleaseEvent(self, event) -> None:
-        if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.pos()):
+        if event.button() != Qt.MouseButton.LeftButton or not self._pressed:
+            super().mouseReleaseEvent(event)
+            return
+        self._pressed = False
+        if self.rect().contains(event.pos()):
             self.activated.emit()
         super().mouseReleaseEvent(event)
 
@@ -215,7 +231,11 @@ class _RowWidget(QWidget):
         if obj is self._see_all:
             if event.type() == QEvent.Type.Enter:
                 self.see_all_hovered.emit()
-            elif event.type() == QEvent.Type.MouseButtonRelease:
+            elif (
+                event.type() == QEvent.Type.MouseButtonRelease
+                and event.button() == Qt.MouseButton.LeftButton
+                and self._see_all.rect().contains(event.pos())
+            ):
                 self.see_all_activated.emit()
         return super().eventFilter(obj, event)
 
@@ -406,6 +426,9 @@ class BrowseScreen(QWidget):
         if hasattr(self, "_finish_popup"):
             w, h = int(self.width() * 0.5), 180
             self._finish_popup.setGeometry((self.width() - w) // 2, (self.height() - h) // 2, w, h)
+            self._finish_popup.update_scrim_geometry()
+        if hasattr(self, "_exit_scrim"):
+            self._exit_scrim.setGeometry(self.rect())
         super().resizeEvent(event)
 
     def _build_hero(self) -> None:
@@ -510,6 +533,20 @@ class BrowseScreen(QWidget):
         as PlayerScreen's in-player chapter overlay: a plain hidden child of
         `self`, positioned explicitly in resizeEvent, shown/raised on demand.
         """
+        # Full-screen "shield" sibling that captures mouse events while the
+        # exit confirmation is open -- see ConfirmPopup._scrim's docstring
+        # comment (confirm_popup.py) for the full reasoning this mirrors:
+        # keyboard input is already gated (keyPressEvent checks
+        # `_exit_overlay.isVisible()` before any zone dispatch), but mouse
+        # input isn't gated by focus at all -- Qt delivers mouse/enter/leave
+        # events to whichever widget is topmost under the cursor. This
+        # overlay is only a small centered widget, so without a full-size
+        # shield underneath it, cards/sidebar items elsewhere on screen stay
+        # directly hit-testable while it's open.
+        self._exit_scrim = QWidget(self)
+        self._exit_scrim.setStyleSheet("background: transparent;")
+        self._exit_scrim.hide()
+
         self._exit_overlay = QWidget(self)
         self._exit_overlay.setStyleSheet(
             f"background: {theme.SURFACE}; border: 2px solid {theme.ACCENT}; "
@@ -1141,6 +1178,8 @@ class BrowseScreen(QWidget):
         self._reflect_current()
 
     def _on_see_all_hovered(self, row_idx: int) -> None:
+        if self._see_all_focused:
+            self._set_see_all_focused(False)
         if self._zone != "rows" or self._focused_row != row_idx:
             if self._zone == "rows":
                 self._row_widgets[self._focused_row].unfocus()
@@ -1169,6 +1208,11 @@ class BrowseScreen(QWidget):
     def _show_exit_confirm(self) -> None:
         self._exit_confirm_idx = 1  # default to No every time it's opened
         self._reflect_exit_confirm_focus()
+        # Shield first, THEN the overlay itself, so the overlay's own
+        # Yes/No buttons stay on top of the shield and remain clickable.
+        self._exit_scrim.setGeometry(self.rect())
+        self._exit_scrim.show()
+        self._exit_scrim.raise_()
         self._exit_overlay.setGeometry(self._exit_confirm_geometry())
         self._exit_overlay.show()
         self._exit_overlay.raise_()
@@ -1197,9 +1241,11 @@ class BrowseScreen(QWidget):
             self._activate_exit_confirm(self._exit_confirm_idx)
         elif action == InputAction.BACK:
             self._exit_overlay.hide()
+            self._exit_scrim.hide()
 
     def _activate_exit_confirm(self, idx: int) -> None:
         self._exit_overlay.hide()
+        self._exit_scrim.hide()
         if idx == 0:
             self.exit_requested.emit()
 

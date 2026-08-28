@@ -156,6 +156,12 @@ class ChapterItem(QWidget):
     ) -> None:
         super().__init__(parent)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        # Mirrors MediaCard's minimal press-tracking guard (media_card.py)
+        # so a real double-click's second release -- which arrives with no
+        # intervening mousePressEvent, since Qt delivers that click's press
+        # as a MouseButtonDblClick event this widget doesn't override --
+        # doesn't re-emit `activated` a second time.
+        self._pressed = False
         self._build_ui(index, chapter, status, fraction)
 
     def _build_ui(self, index: int, chapter: Chapter, status: str, fraction: float) -> None:
@@ -213,8 +219,18 @@ class ChapterItem(QWidget):
         self.hovered.emit()
         super().enterEvent(event)
 
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._pressed = True
+        else:
+            super().mousePressEvent(event)
+
     def mouseReleaseEvent(self, event) -> None:
-        if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.pos()):
+        if event.button() != Qt.MouseButton.LeftButton or not self._pressed:
+            super().mouseReleaseEvent(event)
+            return
+        self._pressed = False
+        if self.rect().contains(event.pos()):
             self.activated.emit()
         super().mouseReleaseEvent(event)
 

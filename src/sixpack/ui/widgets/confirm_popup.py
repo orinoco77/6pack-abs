@@ -34,6 +34,25 @@ class ConfirmPopup(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._focus_index = 0  # 0 = Cancel, 1 = Confirm -- safer default
+        # Full-host-size, always-on-top "shield" sibling (NOT a child of
+        # this popup -- it's parented to the same host screen this popup
+        # itself was constructed with) that captures mouse events while
+        # the popup is open. This popup is only a small centered widget,
+        # so cards/sidebar items elsewhere on the host screen stay
+        # directly hit-testable by mouse unless something else covers
+        # them too -- keyboard input is already safe (this popup takes
+        # real Qt focus in show_confirm(), so keyPressEvent naturally
+        # routes here), but mouse input isn't gated by focus at all: Qt
+        # delivers mouse/enter/leave events to whichever widget is
+        # topmost under the cursor, regardless of who has focus. A plain
+        # widget left NOT transparent-for-mouse-events (the opposite of
+        # this codebase's decorative overlays like _Scrim/_FinishedBadge
+        # in media_card.py) is topmost-by-construction once raised, so it
+        # simply intercepts everything underneath -- no explicit event-
+        # swallowing code is needed here.
+        self._scrim = QWidget(self.parentWidget())
+        self._scrim.setStyleSheet("background: transparent;")
+        self._scrim.hide()
         self._build_ui()
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.hide()
@@ -83,9 +102,26 @@ class ConfirmPopup(QWidget):
         self._cancel_btn.setText(cancel_label)
         self._focus_index = 0
         self._reflect_focus()
+        # Shield first, THEN the popup itself, so the popup's own Cancel/
+        # Confirm buttons stay on top of the shield and remain clickable --
+        # only raise() order (not construction order) determines stacking.
+        host = self.parentWidget()
+        if host is not None:
+            self._scrim.setGeometry(host.rect())
+            self._scrim.show()
+            self._scrim.raise_()
         self.show()
         self.raise_()
         self.setFocus()
+
+    def update_scrim_geometry(self) -> None:
+        """Keep the shield covering the full host if the host is resized
+        while this popup is open. Hosts that reposition this popup in
+        their own resizeEvent (grep for `_finish_popup.setGeometry`)
+        should call this alongside that."""
+        host = self.parentWidget()
+        if host is not None:
+            self._scrim.setGeometry(host.rect())
 
     def keyPressEvent(self, event) -> None:
         from sixpack.input.keyboard import key_to_action
@@ -129,8 +165,10 @@ class ConfirmPopup(QWidget):
 
     def _activate_cancel(self) -> None:
         self.hide()
+        self._scrim.hide()
         self.cancelled.emit()
 
     def _activate_confirm(self) -> None:
         self.hide()
+        self._scrim.hide()
         self.confirmed.emit()
