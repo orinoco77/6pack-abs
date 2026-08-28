@@ -963,6 +963,34 @@ def test_chapter_screen_play_signal(qtbot):
     assert signals[0][1] == 1500.0
 
 
+def test_chapter_screen_card_hover_moves_current_row(qtbot):
+    from sixpack.ui.screens.chapter_select import ChapterSelectScreen
+    screen = ChapterSelectScreen()
+    qtbot.addWidget(screen)
+    screen.load(_make_box_set_book(), _make_chapters(), None)
+
+    assert screen._list.currentRow() == 0
+    widget = screen._list.itemWidget(screen._list.item(1))
+    widget.hovered.emit()
+
+    assert screen._list.currentRow() == 1
+
+
+def test_chapter_screen_card_click_emits_play_signal(qtbot):
+    from sixpack.ui.screens.chapter_select import ChapterSelectScreen
+    screen = ChapterSelectScreen()
+    qtbot.addWidget(screen)
+    book = _make_box_set_book()
+    screen.load(book, _make_chapters(), None)
+
+    signals = []
+    screen.play_requested.connect(lambda b, t: signals.append((b, t)))
+    widget = screen._list.itemWidget(screen._list.item(1))
+    widget.activated.emit()
+
+    assert signals == [(book, 1500.0)]
+
+
 def test_chapter_screen_enter_on_real_focus_target_activates_chapter(qtbot):
     """Regression: QListWidget's own default Key_Return handling doesn't
     reliably fire itemActivated in this app's configuration, so if the list
