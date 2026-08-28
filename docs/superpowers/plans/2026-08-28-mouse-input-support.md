@@ -36,7 +36,8 @@ Add to `tests/test_ui/test_widgets.py`, near the existing `test_media_card_mouse
 
 ```python
 def test_media_card_enter_emits_hovered(qtbot):
-    from PyQt6.QtCore import QEvent
+    from PyQt6.QtCore import QPointF
+    from PyQt6.QtGui import QEnterEvent
 
     card = MediaCard(title="Test")
     qtbot.addWidget(card)
@@ -44,7 +45,7 @@ def test_media_card_enter_emits_hovered(qtbot):
     hovered = []
     card.hovered.connect(lambda: hovered.append(True))
 
-    card.enterEvent(QEvent(QEvent.Type.Enter))
+    card.enterEvent(QEnterEvent(QPointF(0, 0), QPointF(0, 0), QPointF(0, 0)))
 
     assert hovered == [True]
 ```
@@ -430,7 +431,8 @@ def test_chapter_item_click_emits_activated(qtbot):
 
 
 def test_chapter_item_enter_emits_hovered(qtbot):
-    from PyQt6.QtCore import QEvent
+    from PyQt6.QtCore import QPointF
+    from PyQt6.QtGui import QEnterEvent
 
     from sixpack.ui.screens.chapter_select import ChapterItem
 
@@ -440,7 +442,7 @@ def test_chapter_item_enter_emits_hovered(qtbot):
     hovered = []
     item.hovered.connect(lambda: hovered.append(True))
 
-    item.enterEvent(QEvent(QEvent.Type.Enter))
+    item.enterEvent(QEnterEvent(QPointF(0, 0), QPointF(0, 0), QPointF(0, 0)))
 
     assert hovered == [True]
 ```
@@ -658,7 +660,8 @@ def test_sidebar_item_click_emits_activated(qtbot):
 
 
 def test_sidebar_item_enter_emits_hovered(qtbot):
-    from PyQt6.QtCore import QEvent
+    from PyQt6.QtCore import QPointF
+    from PyQt6.QtGui import QEnterEvent
 
     item = _SidebarItem("Audiobooks")
     qtbot.addWidget(item)
@@ -666,7 +669,7 @@ def test_sidebar_item_enter_emits_hovered(qtbot):
     hovered = []
     item.hovered.connect(lambda: hovered.append(True))
 
-    item.enterEvent(QEvent(QEvent.Type.Enter))
+    item.enterEvent(QEnterEvent(QPointF(0, 0), QPointF(0, 0), QPointF(0, 0)))
 
     assert hovered == [True]
 ```
@@ -1026,7 +1029,7 @@ def test_row_widget_card_long_pressed_reemits_with_index(qtbot):
 
 
 def test_row_widget_see_all_hover_and_click(qtbot):
-    from PyQt6.QtCore import QEvent, QPoint
+    from PyQt6.QtCore import QEvent, QPointF
     from PyQt6.QtGui import QMouseEvent
 
     row = _RowWidget("Continue Listening")
@@ -1042,7 +1045,7 @@ def test_row_widget_see_all_hover_and_click(qtbot):
     assert hovered == [True]
 
     release = QMouseEvent(
-        QEvent.Type.MouseButtonRelease, QPoint(1, 1), Qt.MouseButton.LeftButton,
+        QEvent.Type.MouseButtonRelease, QPointF(1, 1), Qt.MouseButton.LeftButton,
         Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
     )
     row.eventFilter(row._see_all, release)
