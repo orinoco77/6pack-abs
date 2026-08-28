@@ -1011,6 +1011,42 @@ def test_chapter_screen_down_arrow_moves_current_row(qtbot):
     assert screen._list.currentRow() == 0
 
 
+def test_chapter_item_click_emits_activated(qtbot):
+    from PyQt6.QtCore import Qt
+
+    from sixpack.ui.screens.chapter_select import ChapterItem
+
+    item = ChapterItem(0, _make_chapters()[0], status="unstarted")
+    qtbot.addWidget(item)
+    item.show()
+
+    activated = []
+    hovered = []
+    item.activated.connect(lambda: activated.append(True))
+    item.hovered.connect(lambda: hovered.append(True))
+
+    qtbot.mouseClick(item, Qt.MouseButton.LeftButton)
+
+    assert activated == [True]
+
+
+def test_chapter_item_enter_emits_hovered(qtbot):
+    from PyQt6.QtCore import QPointF
+    from PyQt6.QtGui import QEnterEvent
+
+    from sixpack.ui.screens.chapter_select import ChapterItem
+
+    item = ChapterItem(0, _make_chapters()[0], status="unstarted")
+    qtbot.addWidget(item)
+
+    hovered = []
+    item.hovered.connect(lambda: hovered.append(True))
+
+    item.enterEvent(QEnterEvent(QPointF(0, 0), QPointF(0, 0), QPointF(0, 0)))
+
+    assert hovered == [True]
+
+
 def test_chapter_screen_back_signal(qtbot):
     from sixpack.ui.screens.chapter_select import ChapterSelectScreen
     screen = ChapterSelectScreen()
