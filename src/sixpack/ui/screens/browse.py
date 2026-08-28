@@ -576,9 +576,18 @@ class BrowseScreen(QWidget):
         rows_layout.setSpacing(12)
 
         self._row_widgets: list[_RowWidget] = []
-        for rt in self._row_types:
+        for row_idx, rt in enumerate(self._row_types):
             rw = _RowWidget(rt.value)
             rw.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            rw.card_hovered.connect(
+                lambda item_idx, ridx=row_idx: self._on_row_card_hovered(ridx, item_idx)
+            )
+            rw.card_activated.connect(
+                lambda item_idx, ridx=row_idx: self._activate_row_item(ridx, item_idx)
+            )
+            rw.card_long_pressed.connect(lambda _item_idx: self._on_select_long_press())
+            rw.see_all_hovered.connect(lambda ridx=row_idx: self._on_see_all_hovered(ridx))
+            rw.see_all_activated.connect(self._trigger_see_all)
             self._row_widgets.append(rw)
             rows_layout.addWidget(rw)
         rows_layout.addStretch()
@@ -1106,6 +1115,31 @@ class BrowseScreen(QWidget):
             self._reflect_current()
         else:
             self._start_loading_selected_library()
+
+    def _on_row_card_hovered(self, row_idx: int, item_idx: int) -> None:
+        if self._see_all_focused:
+            self._set_see_all_focused(False)
+        if self._zone != "rows" or self._focused_row != row_idx:
+            if self._zone == "rows":
+                self._row_widgets[self._focused_row].unfocus()
+            self._zone = "rows"
+            self._focused_row = row_idx
+            self._update_sidebar_styles()
+            self._update_row_styles()
+        self._row_item_idxs[row_idx] = item_idx
+        self._row_widgets[row_idx].focus_card(item_idx)
+        self._reflect_current()
+
+    def _on_see_all_hovered(self, row_idx: int) -> None:
+        if self._zone != "rows" or self._focused_row != row_idx:
+            if self._zone == "rows":
+                self._row_widgets[self._focused_row].unfocus()
+            self._zone = "rows"
+            self._focused_row = row_idx
+            self._update_sidebar_styles()
+            self._update_row_styles()
+        self._set_see_all_focused(True)
+        self._reflect_current()
 
     def _start_loading_selected_library(self) -> None:
         """Eagerly trigger a content fetch for the currently highlighted library."""

@@ -1164,6 +1164,47 @@ def test_rows_select_out_of_bounds_does_nothing(qtbot):
     assert not fired
 
 
+def test_row_card_hover_syncs_zone_row_and_item(qtbot):
+    screen = _make_screen_with_items(qtbot)
+    screen._zone = "sidebar"  # start somewhere other than this row
+
+    screen._row_widgets[1].card_hovered.emit(0)
+
+    assert screen._zone == "rows"
+    assert screen._focused_row == 1
+    assert screen._row_item_idxs[1] == 0
+
+
+def test_row_card_click_activates_item(qtbot):
+    screen = _make_screen_with_items(qtbot)
+
+    with qtbot.waitSignal(screen.book_selected, timeout=500) as blocker:
+        screen._row_widgets[0].card_activated.emit(1)
+
+    assert blocker.args[0].id == "i2"
+
+
+def test_row_see_all_hover_focuses_see_all(qtbot):
+    screen = _make_screen_with_items(qtbot)
+    screen._zone = "sidebar"
+
+    screen._row_widgets[0].see_all_hovered.emit()
+
+    assert screen._zone == "rows"
+    assert screen._focused_row == 0
+    assert screen._see_all_focused is True
+
+
+def test_row_see_all_click_triggers_see_all(qtbot):
+    screen = _make_screen_with_items(qtbot)
+
+    with qtbot.waitSignal(screen.see_all_requested, timeout=500) as blocker:
+        screen._row_widgets[0].see_all_activated.emit()
+
+    assert blocker.args[0] == RowType.CONTINUE_LISTENING
+    assert screen._zone == "grid"
+
+
 # ---------------------------------------------------------------------------
 # BrowseScreen — grid zone
 # ---------------------------------------------------------------------------
