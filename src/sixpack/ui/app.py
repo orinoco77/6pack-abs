@@ -57,6 +57,30 @@ from sixpack.updater import (
 
 logger = logging.getLogger(__name__)
 
+
+def _author_surname_sort_key(item: LibraryItem) -> tuple[int, str, str]:
+    """Sort key for the "All Books" row: alphabetical by the primary
+    author's surname, case-insensitive.
+
+    Audiobookshelf has no server-side "sort by surname" (only by the raw
+    authorName string, which would file "Terry Pratchett" under T), so
+    this is done client-side. A multi-author work stores its authors as
+    one comma-joined string (e.g. "Terry Pratchett, Neil Gaiman") --
+    this sorts by the FIRST-listed (primary) author only, and within
+    that author's name by its last whitespace-separated token (a
+    pragmatic heuristic, not true name parsing -- "Ursula K. Le Guin"
+    sorts under "Guin" rather than "Le Guin"). Items with no author
+    metadata sort after everything else. Title is the tiebreaker so the
+    overall order is always fully deterministic.
+    """
+    author = (item.author or "").split(",", 1)[0].strip()
+    title_key = (item.title or "").casefold()
+    if not author:
+        return (1, "", title_key)
+    surname = author.split()[-1]
+    return (0, surname.casefold(), title_key)
+
+
 # Gamepad actions are delivered to the app by synthesizing the equivalent
 # keyboard key event and sending it to whatever widget currently has focus
 # -- reusing every screen's existing keyPressEvent/key_to_action handling
@@ -507,10 +531,11 @@ class MainWindow(QMainWindow):
 
     async def _async_get_browse_content(self, library_id: str) -> tuple:
         client = self._client
-        shelves, recent, series_list, playlists = await asyncio.gather(
+        shelves, recent, series_list, all_books, playlists = await asyncio.gather(
             client.get_personalized_shelves(library_id),
             client.get_library_items_recent(library_id, 20),
             client.get_series(library_id),
+            client.get_all_library_items(library_id),
             client.get_playlists(library_id),
         )
         continue_listening: list = []
@@ -518,10 +543,12 @@ class MainWindow(QMainWindow):
             if "continue" in shelf.label.lower():
                 continue_listening = shelf.entities[:20]
                 break
+        all_books.sort(key=_author_surname_sort_key)
         rows = {
             RowType.CONTINUE_LISTENING: continue_listening,
             RowType.RECENTLY_ADDED: recent[:20],
             RowType.SERIES: series_list[:20],
+            RowType.ALL_BOOKS: all_books[:20],
             RowType.PLAYLISTS: playlists[:20],
         }
         return library_id, rows
@@ -545,6 +572,9 @@ class MainWindow(QMainWindow):
             items = await client.get_library_items_recent(library_id, limit=100)
         elif row_type == RowType.SERIES:
             items = await client.get_series(library_id, limit=500)
+        elif row_type == RowType.ALL_BOOKS:
+            items = await client.get_all_library_items(library_id)
+            items.sort(key=_author_surname_sort_key)
         else:  # PLAYLISTS
             items = await client.get_playlists(library_id)
         return row_type, items

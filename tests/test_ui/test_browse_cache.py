@@ -80,6 +80,7 @@ def test_save_then_load_browse_content_round_trips_all_row_types(tmp_path):
         RowType.CONTINUE_LISTENING: [_item("i1", "CL Book")],
         RowType.RECENTLY_ADDED: [_item("i2", "RA Book")],
         RowType.SERIES: [_series("s1", "A Series")],
+        RowType.ALL_BOOKS: [_item("i3", "AB Book")],
         RowType.PLAYLISTS: [_playlist("p1", "A Playlist")],
     }
     cache.save_browse_content("http://s", "lib1", rows)
@@ -90,10 +91,12 @@ def test_save_then_load_browse_content_round_trips_all_row_types(tmp_path):
     assert [i.title for i in loaded[RowType.CONTINUE_LISTENING]] == ["CL Book"]
     assert [i.title for i in loaded[RowType.RECENTLY_ADDED]] == ["RA Book"]
     assert [s.name for s in loaded[RowType.SERIES]] == ["A Series"]
+    assert [i.title for i in loaded[RowType.ALL_BOOKS]] == ["AB Book"]
     assert [p.name for p in loaded[RowType.PLAYLISTS]] == ["A Playlist"]
     assert isinstance(loaded[RowType.SERIES][0], Series)
     assert isinstance(loaded[RowType.PLAYLISTS][0], Playlist)
     assert isinstance(loaded[RowType.CONTINUE_LISTENING][0], LibraryItem)
+    assert isinstance(loaded[RowType.ALL_BOOKS][0], LibraryItem)
 
 
 def test_browse_content_is_keyed_by_server_and_library(tmp_path):

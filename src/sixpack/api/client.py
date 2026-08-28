@@ -1,6 +1,7 @@
 """Audiobookshelf REST API client."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -217,6 +218,53 @@ class ABSClient:
         self._raise_for_status(response)
         data = response.json()
         return [LibraryItem.model_validate(item) for item in data.get("results", [])]
+
+    async def get_all_library_items(
+        self, library_id: str, page_size: int = 200
+    ) -> list[LibraryItem]:
+        """Fetch every item in a library, paginating as needed.
+
+        Unlike get_library_items_recent()/get_series() (which cap at a
+        fixed limit), this is used for the "All Books" row, which must
+        show the entire catalog regardless of size -- a personal
+        audiobook library can run well past a four-digit item count.
+        The server reports `total` on every page, so after the first
+        page the remaining ones are known up front and fetched
+        concurrently (bounded by a semaphore) rather than one at a time.
+        """
+        first = await self._http.get(
+            f"/api/libraries/{library_id}/items",
+            params={"limit": page_size, "page": 0},
+        )
+        self._raise_for_status(first)
+        data = first.json()
+        results = data.get("results", [])
+        total = data.get("total", len(results))
+        items = [LibraryItem.model_validate(item) for item in results]
+
+        pages_needed = -(-total // page_size) if page_size else 1  # ceil division
+        if pages_needed > 1:
+            sem = asyncio.Semaphore(10)
+
+            async def _fetch_page(page: int) -> list[LibraryItem]:
+                async with sem:
+                    response = await self._http.get(
+                        f"/api/libraries/{library_id}/items",
+                        params={"limit": page_size, "page": page},
+                    )
+                    self._raise_for_status(response)
+                    return [
+                        LibraryItem.model_validate(item)
+                        for item in response.json().get("results", [])
+                    ]
+
+            pages = await asyncio.gather(
+                *(_fetch_page(p) for p in range(1, pages_needed))
+            )
+            for page_items in pages:
+                items.extend(page_items)
+
+        return items
 
     async def get_personalized_shelves(self, library_id: str) -> list[PersonalizedShelf]:
         """Fetch personalized shelves for a library (Continue Listening, Recently Added, etc.)."""

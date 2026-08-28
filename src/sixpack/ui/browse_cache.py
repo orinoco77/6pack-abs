@@ -25,6 +25,7 @@ _ROW_MODELS = {
     RowType.CONTINUE_LISTENING: LibraryItem,
     RowType.RECENTLY_ADDED: LibraryItem,
     RowType.SERIES: Series,
+    RowType.ALL_BOOKS: LibraryItem,
     RowType.PLAYLISTS: Playlist,
 }
 

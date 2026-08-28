@@ -96,6 +96,7 @@ def test_row_type_values():
     assert RowType.CONTINUE_LISTENING.value == "Continue Listening"
     assert RowType.RECENTLY_ADDED.value == "Recently Added"
     assert RowType.SERIES.value == "Series"
+    assert RowType.ALL_BOOKS.value == "All Books"
     assert RowType.PLAYLISTS.value == "Playlists"
 
 
@@ -104,6 +105,7 @@ def test_default_row_types_order():
         RowType.CONTINUE_LISTENING,
         RowType.RECENTLY_ADDED,
         RowType.SERIES,
+        RowType.ALL_BOOKS,
         RowType.PLAYLISTS,
     ]
 
@@ -1146,6 +1148,7 @@ def _make_screen_with_items(qtbot):
     screen.set_row_items(RowType.CONTINUE_LISTENING, [_li("i1", "CL1"), _li("i2", "CL2")])
     screen.set_row_items(RowType.RECENTLY_ADDED, [_li("i3", "RA1")])
     screen.set_row_items(RowType.SERIES, [_series("s1", "S1")])
+    screen.set_row_items(RowType.ALL_BOOKS, [_li("i4", "AB1")])
     screen.set_row_items(RowType.PLAYLISTS, [_playlist("p1", "PL1")])
     screen.show()
     # Enter rows
@@ -1336,7 +1339,7 @@ def test_rows_select_series_emits_series(qtbot):
 def test_rows_select_playlist_emits_playlist(qtbot):
     screen = _make_screen_with_items(qtbot)
     with qtbot.waitSignal(screen.playlist_selected, timeout=500) as blocker:
-        screen._activate_row_item(3, 0)  # PLAYLISTS row
+        screen._activate_row_item(4, 0)  # PLAYLISTS row
     assert blocker.args[0].id == "p1"
 
 
@@ -2017,6 +2020,26 @@ def test_short_tap_on_continue_listening_card_still_activates_it(qtbot):
     assert requested == []
 
 
+def test_long_press_on_all_books_card_requests_finish_progress(qtbot):
+    """All Books cards are plain library items just like Continue
+    Listening/Recently Added -- mark-finished must work there too."""
+    screen = _make_screen_with_items(qtbot)
+    screen._handle_rows(InputAction.DOWN)
+    screen._handle_rows(InputAction.DOWN)
+    screen._handle_rows(InputAction.DOWN)  # row 3 = ALL_BOOKS
+    screen.setFocus()
+    requested = []
+    screen.finish_progress_requested.connect(requested.append)
+
+    qtbot.keyPress(screen, Qt.Key.Key_Return)
+    qtbot.wait(600)
+    qtbot.keyRelease(screen, Qt.Key.Key_Return)
+    qtbot.wait(50)
+
+    assert len(requested) == 1
+    assert requested[0].id == "i4"
+
+
 def test_long_press_on_series_row_does_not_request_finish_progress(qtbot):
     """Series/Playlists rows hold Series/Playlist objects, not individual
     items -- long-press there must be a no-op, not crash or misfire."""
@@ -2088,6 +2111,25 @@ def test_show_finish_confirm_finished_item_offers_mark_unfinished(qtbot):
     screen.show_finish_confirm(item, progress)
 
     assert "as unfinished?" in screen._finish_popup._message_label.text()
+
+
+def test_show_finish_confirm_shows_popup_for_all_books_card(qtbot):
+    """Regression: _on_select_long_press() allows ALL_BOOKS, but
+    show_finish_confirm() has its own, separate row-type check (used to
+    detect the user navigating away while the progress fetch was in
+    flight) -- it must allow ALL_BOOKS too, or the popup silently never
+    appears even though finish_progress_requested fired correctly."""
+    screen = _make_screen_with_items(qtbot)
+    screen._handle_rows(InputAction.DOWN)
+    screen._handle_rows(InputAction.DOWN)
+    screen._handle_rows(InputAction.DOWN)  # row 3 = ALL_BOOKS
+    screen.setFocus()
+    item = screen._row_items[3][0]
+    screen._pending_finish_item = item
+
+    screen.show_finish_confirm(item, None)
+
+    assert screen._finish_popup.isVisible()
 
 
 def test_show_finish_confirm_ignores_response_superseded_by_a_later_long_press(qtbot):

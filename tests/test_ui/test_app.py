@@ -374,6 +374,150 @@ def test_browse_content_result_saves_to_cache(window, tmp_path):
     assert [i.title for i in cached[RowType.RECENTLY_ADDED]] == ["Fresh Book"]
 
 
+# ---- "All Books" row: sort by author surname ----
+
+def _li(item_id="li1", title="Book", author=""):
+    from sixpack.api.models import LibraryItem, LibraryItemMedia
+    return LibraryItem(
+        id=item_id, libraryId="lib1", mediaType="book",
+        media=LibraryItemMedia(metadata={"title": title, "authorName": author}),
+    )
+
+
+def test_author_surname_sort_key_orders_by_last_name():
+    from sixpack.ui.app import _author_surname_sort_key
+
+    items = [
+        _li("b1", "Small Gods", "Terry Pratchett"),
+        _li("b2", "Neverwhere", "Neil Gaiman"),
+    ]
+    ordered = sorted(items, key=_author_surname_sort_key)
+    assert [i.id for i in ordered] == ["b2", "b1"]  # Gaiman before Pratchett
+
+
+def test_author_surname_sort_key_uses_primary_author_of_multi_author_string():
+    from sixpack.ui.app import _author_surname_sort_key
+
+    items = [
+        _li("b1", "Good Omens", "Terry Pratchett, Neil Gaiman"),
+        _li("b2", "Anansi Boys", "Neil Gaiman"),
+    ]
+    ordered = sorted(items, key=_author_surname_sort_key)
+    # "Good Omens" sorts by its PRIMARY (first-listed) author, Pratchett --
+    # not Gaiman -- so it comes after Anansi Boys, not before.
+    assert [i.id for i in ordered] == ["b2", "b1"]
+
+
+def test_author_surname_sort_key_is_case_insensitive():
+    from sixpack.ui.app import _author_surname_sort_key
+
+    items = [_li("b1", "Book A", "terry pratchett"), _li("b2", "Book B", "Neil Gaiman")]
+    ordered = sorted(items, key=_author_surname_sort_key)
+    assert [i.id for i in ordered] == ["b2", "b1"]
+
+
+def test_author_surname_sort_key_sorts_missing_author_last():
+    from sixpack.ui.app import _author_surname_sort_key
+
+    items = [
+        _li("b1", "Mystery Book", ""),
+        _li("b2", "Small Gods", "Terry Pratchett"),
+    ]
+    ordered = sorted(items, key=_author_surname_sort_key)
+    assert [i.id for i in ordered] == ["b2", "b1"]
+
+
+def test_author_surname_sort_key_ties_break_by_title():
+    from sixpack.ui.app import _author_surname_sort_key
+
+    items = [
+        _li("b1", "The Second Book", "Terry Pratchett"),
+        _li("b2", "The First Book", "Terry Pratchett"),
+    ]
+    ordered = sorted(items, key=_author_surname_sort_key)
+    assert [i.id for i in ordered] == ["b2", "b1"]
+
+
+def _li_item_payload(item_id, title, author):
+    return {
+        "id": item_id, "libraryId": "lib1", "mediaType": "book",
+        "media": {
+            "metadata": {"title": title, "authorName": author},
+            "chapters": [], "audioFiles": [], "tracks": [],
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_async_get_browse_content_includes_all_books_row_sorted_by_surname(window):
+    from sixpack.ui.screens.browse import RowType
+
+    window._server_url = "http://abs.test"
+    window._token = "tok"
+    window._client = ABSClient(window._server_url, token=window._token)
+
+    def _items_route(request: httpx.Request) -> httpx.Response:
+        # get_library_items_recent() (RECENTLY_ADDED) asks for sort=addedAt;
+        # get_all_library_items() (ALL_BOOKS) doesn't -- distinguish them
+        # the same way the real server would treat two differently-sorted
+        # requests to the same endpoint.
+        if request.url.params.get("sort") == "addedAt":
+            return httpx.Response(200, json={"results": [], "total": 0})
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    _li_item_payload("b1", "Small Gods", "Terry Pratchett"),
+                    _li_item_payload("b2", "Neverwhere", "Neil Gaiman"),
+                ],
+                "total": 2,
+            },
+        )
+
+    async with respx.mock(base_url="http://abs.test") as mock:
+        mock.get("/api/libraries/lib1/personalized").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        mock.get("/api/libraries/lib1/items").mock(side_effect=_items_route)
+        mock.get("/api/libraries/lib1/series").mock(
+            return_value=httpx.Response(200, json={"results": []})
+        )
+        mock.get("/api/playlists").mock(
+            return_value=httpx.Response(200, json={"playlists": []})
+        )
+        _library_id, rows = await window._async_get_browse_content("lib1")
+
+    assert [i.id for i in rows[RowType.ALL_BOOKS]] == ["b2", "b1"]  # Gaiman before Pratchett
+
+
+@pytest.mark.asyncio
+async def test_async_get_see_all_all_books_returns_full_sorted_catalog(window):
+    from sixpack.ui.screens.browse import RowType
+
+    window._server_url = "http://abs.test"
+    window._token = "tok"
+    window._client = ABSClient(window._server_url, token=window._token)
+
+    async with respx.mock(base_url="http://abs.test") as mock:
+        mock.get("/api/libraries/lib1/items").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "results": [
+                        _li_item_payload("b1", "Small Gods", "Terry Pratchett"),
+                        _li_item_payload("b2", "Neverwhere", "Neil Gaiman"),
+                        _li_item_payload("b3", "Anansi Boys", "Neil Gaiman"),
+                    ],
+                    "total": 3,
+                },
+            )
+        )
+        row_type, items = await window._async_get_see_all(RowType.ALL_BOOKS, "lib1")
+
+    assert row_type == RowType.ALL_BOOKS
+    assert [i.id for i in items] == ["b3", "b2", "b1"]  # Gaiman(Anansi) < Gaiman(Never) < Pratchett
+
+
 def test_on_track_ended_navigates_to_series_detail_with_next_focused(window, qtbot):
     """Automatic end-of-track must NOT auto-play the next book — it shows
     an up-next message, then lands on the series detail screen with the

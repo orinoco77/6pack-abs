@@ -35,6 +35,7 @@ class RowType(Enum):
     CONTINUE_LISTENING = "Continue Listening"
     RECENTLY_ADDED = "Recently Added"
     SERIES = "Series"
+    ALL_BOOKS = "All Books"
     PLAYLISTS = "Playlists"
 
 
@@ -42,6 +43,7 @@ DEFAULT_ROW_TYPES: list[RowType] = [
     RowType.CONTINUE_LISTENING,
     RowType.RECENTLY_ADDED,
     RowType.SERIES,
+    RowType.ALL_BOOKS,
     RowType.PLAYLISTS,
 ]
 
@@ -942,14 +944,16 @@ class BrowseScreen(QWidget):
         return None
 
     # ------------------------------------------------------------------
-    # Mark finished (long-press on a Continue Listening / Recently Added
-    # card — Series/Playlists rows hold Series/Playlist objects, not
-    # individual items, so "finished" has no meaning there; drilling into
-    # SeriesDetailScreen/PlaylistDetailScreen is how those get marked)
+    # Mark finished (long-press on a Continue Listening / Recently Added /
+    # All Books card — Series/Playlists rows hold Series/Playlist objects,
+    # not individual items, so "finished" has no meaning there; drilling
+    # into SeriesDetailScreen/PlaylistDetailScreen is how those get marked)
     # ------------------------------------------------------------------
 
     def _on_select_long_press(self) -> None:
-        if self._current_row_type() not in (RowType.CONTINUE_LISTENING, RowType.RECENTLY_ADDED):
+        if self._current_row_type() not in (
+            RowType.CONTINUE_LISTENING, RowType.RECENTLY_ADDED, RowType.ALL_BOOKS,
+        ):
             return
         item = self._current_focused_item()
         if item is None:
@@ -964,7 +968,7 @@ class BrowseScreen(QWidget):
         if self._pending_finish_item is not item:
             return  # superseded by a later long-press before this one landed
         if self._current_row_type() not in (
-            RowType.CONTINUE_LISTENING, RowType.RECENTLY_ADDED
+            RowType.CONTINUE_LISTENING, RowType.RECENTLY_ADDED, RowType.ALL_BOOKS,
         ) or self._current_focused_item() is not item:
             # User navigated away while the fetch was in flight.
             self._pending_finish_item = None
