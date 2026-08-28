@@ -275,6 +275,48 @@ async def test_get_library_items(server_url, auth_token):
 
 
 @pytest.mark.asyncio
+async def test_get_all_library_items_single_page(server_url, auth_token):
+    """When the library fits in one page, only one request is made."""
+    async with respx.mock(base_url=server_url) as mock:
+        route = mock.get("/api/libraries/lib1/items").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "results": [_li_payload("li1", "Book 1"), _li_payload("li2", "Book 2")],
+                    "total": 2,
+                },
+            )
+        )
+        async with ABSClient(server_url, token=auth_token) as client:
+            items = await client.get_all_library_items("lib1", page_size=200)
+    assert route.call_count == 1
+    assert [i.id for i in items] == ["li1", "li2"]
+
+
+@pytest.mark.asyncio
+async def test_get_all_library_items_paginates_beyond_first_page(server_url, auth_token):
+    """A library larger than one page must have every item fetched, not
+    just the first page -- this is the whole point of "All Books" over
+    the existing capped get_library_items_recent()/get_series()."""
+
+    def _respond(request: httpx.Request) -> httpx.Response:
+        page = int(request.url.params.get("page", "0"))
+        if page == 0:
+            results = [_li_payload("li1", "Book 1"), _li_payload("li2", "Book 2")]
+        elif page == 1:
+            results = [_li_payload("li3", "Book 3"), _li_payload("li4", "Book 4")]
+        else:
+            results = [_li_payload("li5", "Book 5")]
+        return httpx.Response(200, json={"results": results, "total": 5})
+
+    async with respx.mock(base_url=server_url) as mock:
+        mock.get("/api/libraries/lib1/items").mock(side_effect=_respond)
+        async with ABSClient(server_url, token=auth_token) as client:
+            items = await client.get_all_library_items("lib1", page_size=2)
+    assert sorted(i.id for i in items) == ["li1", "li2", "li3", "li4", "li5"]
+
+
+@pytest.mark.asyncio
 async def test_get_library_item(server_url, auth_token):
     payload = {
         "id": "item1",
