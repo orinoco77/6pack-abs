@@ -82,6 +82,10 @@ class FocusGrid(QWidget):
 
         if hasattr(widget, "activated"):
             widget.activated.connect(lambda idx=index: self.item_activated.emit(idx))
+        if hasattr(widget, "hovered"):
+            widget.hovered.connect(lambda idx=index: self.focus_item(idx))
+        if hasattr(widget, "long_pressed"):
+            widget.long_pressed.connect(lambda idx=index: self.long_press_activated.emit(idx))
 
         return index
 

@@ -312,6 +312,37 @@ def test_long_press_uses_currently_focused_index(qtbot):
     assert long_pressed == [2]
 
 
+def test_focus_grid_card_hover_moves_focus(qtbot):
+    grid = FocusGrid(columns=3)
+    qtbot.addWidget(grid)
+    for title in ("A", "B", "C"):
+        grid.add_item(MediaCard(title=title))
+    grid.show()
+    grid.setFocus()
+
+    assert grid.focused_index == 0
+    grid._items[2].hovered.emit()
+
+    assert grid.focused_index == 2
+
+
+def test_focus_grid_card_long_press_emits_long_press_activated(qtbot):
+    grid = FocusGrid(columns=3)
+    qtbot.addWidget(grid)
+    for title in ("A", "B"):
+        grid.add_item(MediaCard(title=title))
+    grid.show()
+    grid.setFocus()
+    grid.focus_item(1)
+
+    long_pressed = []
+    grid.long_press_activated.connect(lambda idx: long_pressed.append(idx))
+
+    grid._items[1].long_pressed.emit()
+
+    assert long_pressed == [1]
+
+
 def test_held_select_past_threshold_fires_long_press_even_if_timer_is_late(qtbot):
     """Bug repro: hold-vs-tap must not depend on the QTimer callback
     happening to fire before the key release is processed. If the GUI
