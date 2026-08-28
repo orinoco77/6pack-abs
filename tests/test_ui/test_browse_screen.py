@@ -230,6 +230,73 @@ def test_row_widget_set_row_focused(qtbot):
     rw.set_row_focused(False)
 
 
+def test_row_widget_card_hover_reemits_with_index(qtbot):
+    from sixpack.ui.widgets.media_card import MediaCard
+    row = _RowWidget("Continue Listening")
+    qtbot.addWidget(row)
+    row.add_card(MediaCard(title="A"))
+    row.add_card(MediaCard(title="B"))
+
+    hovered = []
+    row.card_hovered.connect(lambda idx: hovered.append(idx))
+
+    row._cards[1].hovered.emit()
+
+    assert hovered == [1]
+
+
+def test_row_widget_card_activated_reemits_with_index(qtbot):
+    from sixpack.ui.widgets.media_card import MediaCard
+    row = _RowWidget("Continue Listening")
+    qtbot.addWidget(row)
+    row.add_card(MediaCard(title="A"))
+
+    activated = []
+    row.card_activated.connect(lambda idx: activated.append(idx))
+
+    row._cards[0].activated.emit()
+
+    assert activated == [0]
+
+
+def test_row_widget_card_long_pressed_reemits_with_index(qtbot):
+    from sixpack.ui.widgets.media_card import MediaCard
+    row = _RowWidget("Continue Listening")
+    qtbot.addWidget(row)
+    row.add_card(MediaCard(title="A"))
+
+    long_pressed = []
+    row.card_long_pressed.connect(lambda idx: long_pressed.append(idx))
+
+    row._cards[0].long_pressed.emit()
+
+    assert long_pressed == [0]
+
+
+def test_row_widget_see_all_hover_and_click(qtbot):
+    from PyQt6.QtCore import QEvent, QPointF
+    from PyQt6.QtGui import QMouseEvent
+
+    row = _RowWidget("Continue Listening")
+    qtbot.addWidget(row)
+    row.show()
+
+    hovered = []
+    activated = []
+    row.see_all_hovered.connect(lambda: hovered.append(True))
+    row.see_all_activated.connect(lambda: activated.append(True))
+
+    row.eventFilter(row._see_all, QEvent(QEvent.Type.Enter))
+    assert hovered == [True]
+
+    release = QMouseEvent(
+        QEvent.Type.MouseButtonRelease, QPointF(1, 1), Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+    )
+    row.eventFilter(row._see_all, release)
+    assert activated == [True]
+
+
 # ---------------------------------------------------------------------------
 # BrowseScreen — construction
 # ---------------------------------------------------------------------------
