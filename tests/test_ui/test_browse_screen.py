@@ -751,7 +751,7 @@ def test_exit_confirm_select_no_dismisses_without_exit_requested(qtbot):
 
     _press(qtbot, screen, Qt.Key.Key_Up)
     _press(qtbot, screen, Qt.Key.Key_Right)  # opens, defaults to No
-    _press(qtbot, screen, Qt.Key.Key_Return)  # selects No
+    qtbot.keyClick(screen, Qt.Key.Key_Return)  # selects No (press+release)
 
     assert not screen._exit_overlay.isVisible()
     assert signals == []
@@ -768,10 +768,39 @@ def test_exit_confirm_select_yes_emits_exit_requested(qtbot):
     _press(qtbot, screen, Qt.Key.Key_Up)
     _press(qtbot, screen, Qt.Key.Key_Right)  # opens, defaults to No
     _press(qtbot, screen, Qt.Key.Key_Left)  # move to Yes
-    _press(qtbot, screen, Qt.Key.Key_Return)
+    qtbot.keyClick(screen, Qt.Key.Key_Return)  # press+release
 
     assert not screen._exit_overlay.isVisible()
     assert signals == [True]
+
+
+def test_exit_confirm_select_press_alone_does_not_exit(qtbot):
+    """Regression: exiting must resolve on key RELEASE, not press -- if
+    the physical key/button is still down when SixPack's process quits,
+    an external process supervisor (e.g. a kiosk launcher managing
+    SixPack's window) can receive the eventual release event once focus
+    reverts to it after SixPack is gone, and misinterpret that stray
+    release as a fresh activation on whatever it now has selected --
+    immediately relaunching SixPack. Reported as "Exit seems to restart
+    the app" under flex-launcher specifically."""
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    screen.load_libraries([_lib("l1", "A")], "http://s", "tok")
+    screen.show()
+    signals = []
+    screen.exit_requested.connect(lambda: signals.append(True))
+
+    _press(qtbot, screen, Qt.Key.Key_Up)
+    _press(qtbot, screen, Qt.Key.Key_Right)  # opens, defaults to No
+    _press(qtbot, screen, Qt.Key.Key_Left)  # move to Yes
+    _press(qtbot, screen, Qt.Key.Key_Return)  # PRESS only -- key still "held"
+
+    assert signals == []  # must not have exited yet
+    assert screen._exit_overlay.isVisible()  # still open, waiting for release
+
+    qtbot.keyRelease(screen, Qt.Key.Key_Return)
+
+    assert signals == [True]  # resolves once the key is actually released
 
 
 def test_exit_confirm_back_cancels(qtbot):
@@ -890,7 +919,7 @@ def test_exit_scrim_hidden_after_selecting_no(qtbot):
     _press(qtbot, screen, Qt.Key.Key_Right)  # opens, defaults to No
     assert screen._exit_scrim.isVisible()
 
-    _press(qtbot, screen, Qt.Key.Key_Return)  # selects No
+    qtbot.keyClick(screen, Qt.Key.Key_Return)  # selects No (press+release)
 
     assert not screen._exit_scrim.isVisible()
 
