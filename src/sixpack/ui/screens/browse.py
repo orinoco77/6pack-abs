@@ -1067,7 +1067,12 @@ class BrowseScreen(QWidget):
             super().keyPressEvent(event)
             return
         if self._exit_overlay.isVisible():
-            self._handle_exit_confirm(action)
+            # SELECT is deliberately NOT handled here -- see
+            # keyReleaseEvent's matching branch for why (resolving Exit on
+            # key release, not press, avoids relaunching under a kiosk
+            # launcher that regains focus the instant this process quits).
+            if action != InputAction.SELECT:
+                self._handle_exit_confirm(action)
             return
         # Select in rows/grid is resolved on release (tap vs. hold — see
         # keyReleaseEvent) so a long hold can trigger mark-finished instead
@@ -1098,6 +1103,18 @@ class BrowseScreen(QWidget):
             super().keyReleaseEvent(event)
             return
         action = key_to_action(event.key())
+        if self._exit_overlay.isVisible():
+            # Exit itself resolves here, on release, not in keyPressEvent
+            # above -- if the physical key/button were still down at the
+            # moment this process quits, a kiosk launcher regaining focus
+            # right after would receive that stray release next and could
+            # misread it as a fresh activation on whatever it now has
+            # selected, instantly relaunching this app. By the time
+            # _handle_exit_confirm can actually call close(), the key is
+            # already up.
+            if action == InputAction.SELECT:
+                self._handle_exit_confirm(action)
+            return
         if action != InputAction.SELECT or not self._select_held:
             super().keyReleaseEvent(event)
             return
