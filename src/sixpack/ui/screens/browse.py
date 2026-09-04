@@ -373,6 +373,11 @@ class BrowseScreen(QWidget):
         self._grid_cards: list[MediaCard] = []
 
         self._sidebar_items: list[_SidebarItem] = []
+        # Sidebar SELECT resolves on release, not press -- see
+        # keyPressEvent/keyReleaseEvent's sidebar-zone branches for why
+        # (opening the exit confirmation with the key still physically
+        # down let its own trailing release immediately dismiss it).
+        self._sidebar_select_pending = False
 
         # Select-hold detection for the mark-finished long-press gesture —
         # mirrors FocusGrid's identical mechanism (see its docstring/comments
@@ -1092,6 +1097,20 @@ class BrowseScreen(QWidget):
                 self._select_press_elapsed.start()
             return
         if self._zone == "sidebar":
+            # SELECT is deliberately deferred to keyReleaseEvent, same
+            # bug class as the exit-overlay's own SELECT handling just
+            # above: this can open something with a pre-focused default
+            # (the exit confirmation). Resolving on press left the key
+            # still physically down the instant that popup existed, so
+            # its own trailing release landed on the exit-overlay's
+            # release-resolves-SELECT branch above and immediately
+            # dismissed the popup this same keystroke had just opened.
+            # UP/DOWN/LEFT/BACK only move the sidebar cursor / back out
+            # and stay on press.
+            if action == InputAction.SELECT:
+                if not event.isAutoRepeat():
+                    self._sidebar_select_pending = True
+                return
             self._handle_sidebar(action)
         elif self._zone == "rows":
             self._handle_rows(action)
@@ -1114,6 +1133,11 @@ class BrowseScreen(QWidget):
             # already up.
             if action == InputAction.SELECT:
                 self._handle_exit_confirm(action)
+            return
+        if self._zone == "sidebar":
+            if action == InputAction.SELECT and self._sidebar_select_pending:
+                self._sidebar_select_pending = False
+                self._handle_sidebar(InputAction.SELECT)
             return
         if action != InputAction.SELECT or not self._select_held:
             super().keyReleaseEvent(event)

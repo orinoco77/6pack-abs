@@ -577,7 +577,27 @@ def test_sidebar_select_enters_rows(qtbot):
     qtbot.addWidget(screen)
     screen.load_libraries([_lib("l1", "A")], "http://s", "tok")
     screen.show()
-    _press(qtbot, screen, Qt.Key.Key_Return)
+    qtbot.keyClick(screen, Qt.Key.Key_Return)  # press+release -- sidebar SELECT resolves on release
+    assert screen._zone == "rows"
+
+
+def test_sidebar_select_press_alone_does_not_enter_rows(qtbot):
+    """Mirrors test_exit_confirm_select_press_alone_does_not_exit: sidebar
+    SELECT must not act until the key is actually released, or its own
+    trailing release can misfire into whatever it just opened (the exact
+    bug reported for the Exit item — see
+    test_select_on_exit_survives_its_own_trailing_key_release)."""
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    screen.load_libraries([_lib("l1", "A")], "http://s", "tok")
+    screen.show()
+
+    qtbot.keyPress(screen, Qt.Key.Key_Return)  # PRESS only -- key still "held"
+
+    assert screen._zone == "sidebar"
+
+    qtbot.keyRelease(screen, Qt.Key.Key_Return)
+
     assert screen._zone == "rows"
 
 
@@ -691,6 +711,30 @@ def test_selecting_exit_shows_confirmation_overlay(qtbot):
     assert screen._sidebar_idx == 0
 
     _press(qtbot, screen, Qt.Key.Key_Right)
+
+    assert screen._exit_overlay.isVisible()
+
+
+def test_select_on_exit_survives_its_own_trailing_key_release(qtbot):
+    """Regression: opening the exit confirmation via SELECT (Key_Return),
+    not RIGHT, must not have its own trailing key-release immediately
+    dismiss the popup it just opened. Before this fix, _handle_sidebar's
+    SELECT branch opened the overlay synchronously on key PRESS -- the
+    physical key was still down at that instant, so keyReleaseEvent's
+    (correct, separately-added) "resolve exit-confirm's Select on
+    release" handling then fired for that SAME key's release, immediately
+    activating the overlay's default-focused button (Cancel/No) and
+    closing the popup the user never got to see. Right arrow "worked" by
+    accident only because RIGHT's release doesn't match the overlay's
+    SELECT-only release check."""
+    screen = BrowseScreen()
+    qtbot.addWidget(screen)
+    screen.load_libraries([_lib("l1", "A")], "http://s", "tok")
+    screen.show()
+    _press(qtbot, screen, Qt.Key.Key_Up)  # from the default first library to Exit
+    assert screen._sidebar_idx == 0
+
+    qtbot.keyClick(screen, Qt.Key.Key_Return)  # full press+release, like a real remote
 
     assert screen._exit_overlay.isVisible()
     assert screen._zone == "sidebar"  # unchanged — the overlay just floats on top
